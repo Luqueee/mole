@@ -81,6 +81,26 @@ func GlobalPath() string {
 	return filepath.Join(base, "mole", "config.yaml")
 }
 
+// StateDir returns the per-user directory for mole's runtime state
+// (pidfile, background log): ~/.local/state/mole on Unix (honouring
+// XDG_STATE_HOME), %LOCALAPPDATA%\mole on Windows. The directory is not
+// created here — callers do that when they need to write.
+func StateDir() string {
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("LOCALAPPDATA")
+		if base == "" {
+			base = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
+		}
+		return filepath.Join(base, "mole")
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, _ := os.UserHomeDir()
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(base, "mole")
+}
+
 // SearchPaths returns the ordered list of config locations mole checks
 // when the user does not pass an explicit -config: project-local first
 // (so a repo's mole.yaml wins), then the user-global config.

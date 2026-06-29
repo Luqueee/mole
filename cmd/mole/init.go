@@ -154,8 +154,10 @@ Environment (read when the corresponding flag is empty):
 		startNow = a == "" || strings.HasPrefix(a, "y")
 	}
 	if startNow && !ans.PrintOnly {
-		fmt.Fprintln(os.Stderr, "starting mole — press Ctrl+C to stop")
-		return runUp([]string{"-config", dest})
+		// Start in the background so the shell returns immediately;
+		// stop later with `mole down`.
+		fmt.Fprintln(os.Stderr, "starting mole in the background")
+		return runUp([]string{"-config", dest, "-d"})
 	}
 
 	return 0

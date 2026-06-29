@@ -50,6 +50,8 @@ func main() {
 	switch cmd {
 	case "up":
 		os.Exit(runUp(args))
+	case "down":
+		os.Exit(runDown(args))
 	case "status":
 		os.Exit(runStatus(args))
 	case "init":
@@ -70,13 +72,15 @@ func printUsage() {
 
 Usage:
   mole up [flags]
+  mole down
   mole status [flags]
   mole init [flags]
   mole version
   mole help
 
 Commands:
-  up       Start the forwarder (foreground)
+  up       Start the forwarder (foreground, or -d for background)
+  down     Stop a backgrounded mole (started with 'up -d')
   status   Query the local admin API
   init     Generate a mole.yaml interactively (or via flags)
   version  Print version and exit
@@ -93,6 +97,8 @@ func runUp(args []string) int {
 		autoDisc   = fs.Bool("auto-discover", false, "probe remote for common dev ports")
 		adminAddr  = fs.String("admin", "", "admin HTTP address (default 127.0.0.1:9999; empty to disable)")
 		logLevel   = fs.String("log-level", "", "debug|info|warn|error")
+		detach     = fs.Bool("d", false, "run in the background (daemon)")
+		detachLong = fs.Bool("detach", false, "alias for -d")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `Usage: mole up [flags]
@@ -104,11 +110,23 @@ Flags:
   -auto-discover  probe remote for common dev ports
   -admin          admin HTTP address (empty to disable)
   -log-level      debug|info|warn|error
+  -d, -detach     run in the background (daemon); stop with 'mole down'
 
 Either -remote or a config file with 'remote:' is required.`)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	// Background mode: re-exec detached and return control to the shell.
+	// The child carries MOLE_DAEMONIZED=1 and falls through to run the
+	// forwarder in the foreground of its own session.
+	if (*detach || *detachLong) && os.Getenv("MOLE_DAEMONIZED") == "" {
+		return daemonize(stripDetachFlags(args))
+	}
+	// When we are the detached child, clean up the pidfile on exit.
+	if os.Getenv("MOLE_DAEMONIZED") != "" {
+		defer os.Remove(pidPath())
 	}
 
 	// When no explicit -config is given, search the standard locations
