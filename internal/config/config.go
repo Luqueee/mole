@@ -5,6 +5,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -52,6 +54,53 @@ func Default() *Config {
 		LogLevel: "info",
 		SSHPort:  22,
 	}
+}
+
+// LocalPath is the project-local config filename mole looks for in the
+// current working directory.
+const LocalPath = "mole.yaml"
+
+// GlobalPath returns the per-user config file location for the current
+// OS: ~/.config/mole/config.yaml on Unix (honouring XDG_CONFIG_HOME),
+// %APPDATA%\mole\config.yaml on Windows. This is the single source of
+// truth for where `mole init -global` writes and where `mole up` looks
+// when there is no project-local config.
+func GlobalPath() string {
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			base = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
+		}
+		return filepath.Join(base, "mole", "config.yaml")
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, _ := os.UserHomeDir()
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "mole", "config.yaml")
+}
+
+// SearchPaths returns the ordered list of config locations mole checks
+// when the user does not pass an explicit -config: project-local first
+// (so a repo's mole.yaml wins), then the user-global config.
+func SearchPaths() []string {
+	paths := []string{LocalPath}
+	if g := GlobalPath(); g != "" {
+		paths = append(paths, g)
+	}
+	return paths
+}
+
+// Find returns the first existing path from SearchPaths, or "" if none
+// exist (in which case Load("") yields just the defaults).
+func Find() string {
+	for _, p := range SearchPaths() {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 // Load reads a YAML config file from path and merges it on top of the

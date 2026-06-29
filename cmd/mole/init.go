@@ -21,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -43,16 +42,17 @@ type initAnswers struct {
 func runInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	var (
-		remote   = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
-		portsCSV = fs.String("ports", "", "comma-separated ports to forward (e.g. 3000,5173)")
-		autoDisc = fs.Bool("auto-discover", false, "probe the remote for common dev ports")
-		cfgPath  = fs.String("config", "", "where to write the YAML (default: ./mole.yaml)")
-		global   = fs.Bool("global", false, "write to the user-global config (~/.config/mole/config.yaml)")
+		remote    = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
+		portsCSV  = fs.String("ports", "", "comma-separated ports to forward (e.g. 3000,5173)")
+		autoDisc  = fs.Bool("auto-discover", false, "probe the remote for common dev ports")
+		cfgPath   = fs.String("config", "", "where to write the YAML (default: ./mole.yaml)")
+		global    = fs.Bool("global", false, "write to the user-global config (~/.config/mole/config.yaml)")
 		printOnly = fs.Bool("print", false, "print the generated YAML to stdout instead of writing a file")
-		noPrompt = fs.Bool("no-prompt", false, "don't ask questions; require all flags / env vars")
-		yes      = fs.Bool("yes", false, "accept defaults for any unanswered questions")
-		test     = fs.Bool("test", false, "after writing the config, test the SSH connection")
-		force    = fs.Bool("force", false, "overwrite the config file if it already exists")
+		noPrompt  = fs.Bool("no-prompt", false, "don't ask questions; require all flags / env vars")
+		yes       = fs.Bool("yes", false, "accept defaults for any unanswered questions")
+		test      = fs.Bool("test", false, "after writing the config, test the SSH connection")
+		force     = fs.Bool("force", false, "overwrite the config file if it already exists")
+		up        = fs.Bool("up", false, "start mole (mole up) immediately after writing the config")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `Usage: mole init [flags]
@@ -71,6 +71,7 @@ Flags:
   -yes               accept defaults for any unanswered questions
   -test              after writing, test the SSH connection
   -force             overwrite the config file if it already exists
+  -up                start mole (mole up) immediately after writing
   -h, --help         show this help
 
 Environment (read when the corresponding flag is empty):
@@ -142,6 +143,21 @@ Environment (read when the corresponding flag is empty):
 	if *test {
 		testRemote(ans.Remote)
 	}
+
+	// Optionally start mole right away. Honour -up unconditionally; in
+	// interactive mode without -up, offer it (default yes). PrintOnly
+	// has no file to start from, so skip.
+	startNow := *up
+	if !startNow && interactive && !ans.PrintOnly {
+		fmt.Fprint(os.Stderr, "Start mole now? [Y/n]: ")
+		a := strings.ToLower(strings.TrimSpace(readLine(os.Stdin)))
+		startNow = a == "" || strings.HasPrefix(a, "y")
+	}
+	if startNow && !ans.PrintOnly {
+		fmt.Fprintln(os.Stderr, "starting mole — press Ctrl+C to stop")
+		return runUp([]string{"-config", dest})
+	}
+
 	return 0
 }
 
@@ -229,7 +245,7 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 		// Default config path if the user didn't pick one.
 		if ans.ConfigPath == "" {
 			if ans.Global {
-				ans.ConfigPath = globalConfigPath()
+				ans.ConfigPath = config.GlobalPath()
 			} else {
 				ans.ConfigPath = "./mole.yaml"
 			}
@@ -311,7 +327,7 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 			"Where to save the config?",
 			[]string{
 				"./mole.yaml               (current directory, project-local)",
-				globalConfigPath() + "  (user-global)",
+				config.GlobalPath() + "  (user-global)",
 				"don't save — print to stdout instead",
 			}, defaultChoice)
 		switch choice {
@@ -322,7 +338,7 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 		case "2":
 			ans.Global = true
 			ans.PrintOnly = false
-			ans.ConfigPath = globalConfigPath()
+			ans.ConfigPath = config.GlobalPath()
 		default:
 			ans.PrintOnly = true
 			ans.ConfigPath = ""
@@ -369,25 +385,6 @@ func renderYAML(ans *initAnswers) string {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// globalConfigPath returns the per-user config file location for the
-// current OS: ~/.config/mole/config.yaml on Unix, %APPDATA%\mole\...
-// on Windows. Honours XDG_CONFIG_HOME on Unix when set.
-func globalConfigPath() string {
-	if runtime.GOOS == "windows" {
-		base := os.Getenv("APPDATA")
-		if base == "" {
-			base = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
-		}
-		return filepath.Join(base, "mole", "config.yaml")
-	}
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "mole", "config.yaml")
-}
 
 func validateRemote(r string) error {
 	r = strings.TrimSpace(r)

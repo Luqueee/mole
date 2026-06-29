@@ -86,7 +86,7 @@ Run 'mole up -h' for up flags, 'mole init -h' for init flags.`)
 func runUp(args []string) int {
 	fs := flag.NewFlagSet("up", flag.ExitOnError)
 	var (
-		configPath = fs.String("config", "mole.yaml", "path to YAML config (optional)")
+		configPath = fs.String("config", "", "path to YAML config (default: ./mole.yaml, then user-global)")
 		remote     = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
 		ports      = fs.String("ports", "", "comma-separated ports to forward")
 		autoDisc   = fs.Bool("auto-discover", false, "probe remote for common dev ports")
@@ -97,7 +97,7 @@ func runUp(args []string) int {
 		fmt.Fprintln(os.Stderr, `Usage: mole up [flags]
 
 Flags:
-  -config         path to YAML config (default "mole.yaml")
+  -config         path to YAML config (default: ./mole.yaml, then user-global)
   -remote         SSH target, e.g. dev@workstation[:port]
   -ports          comma-separated ports to forward (e.g. 3000,5173)
   -auto-discover  probe remote for common dev ports
@@ -110,7 +110,14 @@ Either -remote or a config file with 'remote:' is required.`)
 		return 2
 	}
 
-	cfg, err := config.Load(*configPath)
+	// When no explicit -config is given, search the standard locations
+	// (project-local ./mole.yaml, then user-global) so a config written
+	// by `mole init -global` is picked up automatically.
+	resolvedPath := *configPath
+	if resolvedPath == "" {
+		resolvedPath = config.Find()
+	}
+	cfg, err := config.Load(resolvedPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config error:", err)
 		return 1
