@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# scripts/install.sh — install mole (Unix: Linux, macOS, FreeBSD).
+#
+# What this script does:
+#   1. Locates the source: uses the local repo if it is one, otherwise
+#      clones https://github.com/Luqueee/mole into a temp dir.
+#   2. Builds the binary with `go build -trimpath`.
+#   3. Copies it to the right place (root → /usr/local/bin, otherwise
+#      $HOME/.local/bin). Override with --prefix or INSTALL_DIR.
+#   4. Verifies with `mole version`.
+#   5. Prints a hint to add the install dir to PATH if it isn't yet,
+#      and to run `mole init` to configure (mole init does NOT run
+#      automatically — it's interactive, so you opt in).
+#
+# Configuration lives in a single place: the `mole init` subcommand
+# inside the binary itself, shared with the Windows installer.
+#
+# Usage:
+#   ./scripts/install.sh                       # from a clone
+#   curl -fsSL .../install.sh | sh             # one-liner
+#   ./scripts/install.sh --prefix /opt         # custom prefix
+#   INSTALL_DIR=~/bin/mole ./scripts/install.sh
+#
+# Options:
+#   --prefix <dir>      install under <dir>/bin/mole
+#   --no-verify         skip the post-install version check
+#   --init              also run `mole init` after install
+#   -h, --help          show help
+
+set -euo pipefail
+
+REPO="https://github.com/Luqueee/mole.git"
+BINARY="mole"
+DEFAULT_REF="main"
+VERSION_REF="${MOLE_VERSION:-$DEFAULT_REF}"
+
+step() { printf '== %s\n' "$*"; }
+ok()   { printf '   ok %s\n' "$*"; }
+warn() { printf '  warn %s\n' "$*" >&2; }
+die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+	sed -n '2,28p' "$0" | sed 's/^# \?//'
+}
+
+PREFIX=""
+VERIFY="yes"
+RUN_INIT="no"
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--prefix)
+		[ $# -ge 2 ] || die "--prefix requires a value"
+		PREFIX="$2"
+		shift 2
+		;;
+	--prefix=*)
+		PREFIX="${1#--prefix=}"
+		shift
+		;;
+	--no-verify)
+		VERIFY="no"
+		shift
+		;;
+	--init)
+		RUN_INIT="yes"
+		shift
+		;;
+	-h|--help)
+		usage
+		exit 0
+		;;
+	*)
+		die "unknown argument: $1 (try --help)"
+		;;
+	esac
+done
+
+# ---------------------------------------------------------------------------
+# Step 1: locate or fetch the source
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT=""
+CLEANUP_DIR=""
+
+cleanup() {
+	[ -n "$CLEANUP_DIR" ] && [ -d "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR"
+}
+trap cleanup EXIT
+
+is_mole_repo() {
+	local d="$1"
+	[ -f "$d/go.mod" ] || return 1
+	grep -q "github.com/Luqueee/mole" "$d/go.mod" 2>/dev/null || return 1
+	[ -d "$d/cmd/mole" ] || return 1
+}
+
+resolve_source() {
+	if [ -n "${MOLE_SRC:-}" ] && is_mole_repo "$MOLE_SRC"; then
+		echo "$MOLE_SRC"; return 0
+	fi
+	if is_mole_repo "$PWD"; then
+		echo "$PWD"; return 0
+	fi
+	local script_dir
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
+		echo "$(cd "$script_dir/.." && pwd)"; return 0
+	fi
+	if ! command -v git >/dev/null 2>&1; then
+		die "no mole repo in CWD and 'git' not available to clone one"
+	fi
+	local tmp
+	tmp="$(mktemp -d)"
+	step "cloning $REPO (ref: $VERSION_REF) into $tmp/mole"
+	if ! git clone --depth 1 --branch "$VERSION_REF" "$REPO" "$tmp/mole" >/dev/null 2>&1; then
+		git clone --depth 1 "$REPO" "$tmp/mole" >/dev/null
+	fi
+	CLEANUP_DIR="$tmp"
+	echo "$tmp/mole"
+}
+
+PROJECT_ROOT="$(resolve_source)"
+step "using source: $PROJECT_ROOT"
+
+# ---------------------------------------------------------------------------
+# Step 2: build
+# ---------------------------------------------------------------------------
+
+GO_BIN="${GO:-$(command -v go || true)}"
+[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go 1.22+ from https://go.dev/dl/ and re-run."
+
+BUILD_DIR="$PROJECT_ROOT/dist"
+mkdir -p "$BUILD_DIR"
+step "building $BINARY"
+(
+	cd "$PROJECT_ROOT"
+	"$GO_BIN" build -trimpath -o "$BUILD_DIR/$BINARY" ./cmd/mole
+)
+[ -f "$BUILD_DIR/$BINARY" ] || die "build did not produce $BUILD_DIR/$BINARY"
+ok "built $BUILD_DIR/$BINARY"
+
+# ---------------------------------------------------------------------------
+# Step 3: install
+# ---------------------------------------------------------------------------
+
+resolve_dest() {
+	if [ -n "${INSTALL_DIR:-}" ]; then
+		echo "$INSTALL_DIR"; return
+	fi
+	if [ -n "$PREFIX" ]; then
+		echo "$PREFIX/bin/$BINARY"; return
+	fi
+	if [ "$(id -u)" = "0" ]; then
+		echo "/usr/local/bin/$BINARY"
+	else
+		echo "$HOME/.local/bin/$BINARY"
+	fi
+}
+
+DEST="$(resolve_dest)"
+DEST_DIR="$(dirname "$DEST")"
+step "installing to $DEST"
+mkdir -p "$DEST_DIR"
+install -m 0755 "$BUILD_DIR/$BINARY" "$DEST"
+ok "installed $DEST"
+
+# ---------------------------------------------------------------------------
+# Step 4: verify
+# ---------------------------------------------------------------------------
+
+if [ "$VERIFY" = "yes" ]; then
+	step "verifying"
+	if out="$(env -i PATH="$PATH" "$DEST" version 2>&1)"; then
+		ok "$out"
+	else
+		warn "could not run '$DEST version': $out"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5: print post-install hints (no shell mutation — that's the
+# user's choice).
+# ---------------------------------------------------------------------------
+
+path_contains() {
+	case ":$1:" in
+	*":$2:"*) return 0 ;;
+	*)        return 1 ;;
+	esac
+}
+
+printf '\n'
+if ! path_contains "${PATH:-}" "$DEST_DIR"; then
+	printf 'NOTE: %s is not on your PATH.\n' "$DEST_DIR"
+	printf '  Add it to your shell profile, e.g.:\n'
+	printf '    export PATH="%s:$PATH"\n' "$DEST_DIR"
+	printf '\n'
+fi
+
+# Make the binary available in this process for the optional `init` step.
+export PATH="$DEST_DIR:$PATH"
+
+# ---------------------------------------------------------------------------
+# Step 6: optional `mole init`
+# ---------------------------------------------------------------------------
+
+if [ "$RUN_INIT" = "yes" ]; then
+	step "running mole init (interactive)"
+	exec "$DEST" init
+fi
+
+step "done"
+printf '  binary:    %s\n' "$DEST"
+printf '  configure: %smole init%s   (interactive, run once per machine)\n' "" ""
+printf '  start:     %smole up%s      (uses ./mole.yaml by default)\n' "" ""

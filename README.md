@@ -34,18 +34,108 @@ dev ports and forwards the ones that respond.
 
 ## Install
 
+Pick whichever path matches your setup. All three produce the same
+single static binary — no runtime, no `node_modules`, no daemon.
+
+### Option 1 — `go install` (no clone needed)
+
+Requires Go 1.22+ on `PATH`. Drops the binary into
+`$(go env GOPATH)/bin` (usually `~/go/bin`):
+
 ```bash
 go install github.com/Luqueee/mole/cmd/mole@latest
 ```
 
-Or build from source:
+Make sure that directory is on your `PATH`:
+
+```bash
+# add to ~/.bashrc, ~/.zshrc, or your shell's equivalent
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+### Option 2 — install script from a clone
+
+Clones the repo, builds the binary, and copies it to the right place
+on `PATH`. Works without `go install` setup and without configuring
+`GOPATH`.
+
+**Linux / macOS / FreeBSD:**
 
 ```bash
 git clone https://github.com/Luqueee/mole
 cd mole
-make build
-# binary at ./dist/mole
+./scripts/install.sh
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/Luqueee/mole
+cd mole
+./scripts/install.ps1
+```
+
+The installer picks the destination automatically:
+
+| User           | Install location                  |
+|----------------|-----------------------------------|
+| root (Unix)    | `/usr/local/bin/mole`             |
+| non-root (Unix)| `~/.local/bin/mole`               |
+| Windows        | `%LOCALAPPDATA%\Programs\mole\`   |
+
+When installing to `~/.local/bin` (or any other non-`PATH` folder)
+the script prints a hint with the exact line to add to your shell
+profile.
+
+Override the destination with `--prefix` or the `INSTALL_DIR` env var:
+
+```bash
+./scripts/install.sh --prefix /opt            # → /opt/bin/mole
+INSTALL_DIR=~/bin/mole ./scripts/install.sh   # → ~/bin/mole
+```
+
+### Option 3 — `make install` from a clone
+
+Same as Option 2 but uses `make`. Default destination is
+`$(go env GOPATH)/bin/mole`:
+
+```bash
+git clone https://github.com/Luqueee/mole
+cd mole
+make install                      # → $(go env GOPATH)/bin/mole
+make install PREFIX=/usr/local    # → /usr/local/bin/mole
+make install INSTALL_DIR=~/bin/mole  # → ~/bin/mole
+```
+
+### Build without installing
+
+If you just want the binary in the project tree (e.g. for CI):
+
+```bash
+make build      # → ./dist/mole
+# or, with go directly:
+go build -trimpath -o ./mole ./cmd/mole
+```
+
+### Uninstall
+
+Whichever method you used:
+
+```bash
+# from a clone
+./scripts/uninstall.sh                 # Unix
+./scripts/uninstall.ps1                # Windows
+
+# add --purge to also drop ~/.config/mole/ (Unix) or
+# %LOCALAPPDATA%\mole\ (Windows)
+./scripts/uninstall.sh --purge
+
+# or, with make:
+make uninstall
+```
+
+For `go install`, simply remove the binary from
+`$(go env GOPATH)/bin/mole`.
 
 ## Usage
 
@@ -165,9 +255,22 @@ Single static Go binary — runs on **Linux**, **macOS**, and **Windows**
 ## Development
 
 ```bash
-make build   # → ./dist/mole
-make test    # go test ./...
+make build      # → ./dist/mole
+make install    # build + install to $(go env GOPATH)/bin/mole (or PREFIX=/BIN)
+make uninstall  # remove the installed binary
+make test       # go test ./...
+make tidy
 make clean
+```
+
+Or via the cross-platform scripts:
+
+```bash
+./scripts/install.sh
+./scripts/uninstall.sh            # add --purge to also drop ~/.config/mole/
+# Windows:
+#   ./scripts/install.ps1
+#   ./scripts/uninstall.ps1
 ```
 
 ## License

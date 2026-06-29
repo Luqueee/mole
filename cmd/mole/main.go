@@ -51,6 +51,8 @@ func main() {
 		os.Exit(runUp(args))
 	case "status":
 		os.Exit(runStatus(args))
+	case "init":
+		os.Exit(runInit(args))
 	case "version", "-v", "--version":
 		fmt.Println("mole", version)
 	case "help", "-h", "--help":
@@ -68,15 +70,17 @@ func printUsage() {
 Usage:
   mole up [flags]
   mole status [flags]
+  mole init [flags]
   mole version
   mole help
 
 Commands:
   up       Start the forwarder (foreground)
   status   Query the local admin API
+  init     Generate a mole.yaml interactively (or via flags)
   version  Print version and exit
 
-Run 'mole up -h' for up flags.`)
+Run 'mole up -h' for up flags, 'mole init -h' for init flags.`)
 }
 
 func runUp(args []string) int {
