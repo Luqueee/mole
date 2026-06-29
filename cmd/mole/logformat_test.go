@@ -82,6 +82,23 @@ func TestFormatLine_NonLogfmt(t *testing.T) {
 	}
 }
 
+func TestFormatLine_ForwardingBadge(t *testing.T) {
+	line := `time=2026-06-29T20:08:54Z level=INFO msg=forwarding local=127.0.0.1:3301 remote=dev:3301`
+
+	plain := formatLine(line, false)
+	if !strings.Contains(plain, "[FORWARD]") {
+		t.Errorf("forwarding line should show a FORWARD badge, not INFO: %q", plain)
+	}
+	if strings.Contains(plain, "[INFO]") {
+		t.Errorf("forwarding line must not use the INFO badge: %q", plain)
+	}
+
+	colored := formatLine(line, true)
+	if !strings.Contains(colored, "48;2;63;185;80") {
+		t.Errorf("forwarding badge should use the green background: %q", colored)
+	}
+}
+
 func TestCollapseKey_IgnoresTime(t *testing.T) {
 	a := `time=2026-06-29T20:00:00Z level=WARN msg="x" port=25`
 	b := `time=2026-06-29T20:05:00Z level=WARN msg="x" port=25`

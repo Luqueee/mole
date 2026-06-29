@@ -16,25 +16,44 @@ func badge(fr, fgc, fb, br, bg, bb int, s string) string {
 	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm%s\x1b[0m", fr, fgc, fb, br, bg, bb, s)
 }
 
-// levelStyle returns a coloured, fixed-width badge for a log level.
-// Colours follow a modern dark-UI palette (GitHub-ish).
-func levelStyle(level string, color bool) string {
-	label := fmt.Sprintf(" %-5s ", level)
-	if !color {
-		return "[" + strings.TrimSpace(level) + "]"
+// badgeWidth is the inner label width every badge is padded to, so the
+// message column stays aligned across levels and event badges.
+const badgeWidth = 7
+
+type badgeStyle struct {
+	label       string
+	fr, fgc, fb int // foreground rgb
+	br, bg, bb  int // background rgb
+}
+
+// styleFor picks a badge by event first, then by level. Specific events
+// (like a port being forwarded) get their own colour so they stand out
+// from the generic INFO stream.
+func styleFor(level, msg string) badgeStyle {
+	switch strings.ToLower(msg) {
+	case "forwarding":
+		return badgeStyle{"FORWARD", 16, 24, 16, 63, 185, 80} // dark on green
 	}
 	switch strings.ToUpper(level) {
 	case "ERROR":
-		return badge(255, 255, 255, 248, 81, 73, label) // white on red
+		return badgeStyle{"ERROR", 255, 255, 255, 248, 81, 73} // white on red
 	case "WARN":
-		return badge(20, 20, 20, 210, 153, 34, label) // black on amber
+		return badgeStyle{"WARN", 20, 20, 20, 210, 153, 34} // black on amber
 	case "INFO":
-		return badge(255, 255, 255, 56, 139, 253, label) // white on blue
+		return badgeStyle{"INFO", 255, 255, 255, 56, 139, 253} // white on blue
 	case "DEBUG":
-		return badge(230, 237, 243, 87, 96, 106, label) // light on gray
+		return badgeStyle{"DEBUG", 230, 237, 243, 87, 96, 106} // light on gray
 	default:
-		return badge(230, 237, 243, 87, 96, 106, label)
+		return badgeStyle{strings.ToUpper(level), 230, 237, 243, 87, 96, 106}
 	}
+}
+
+func renderBadge(st badgeStyle, color bool) string {
+	if !color {
+		return "[" + st.label + "]"
+	}
+	label := fmt.Sprintf(" %-*s ", badgeWidth, st.label)
+	return badge(st.fr, st.fgc, st.fb, st.br, st.bg, st.bb, label)
 }
 
 // collapser folds consecutive identical log lines (ignoring their
@@ -162,9 +181,9 @@ func formatLine(line string, color bool) string {
 		b.WriteByte(' ')
 	}
 
-	// Level badge.
+	// Level / event badge.
 	if level != "" {
-		b.WriteString(levelStyle(level, color))
+		b.WriteString(renderBadge(styleFor(level, msg), color))
 		b.WriteByte(' ')
 	}
 
