@@ -1,4 +1,4 @@
-// Command fallback-proxy is a smart local-port forwarder.
+// Command mole is a smart local-port forwarder.
 //
 // It opens a single SSH connection to a remote machine and forwards
 // one or more local TCP ports through it to the same port numbers on
@@ -7,9 +7,9 @@
 //
 // Usage:
 //
-//	fallback-proxy up [flags]
-//	fallback-proxy status
-//	fallback-proxy version
+//	mole up [flags]
+//	mole status
+//	mole version
 package main
 
 import (
@@ -28,11 +28,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fallback-proxy/fallback-proxy/internal/admin"
-	"github.com/fallback-proxy/fallback-proxy/internal/config"
-	"github.com/fallback-proxy/fallback-proxy/internal/discover"
-	"github.com/fallback-proxy/fallback-proxy/internal/proxy"
-	"github.com/fallback-proxy/fallback-proxy/internal/tunnel"
+	"github.com/Luqueee/mole/internal/admin"
+	"github.com/Luqueee/mole/internal/config"
+	"github.com/Luqueee/mole/internal/discover"
+	"github.com/Luqueee/mole/internal/proxy"
+	"github.com/Luqueee/mole/internal/tunnel"
 )
 
 const version = "0.1.0"
@@ -52,7 +52,7 @@ func main() {
 	case "status":
 		os.Exit(runStatus(args))
 	case "version", "-v", "--version":
-		fmt.Println("fallback-proxy", version)
+		fmt.Println("mole", version)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -63,26 +63,26 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`fallback-proxy — local-port forwarder with auto-discover
+	fmt.Println(`mole — local-port forwarder with auto-discover
 
 Usage:
-  fallback-proxy up [flags]
-  fallback-proxy status [flags]
-  fallback-proxy version
-  fallback-proxy help
+  mole up [flags]
+  mole status [flags]
+  mole version
+  mole help
 
 Commands:
   up       Start the forwarder (foreground)
   status   Query the local admin API
   version  Print version and exit
 
-Run 'fallback-proxy up -h' for up flags.`)
+Run 'mole up -h' for up flags.`)
 }
 
 func runUp(args []string) int {
 	fs := flag.NewFlagSet("up", flag.ExitOnError)
 	var (
-		configPath = fs.String("config", "fallback-proxy.yaml", "path to YAML config (optional)")
+		configPath = fs.String("config", "mole.yaml", "path to YAML config (optional)")
 		remote     = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
 		ports      = fs.String("ports", "", "comma-separated ports to forward")
 		autoDisc   = fs.Bool("auto-discover", false, "probe remote for common dev ports")
@@ -90,10 +90,10 @@ func runUp(args []string) int {
 		logLevel   = fs.String("log-level", "", "debug|info|warn|error")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `Usage: fallback-proxy up [flags]
+		fmt.Fprintln(os.Stderr, `Usage: mole up [flags]
 
 Flags:
-  -config         path to YAML config (default "fallback-proxy.yaml")
+  -config         path to YAML config (default "mole.yaml")
   -remote         SSH target, e.g. dev@workstation[:port]
   -ports          comma-separated ports to forward (e.g. 3000,5173)
   -auto-discover  probe remote for common dev ports
@@ -222,7 +222,7 @@ Either -remote or a config file with 'remote:' is required.`)
 		}()
 	}
 
-	log.Info("fallback-proxy up. Press Ctrl+C to stop.")
+	log.Info("mole up. Press Ctrl+C to stop.")
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
@@ -250,7 +250,7 @@ func runStatus(args []string) int {
 	resp, err := http.Get("http://" + *addr + "/status")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "could not reach admin API at", *addr, ":", err)
-		fmt.Fprintln(os.Stderr, "is fallback-proxy running?")
+		fmt.Fprintln(os.Stderr, "is mole running?")
 		return 1
 	}
 	defer resp.Body.Close()

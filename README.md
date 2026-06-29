@@ -1,12 +1,12 @@
-# fallback-proxy
+# mole
 
 > Hit `localhost:3000` as if it were always running — even when the
 > real service lives on another machine.
 
-`fallback-proxy` opens a single SSH connection to a remote host and
-forwards one or more local TCP ports through it to the same port
-numbers on the remote. Optional auto-discover mode probes the remote
-for common dev ports and forwards the ones that respond.
+`mole` opens a single SSH connection to a remote host and forwards
+one or more local TCP ports through it to the same port numbers on
+the remote. Optional auto-discover mode probes the remote for common
+dev ports and forwards the ones that respond.
 
 ```
 ┌────────────┐    SSH tunnel (single conn)    ┌─────────────────┐
@@ -15,7 +15,7 @@ for common dev ports and forwards the ones that respond.
 │  whatever  │ ───► localhost:8080 ───►  ───► │ workstation:8080│
 └────────────┘                                 └─────────────────┘
               ▲
-              │  fallback-proxy runs here
+              │  mole runs here
 ```
 
 ## Features
@@ -34,7 +34,7 @@ for common dev ports and forwards the ones that respond.
 ## Install
 
 ```bash
-go install github.com/Luqueee/mole/cmd/fallback-proxy@latest
+go install github.com/Luqueee/mole/cmd/mole@latest
 ```
 
 Or build from source:
@@ -43,7 +43,7 @@ Or build from source:
 git clone https://github.com/Luqueee/mole
 cd mole
 make build
-# binary at ./dist/fallback-proxy
+# binary at ./dist/mole
 ```
 
 ## Usage
@@ -51,7 +51,7 @@ make build
 ### One-liner (auto-discover)
 
 ```bash
-fallback-proxy up --remote dev@workstation --auto-discover
+mole up --remote dev@workstation --auto-discover
 ```
 
 The proxy opens an SSH connection, probes a built-in list of common
@@ -61,13 +61,13 @@ forwards the ones that respond.
 ### Explicit ports
 
 ```bash
-fallback-proxy up --remote dev@workstation --ports 3000,5173,8080
+mole up --remote dev@workstation --ports 3000,5173,8080
 ```
 
 ### Config file
 
-Drop a `fallback-proxy.yaml` in your project root (see
-[`examples/fallback-proxy.yaml`](examples/fallback-proxy.yaml)):
+Drop a `mole.yaml` in your project root (see
+[`examples/mole.yaml`](examples/mole.yaml)):
 
 ```yaml
 remote: dev@workstation
@@ -79,13 +79,13 @@ log_level: info
 Then:
 
 ```bash
-fallback-proxy up
+mole up
 ```
 
 ### Status
 
 ```bash
-fallback-proxy status
+mole status
 # {"stats":{"uptime":"1m23s","active_conns":0,"total_conns":42,...},"info":{...}}
 ```
 
@@ -97,18 +97,18 @@ curl http://127.0.0.1:9999/health   # → ok
 ## CLI reference
 
 ```
-fallback-proxy up [flags]
+mole up [flags]
 
-  -config         path to YAML config (default "fallback-proxy.yaml")
+  -config         path to YAML config (default "mole.yaml")
   -remote         SSH target, e.g. dev@workstation[:port]
   -ports          comma-separated ports to forward (e.g. 3000,5173)
   -auto-discover  probe remote for common dev ports
   -admin          admin HTTP address (empty to disable)
   -log-level      debug|info|warn|error
 
-fallback-proxy status [-admin 127.0.0.1:9999]
-fallback-proxy version
-fallback-proxy help
+mole status [-admin 127.0.0.1:9999]
+mole version
+mole help
 ```
 
 ## Config reference
@@ -152,7 +152,7 @@ Default `discover_ports`:
 ## Development
 
 ```bash
-make build   # → ./dist/fallback-proxy
+make build   # → ./dist/mole
 make test    # go test ./...
 make clean
 ```

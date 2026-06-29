@@ -1,8 +1,8 @@
 .PHONY: build install test clean run tidy
 
-BINARY := fallback-proxy
+BINARY := mole
 DIST   := dist
-PKG    := ./cmd/fallback-proxy
+PKG    := ./cmd/mole
 
 build:
 	@mkdir -p $(DIST)

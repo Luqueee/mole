@@ -1,6 +1,6 @@
-# fallback-proxy — example configuration
+# mole — example configuration
 #
-# Place this file in your project root as `fallback-proxy.yaml`
+# Place this file in your project root as `mole.yaml`
 # (the default path), or pass --config=/path/to/file.yaml.
 #
 # All fields are optional EXCEPT `remote`.

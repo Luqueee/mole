@@ -1,4 +1,4 @@
-// Package config defines the runtime configuration for fallback-proxy
+// Package config defines the runtime configuration for mole
 // and helpers to load it from YAML and merge CLI overrides.
 package config
 
@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds the runtime configuration for fallback-proxy.
+// Config holds the runtime configuration for mole.
 type Config struct {
 	// Remote is the SSH target in the form user@host[:port].
 	// Example: "dev@workstation" or "dev@192.168.1.10:2222".

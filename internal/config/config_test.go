@@ -64,7 +64,7 @@ func TestLoad_EmptyPath(t *testing.T) {
 }
 
 func TestLoad_MissingFile(t *testing.T) {
-	cfg, err := Load("/does/not/exist/fallback-proxy.yaml")
+	cfg, err := Load("/does/not/exist/mole.yaml")
 	if err != nil {
 		t.Fatalf("Load of missing file should not error, got: %v", err)
 	}
