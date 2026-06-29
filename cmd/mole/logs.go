@@ -25,6 +25,7 @@ func runLogs(args []string) int {
 		raw        = fs.Bool("raw", false, "print raw log lines without formatting")
 		noColor    = fs.Bool("no-color", false, "disable colour output")
 		forceColor = fs.Bool("color", false, "force colour even when stdout isn't a TTY")
+		noDedup    = fs.Bool("no-dedup", false, "don't collapse repeated lines into one (×N)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `Usage: mole logs [flags]
@@ -36,7 +37,8 @@ Flags:
   -n <num>    trailing lines to show (default 200)
   -raw        print raw lines, no formatting
   -color      force colour even when piped
-  -no-color   disable colour`)
+  -no-color   disable colour
+  -no-dedup   don't collapse repeated lines into one (×N)`)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -58,16 +60,7 @@ Flags:
 	if *noColor {
 		color = false
 	}
-	render := func(line string) {
-		if line == "" {
-			return
-		}
-		if *raw {
-			fmt.Println(line)
-			return
-		}
-		fmt.Println(formatLine(line, color))
-	}
+	col := &collapser{color: color, raw: *raw, dedup: !*noDedup}
 
 	// Print the last n lines.
 	tail, err := lastLines(f, *lines)
@@ -76,10 +69,11 @@ Flags:
 		return 1
 	}
 	for _, l := range tail {
-		render(l)
+		col.emit(l)
 	}
 
 	if !*follow {
+		col.flush()
 		return 0
 	}
 
@@ -92,11 +86,15 @@ Flags:
 		if chunk != "" {
 			pending += chunk
 			if strings.HasSuffix(pending, "\n") {
-				render(strings.TrimRight(pending, "\n"))
+				col.emit(strings.TrimRight(pending, "\n"))
 				pending = ""
 			}
 		}
 		if err == io.EOF {
+			// Nothing more right now: flush any pending collapsed group
+			// so the latest count is visible without waiting for a
+			// differing line.
+			col.flush()
 			// Detect truncation/rotation: if the file shrank, reopen.
 			if fi, statErr := os.Stat(path); statErr == nil && fi.Size() < off {
 				if nf, oErr := os.Open(path); oErr == nil {

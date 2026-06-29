@@ -37,6 +37,86 @@ func levelStyle(level string, color bool) string {
 	}
 }
 
+// collapser folds consecutive identical log lines (ignoring their
+// timestamp) into a single rendered line with a "(×N)" repeat counter.
+// It buffers the current run and prints on flush — when a differing
+// line arrives, at end of input, or on a follow idle tick.
+type collapser struct {
+	color bool
+	raw   bool
+	dedup bool
+
+	key   string // identity of the current run (line minus timestamp)
+	first string // rendered text of the run's first line
+	count int
+}
+
+func (c *collapser) emit(line string) {
+	if line == "" {
+		return
+	}
+	if !c.dedup {
+		fmt.Println(c.render(line))
+		return
+	}
+	k := collapseKey(line)
+	if c.count > 0 && k == c.key {
+		c.count++
+		return
+	}
+	c.flush()
+	c.key = k
+	c.first = c.render(line)
+	c.count = 1
+}
+
+func (c *collapser) flush() {
+	if c.count == 0 {
+		return
+	}
+	out := c.first
+	if c.count > 1 {
+		out += countSuffix(c.count, c.color)
+	}
+	fmt.Println(out)
+	c.count = 0
+}
+
+func (c *collapser) render(line string) string {
+	if c.raw {
+		return line
+	}
+	return formatLine(line, c.color)
+}
+
+// collapseKey returns a line's identity for dedupe purposes: everything
+// except the timestamp, so the same event at different times collapses.
+func collapseKey(line string) string {
+	pairs := parseLogfmt(line)
+	if len(pairs) == 0 {
+		return line
+	}
+	var b strings.Builder
+	for _, kv := range pairs {
+		if kv[0] == "time" {
+			continue
+		}
+		b.WriteString(kv[0])
+		b.WriteByte('=')
+		b.WriteString(kv[1])
+		b.WriteByte('\x00')
+	}
+	return b.String()
+}
+
+func countSuffix(n int, color bool) string {
+	s := fmt.Sprintf(" (×%d)", n)
+	if color {
+		return fg(110, 114, 125, s)
+	}
+	return s
+}
+
 // formatLine turns one slog text line into a pretty, aligned, coloured
 // line. Unrecognised lines (not logfmt) are returned unchanged.
 func formatLine(line string, color bool) string {

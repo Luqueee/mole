@@ -196,6 +196,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	// runtime, which is what makes periodic auto-discovery work.
 	fwd := &forwarder{
 		active:      make(map[int]net.Listener),
+		failed:      make(map[int]bool),
 		mgr:         mgr,
 		remoteLabel: cfg.Remote,
 		log:         log,
@@ -293,10 +294,14 @@ type forwarder struct {
 
 	mu     sync.Mutex
 	active map[int]net.Listener
+	failed map[int]bool // ports whose bind failed (warned once already)
 }
 
 // ensure starts forwarding port p if it isn't already. Binding failures
-// (e.g. the local port is taken) are logged and skipped, not fatal.
+// (e.g. the local port is taken by another process) are logged once and
+// then retried silently — auto-discovery calls this every 15s, so
+// without the dedupe a permanently-taken port would spam the log
+// forever. A later success clears the warned state.
 func (f *forwarder) ensure(p int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -305,9 +310,13 @@ func (f *forwarder) ensure(p int) {
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
 	if err != nil {
-		f.log.Warn("could not bind local port, skipping", "port", p, "err", err)
+		if !f.failed[p] {
+			f.log.Warn("could not bind local port, skipping", "port", p, "err", err)
+			f.failed[p] = true
+		}
 		return
 	}
+	delete(f.failed, p)
 	f.active[p] = ln
 	remoteAddr := fmt.Sprintf("127.0.0.1:%d", p)
 	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", fmt.Sprintf("%s:%d", f.remoteLabel, p))
