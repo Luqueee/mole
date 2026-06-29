@@ -177,8 +177,17 @@ if (-not $onPath) {
 # ---------------------------------------------------------------------------
 
 if ($Init) {
-    Step "running mole init (interactive)"
-    & $dest init
+    # When stdin is a TTY, run interactively. When it's redirected
+    # (the typical `irm | iex` case), run non-interactively so the
+    # install is scriptable via the $env:MOLE_* variables documented
+    # in `mole init -h`.
+    if ([Console]::IsInputRedirected) {
+        Step "running mole init (non-interactive; using MOLE_* env vars)"
+        & $dest init -no-prompt
+    } else {
+        Step "running mole init (interactive)"
+        & $dest init
+    }
 }
 
 Step "done"

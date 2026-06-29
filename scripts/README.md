@@ -40,6 +40,12 @@ curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.s
 
 # also run mole init right away (interactive)
 ./scripts/install.sh --init
+
+# fully automatic install (binary + non-interactive mole init).
+# Any MOLE_* env var listed under `mole init -h` is honoured.
+MOLE_REMOTE=dev@workstation \
+  curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh \
+    | sh -s -- --init
 ```
 
 ```powershell

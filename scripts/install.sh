@@ -205,8 +205,17 @@ export PATH="$DEST_DIR:$PATH"
 # ---------------------------------------------------------------------------
 
 if [ "$RUN_INIT" = "yes" ]; then
-	step "running mole init (interactive)"
-	exec "$DEST" init
+	# When stdin is a TTY, run interactively. When it's redirected
+	# (the typical `curl | sh` case), run non-interactively so the
+	# install is scriptable via the MOLE_* env vars documented in
+	# `mole init -h`.
+	if [ -t 0 ]; then
+		step "running mole init (interactive)"
+		exec "$DEST" init
+	else
+		step "running mole init (non-interactive; using MOLE_* env vars)"
+		exec "$DEST" init -no-prompt
+	fi
 fi
 
 step "done"

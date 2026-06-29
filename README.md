@@ -69,20 +69,25 @@ Useful flags:
 
 ```bash
 # Linux/macOS — also launch the interactive configurator
-curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh -s -- --init
+# (only works in a real terminal; will fall back to non-interactive
+# when piped, reading MOLE_* env vars — see Option 5 below)
+./scripts/install.sh --init
 
 # Linux/macOS — install under a custom prefix
-curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh -s -- --prefix /opt
+./scripts/install.sh --prefix /opt
 
 # Linux/macOS — pin a specific ref
-curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | MOLE_VERSION=v0.1.0 sh
+MOLE_VERSION=v0.1.0 ./scripts/install.sh
 
 # Windows — custom install dir
 .\scripts\install.ps1 -InstallDir $env:LOCALAPPDATA\Programs\mole
 
 # Windows — also run init
-iwr -useb https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex -Init
+.\scripts\install.ps1 -Init
 ```
+
+The one-liner flavour of `--init` is documented in
+[Option 5 — fully automatic](#option-5--fully-automatic-scripted-zero-prompts).
 
 ### Option 2 — `go install` (no clone, requires Go 1.22+)
 
@@ -139,6 +144,80 @@ cd mole
 make install                      # → $(go env GOPATH)/bin/mole
 make install PREFIX=/usr/local    # → /usr/local/bin/mole
 make install INSTALL_DIR=~/bin/mole  # → ~/bin/mole
+```
+
+### Option 5 — fully automatic (scripted, zero prompts)
+
+For CI, dotfiles, Dockerfiles, and `curl | sh` lovers: install the
+binary **and** generate a working `mole.yaml` in a single
+non-interactive pass. `mole init` reads its answers from flags or
+environment variables when `-no-prompt` is set, so there is nothing
+to type.
+
+The installer scripts already auto-detect the non-TTY stdin and
+forward `-no-prompt` to `mole init` for you — no extra flags
+needed in the one-liner.
+
+**Linux / macOS / FreeBSD:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh \
+  | MOLE_REMOTE=dev@workstation \
+    MOLE_PORTS=3000,5173,8080 \
+    MOLE_AUTO_DISCOVER=true \
+    sh -s -- --init
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$env:MOLE_REMOTE        = 'dev@workstation'
+$env:MOLE_PORTS         = '3000,5173,8080'
+$env:MOLE_AUTO_DISCOVER = 'true'
+iwr -useb https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex -Init
+```
+
+What you get:
+
+- the binary is built (or downloaded) and dropped onto `PATH`;
+- the installer detects the non-TTY stdin and runs
+  `mole init -no-prompt`, which reads the `MOLE_*` env vars and
+  writes `./mole.yaml` (or `~/.config/mole/config.yaml` if
+  `MOLE_GLOBAL=true`) without asking a single question;
+- the install is reproducible — pin a ref with `MOLE_VERSION=v0.1.0`.
+
+Minimal example (auto-discover, no explicit ports):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh \
+  | MOLE_REMOTE=dev@workstation MOLE_AUTO_DISCOVER=true \
+    sh -s -- --init
+```
+
+Add `MOLE_GLOBAL=true` to install the config at
+`~/.config/mole/config.yaml` (per-user) instead of `./mole.yaml`
+(per-project):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh \
+  | MOLE_REMOTE=dev@workstation MOLE_AUTO_DISCOVER=true MOLE_GLOBAL=true \
+    sh -s -- --init
+```
+
+Append `-test` to also probe the SSH connection right after writing
+the config. The simplest pattern is to do the install without
+`--init` and run `mole init -test` yourself so you can pass
+explicit flags:
+
+```bash
+# 1. install the binary
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
+
+# 2. write a config and smoke-test the SSH connection
+mole init -no-prompt -test -force \
+  -remote dev@workstation \
+  -ports 3000,5173,8080 \
+  -auto-discover
 ```
 
 ### Build without installing
@@ -211,6 +290,94 @@ Then:
 mole up
 ```
 
+### Generating the config with `mole init`
+
+`mole init` is the canonical way to produce a `mole.yaml`. It is
+shipped with the binary — there is **no separate `init` script** —
+so the prompts are identical on every OS and the schema is always
+in sync with the loader. The installer scripts call it for you
+when you pass `--init` / `-Init`.
+
+Three modes, same binary:
+
+| Mode | When | How |
+|------|------|-----|
+| **Interactive** | first-time setup on a new machine | `mole init` |
+| **Semi-interactive** | you know the remote, want a sensible default for the rest | `mole init -remote dev@workstation` |
+| **Fully scripted** | CI, Dockerfiles, dotfiles, no TTY | `mole init -no-prompt -remote … [-ports …] [-auto-discover]` |
+
+A typical interactive run:
+
+```bash
+$ mole init
+configuring mole — press Enter to accept the default in [brackets]
+SSH remote (user@host[:port]) [dev@workstation]:
+How should mole pick ports?
+  1) auto-discover common dev ports (recommended)
+  2) explicit list (comma-separated)
+  3) skip — I'll configure ports later
+  choose [1]: 1
+Where to save the config?
+  1) ./mole.yaml               (current directory, project-local)
+  2) ~/.config/mole/config.yaml  (user-global)
+  3) don't save — print to stdout instead
+  choose [1]: 1
+wrote ./mole.yaml
+```
+
+**Scripted (no TTY) example** — generate a config and a global
+install in one shot:
+
+```bash
+mole init -no-prompt \
+  -remote dev@workstation \
+  -ports 3000,5173,8080 \
+  -auto-discover \
+  -global \
+  -test \
+  -force
+```
+
+- `-no-prompt`  refuse to ask; fail if a required value is missing.
+- `-global`     write to `~/.config/mole/config.yaml` (Windows:
+  `%APPDATA%\mole\config.yaml`) instead of `./mole.yaml`.
+- `-print`      print the rendered YAML to stdout, don't write a
+  file. Useful for `mole init -print > mole.yaml`.
+- `-test`       after writing, run `ssh -o BatchMode=yes -o
+  StrictHostKeyChecking=accept-new <remote> true` as a connectivity
+  smoke test.
+- `-force`      overwrite an existing config file.
+- `-yes`        accept defaults for any unanswered interactive
+  prompt (combine with `-remote` to answer only the questions the
+  flag didn't cover).
+
+**Environment variables** (read when the corresponding flag is
+empty; honored in every mode):
+
+| Variable               | Maps to flag        | Example                       |
+|------------------------|---------------------|-------------------------------|
+| `MOLE_REMOTE`          | `-remote`           | `dev@workstation`             |
+| `MOLE_PORTS`           | `-ports`            | `3000,5173,8080`              |
+| `MOLE_AUTO_DISCOVER`   | `-auto-discover`    | `true` / `false`              |
+| `MOLE_CONFIG_PATH`     | `-config`           | `/etc/mole.yaml`              |
+| `MOLE_GLOBAL`          | `-global`           | `true` / `false`              |
+
+**TTY behaviour:** `mole init` only asks questions when stdin is a
+TTY. When invoked from a pipe (the typical `curl | sh` install) it
+errors out unless `-no-prompt` is passed. The install scripts
+already handle this for you — passing `--init` from a real terminal
+runs the interactive wizard, while passing it from a pipe (or with
+`iex` on Windows) automatically adds `-no-prompt` so the
+`MOLE_*` env vars drive everything.
+
+This is what makes the "fully automatic" one-liner work — see
+[Option 5](#option-5--fully-automatic-scripted-zero-prompts) in
+the install section above.
+
+If you ever need to know exactly which path a `-global` install
+would write to, run `mole init -print -global -no-prompt -remote
+user@host` (it prints to stdout, no file is created).
+
 ### Status
 
 ```bash
@@ -238,6 +405,25 @@ mole up [flags]
 mole status [-admin 127.0.0.1:9999]
 mole version
 mole help
+```
+
+```
+mole init [flags]
+
+  -remote <target>   SSH target, e.g. dev@workstation[:port]
+  -ports <list>      comma-separated ports to forward (e.g. 3000,5173)
+  -auto-discover     probe the remote for common dev ports
+  -config <path>     where to write the YAML (default: ./mole.yaml)
+  -global            write to the user-global config (~/.config/mole/...)
+  -print             print the generated YAML to stdout instead of writing
+  -no-prompt         don't ask; require all values via flags / env vars
+  -yes               accept defaults for any unanswered questions
+  -test              after writing, test the SSH connection
+  -force             overwrite the config file if it already exists
+
+Environment (read when the corresponding flag is empty):
+  MOLE_REMOTE, MOLE_PORTS, MOLE_AUTO_DISCOVER,
+  MOLE_CONFIG_PATH, MOLE_GLOBAL
 ```
 
 ## Config reference
