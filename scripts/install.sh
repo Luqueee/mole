@@ -34,8 +34,8 @@ BINARY="mole"
 DEFAULT_REF="main"
 VERSION_REF="${MOLE_VERSION:-$DEFAULT_REF}"
 
-step() { printf '== %s\n' "$*"; }
-ok()   { printf '   ok %s\n' "$*"; }
+step() { printf '== %s\n' "$*" >&2; }
+ok()   { printf '   ok %s\n' "$*" >&2; }
 warn() { printf '  warn %s\n' "$*" >&2; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
@@ -101,8 +101,14 @@ resolve_source() {
 	if is_mole_repo "$PWD"; then
 		echo "$PWD"; return 0
 	fi
-	local script_dir
-	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+	local script_dir=""
+	# BASH_SOURCE is bash-only; under POSIX `sh` (e.g. `curl ... | sh` on
+	# macOS, where /bin/sh is dash/bash-in-POSIX-mode) the array
+	# subscript syntax errors out. Only attempt to resolve the script's
+	# own directory when we're actually running under bash.
+	if [ -n "${BASH_VERSION:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+		script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+	fi
 	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
 		echo "$(cd "$script_dir/.." && pwd)"; return 0
 	fi
