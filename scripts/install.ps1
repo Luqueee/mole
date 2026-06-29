@@ -23,10 +23,25 @@
 param(
     [string]$Prefix,
     [switch]$NoVerify,
-    [switch]$Init
+    [switch]$Init,
+    [switch]$Help
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Track the temp dir created when we have to clone upstream, so we can
+# remove it on exit. Set by Resolve-Source; read by the cleanup block at
+# the end of the script and by the trap below.
+$script:cloneTmpRoot = $null
+
+# Run cleanup on any error path (exception, Ctrl+C) too. `continue`
+# re-raises the original error after cleanup runs.
+trap {
+    if ($script:cloneTmpRoot -and (Test-Path -LiteralPath $script:cloneTmpRoot)) {
+        Remove-Item -LiteralPath $script:cloneTmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    continue
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,7 +67,12 @@ function Resolve-Source {
     if (Test-MoleRepo $PWD) {
         return $PWD
     }
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    # $PSCommandPath is a script-scope automatic variable that always
+    # points at the running .ps1 file. $MyInvocation.MyCommand.Path
+    # would refer to this *function* (i.e. return "Resolve-Source"),
+    # which isn't what we want when looking for the script's parent
+    # directory.
+    $scriptDir = Split-Path -Parent $PSCommandPath
     $parent    = Split-Path -Parent $scriptDir
     if ($parent -and (Test-MoleRepo $parent)) {
         return (Resolve-Path $parent).Path
@@ -63,6 +83,9 @@ function Resolve-Source {
     }
     $ref     = if ($env:MOLE_VERSION) { $env:MOLE_VERSION } else { 'main' }
     $tmpRoot = Join-Path $env:TEMP "mole-install-$(New-Guid)"
+    # Track for cleanup. Read by the trap at top scope and the explicit
+    # cleanup at the end of the script.
+    $script:cloneTmpRoot = $tmpRoot
     $tmp     = Join-Path $tmpRoot 'mole'
     Step "cloning https://github.com/Luqueee/mole.git (ref: $ref) into $tmp"
     New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
@@ -74,6 +97,53 @@ function Resolve-Source {
     }
     return $tmp
 }
+
+function Show-Help {
+    # Try to read the header comment block at the top of this script.
+    # If we're being executed from a real file (e.g. `.\install.ps1
+    # -Help` or `Get-Help .\install.ps1`), $PSCommandPath points at it.
+    # If we're being run via `irm ... | iex`, the script is in memory
+    # and $PSCommandPath is empty — fall back to a hardcoded copy.
+    $fromFile = $false
+    if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+        foreach ($line in (Get-Content -LiteralPath $PSCommandPath)) {
+            if ($line -match '^#\s?(.*)$') {
+                $matches[1]
+                $fromFile = $true
+            } else {
+                break
+            }
+        }
+    }
+    if (-not $fromFile) {
+        # Mirror of the header block at the top of this file. If you
+        # update the header, update this too.
+        @'
+scripts/install.ps1 — install mole on Windows.
+
+This script mirrors scripts/install.sh. Configuration is delegated to
+`mole init` (a subcommand of the binary itself), so there is no
+configuration logic in this file. Whatever the Unix installer can do,
+`mole init` can do — keep both installers dumb by design.
+
+Usage (PowerShell):
+  .\scripts\install.ps1                         # from a clone
+  iwr .../install.ps1 | iex                     # one-liner
+  .\scripts\install.ps1 -Prefix 'C:\Tools'      # custom prefix
+  .\scripts\install.ps1 -Init                   # also run mole init
+
+Environment variables:
+  MOLE_VERSION    git ref to checkout when cloning (default: main)
+  MOLE_SRC        path to an existing local clone
+  INSTALL_DIR     absolute path for the installed binary
+                  (overrides -Prefix; if unset, defaults to
+                  C:\Program Files\mole\mole.exe or
+                  $env:USERPROFILE\.local\bin\mole.exe)
+'@
+    }
+}
+
+if ($Help) { Show-Help; exit 0 }
 
 # ---------------------------------------------------------------------------
 # 1. Source
@@ -194,3 +264,14 @@ Step "done"
 Write-Host "  binary:    $dest"
 Write-Host "  configure: mole init   (interactive, run once per machine)"
 Write-Host "  start:     mole up      (uses .\mole.yaml by default)"
+
+# ---------------------------------------------------------------------------
+# 7. Cleanup
+# ---------------------------------------------------------------------------
+
+# Explicit cleanup for the success path; the trap at top scope handles
+# exception / Ctrl+C paths. Best-effort: failures here are suppressed so
+# they don't mask any earlier error that put us on this code path.
+if ($script:cloneTmpRoot -and (Test-Path -LiteralPath $script:cloneTmpRoot)) {
+    Remove-Item -LiteralPath $script:cloneTmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+}

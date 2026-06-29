@@ -29,6 +29,50 @@
 
 set -euo pipefail
 
+# Resolve a filesystem path to this script. This is needed so helpers
+# like `usage()` (which use `sed -n '2,28p' "$SELF"` to read the header
+# comment) keep working when the script is invoked via
+# `curl ... | sh` or `sh -s --`, where $0 is "sh" or "-s" and there is
+# no real file behind it. Preference order:
+#
+#   1. BASH_SOURCE[0]   — bash, file invocation
+#   2. $0               — POSIX sh, file invocation
+#   3. stdin → tmp file — POSIX sh or `sh -s`, piped invocation
+#
+# The rest of the script is written to be POSIX-portable, so we do NOT
+# re-exec under bash. The BASH_SOURCE guard that used to live here was
+# the only bash-only feature; resolving SELF covers it.
+SELF=""
+SCRIPT_TMP=""
+# BASH_SOURCE is bash-only: the array-subscript syntax errors out
+# under POSIX sh (dash, bash-in-POSIX-mode). Guard the expansion so
+# the parser never sees it on a non-bash interpreter; the [ -f "$0" ]
+# branch below handles the same case for POSIX sh.
+if [ -n "${BASH_VERSION:-}" ]; then
+	if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+		SELF="${BASH_SOURCE[0]}"
+	elif [ -n "${0:-}" ] && [ -f "${0}" ]; then
+		SELF="${0}"
+	fi
+else
+	if [ -n "${0:-}" ] && [ -f "${0}" ]; then
+		SELF="${0}"
+	fi
+fi
+if [ -z "$SELF" ] && [ ! -t 0 ]; then
+	# Invoked via stdin (e.g. `curl ... | sh -s -- --help`). Save the
+	# script body to a temp file so SELF points at a real path. This
+	# consumes stdin, which is acceptable for an installer: any later
+	# read of stdin in this process would have been meaningless once
+	# the script is already in memory. The temp file is removed by
+	# the `cleanup` trap set later in the script.
+	SCRIPT_TMP="$(mktemp 2>/dev/null || true)"
+	if [ -n "$SCRIPT_TMP" ]; then
+		cat > "$SCRIPT_TMP"
+		SELF="$SCRIPT_TMP"
+	fi
+fi
+
 REPO="https://github.com/Luqueee/mole.git"
 BINARY="mole"
 DEFAULT_REF="main"
@@ -40,7 +84,14 @@ warn() { printf '  warn %s\n' "$*" >&2; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-	sed -n '2,28p' "$0" | sed 's/^# \?//'
+	# Reads the header comment out of the script itself. $SELF is
+	# resolved at the top of the script and points at a real file
+	# path in every supported invocation (file or `curl | sh`). If
+	# for some reason SELF is empty (mktemp failed on a piped run),
+	# we silently print nothing rather than crash on `sed ... ""`.
+	if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+		sed -n '2,28p' "$SELF" | sed 's/^# \?//'
+	fi
 }
 
 PREFIX=""
@@ -84,6 +135,10 @@ CLEANUP_DIR=""
 
 cleanup() {
 	[ -n "$CLEANUP_DIR" ] && [ -d "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR"
+	# SCRIPT_TMP is set when the script was invoked via stdin (e.g.
+	# `curl ... | sh -s`) and we copied the body to a temp file so
+	# SELF points at a real path. Remove it on exit.
+	[ -n "$SCRIPT_TMP" ] && [ -f "$SCRIPT_TMP" ] && rm -f "$SCRIPT_TMP"
 }
 trap cleanup EXIT
 
@@ -102,12 +157,11 @@ resolve_source() {
 		echo "$PWD"; return 0
 	fi
 	local script_dir=""
-	# BASH_SOURCE is bash-only; under POSIX `sh` (e.g. `curl ... | sh` on
-	# macOS, where /bin/sh is dash/bash-in-POSIX-mode) the array
-	# subscript syntax errors out. Only attempt to resolve the script's
-	# own directory when we're actually running under bash.
-	if [ -n "${BASH_VERSION:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
-		script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+	# $SELF was resolved at the top of the script and points at a
+	# real file path in every supported invocation (file or piped),
+	# so we no longer need a bash-only BASH_SOURCE guard here.
+	if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+		script_dir="$(cd "$(dirname "$SELF")" && pwd 2>/dev/null || true)"
 	fi
 	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
 		echo "$(cd "$script_dir/.." && pwd)"; return 0
@@ -119,6 +173,7 @@ resolve_source() {
 	tmp="$(mktemp -d)"
 	step "cloning $REPO (ref: $VERSION_REF) into $tmp/mole"
 	if ! git clone --depth 1 --branch "$VERSION_REF" "$REPO" "$tmp/mole" >/dev/null 2>&1; then
+		warn "branch '$VERSION_REF' not found, falling back to default branch"
 		git clone --depth 1 "$REPO" "$tmp/mole" >/dev/null
 	fi
 	CLEANUP_DIR="$tmp"
