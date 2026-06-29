@@ -34,13 +34,59 @@ dev ports and forwards the ones that respond.
 
 ## Install
 
-Pick whichever path matches your setup. All three produce the same
-single static binary — no runtime, no `node_modules`, no daemon.
+Four ways to install — pick whichever fits. All produce the same
+single static binary: no runtime, no `node_modules`, no daemon.
 
-### Option 1 — `go install` (no clone needed)
+### Option 1 — one-liner (no clone, no setup)
 
-Requires Go 1.22+ on `PATH`. Drops the binary into
-`$(go env GOPATH)/bin` (usually `~/go/bin`):
+The installer script handles everything: detects the platform, builds
+the binary, and copies it onto your `PATH`.
+
+**Linux / macOS / FreeBSD:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
+```
+
+**Windows (PowerShell 5+):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
+```
+
+By default the script installs to:
+
+| User           | Install location                  |
+|----------------|-----------------------------------|
+| root (Unix)    | `/usr/local/bin/mole`             |
+| non-root (Unix)| `~/.local/bin/mole`               |
+| Windows        | `%LOCALAPPDATA%\Programs\mole\`   |
+
+If the destination isn't already on your `PATH`, the script prints
+the exact line to add to your shell profile.
+
+Useful flags:
+
+```bash
+# Linux/macOS — also launch the interactive configurator
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh -s -- --init
+
+# Linux/macOS — install under a custom prefix
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh -s -- --prefix /opt
+
+# Linux/macOS — pin a specific ref
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | MOLE_VERSION=v0.1.0 sh
+
+# Windows — custom install dir
+.\scripts\install.ps1 -InstallDir $env:LOCALAPPDATA\Programs\mole
+
+# Windows — also run init
+iwr -useb https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex -Init
+```
+
+### Option 2 — `go install` (no clone, requires Go 1.22+)
+
+Drops the binary into `$(go env GOPATH)/bin` (usually `~/go/bin`):
 
 ```bash
 go install github.com/Luqueee/mole/cmd/mole@latest
@@ -53,11 +99,10 @@ Make sure that directory is on your `PATH`:
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
-### Option 2 — install script from a clone
+### Option 3 — install script from a clone
 
-Clones the repo, builds the binary, and copies it to the right place
-on `PATH`. Works without `go install` setup and without configuring
-`GOPATH`.
+If you already have the repo (or want the source locally), run the
+same script directly — it skips the network clone:
 
 **Linux / macOS / FreeBSD:**
 
@@ -75,28 +120,17 @@ cd mole
 ./scripts/install.ps1
 ```
 
-The installer picks the destination automatically:
-
-| User           | Install location                  |
-|----------------|-----------------------------------|
-| root (Unix)    | `/usr/local/bin/mole`             |
-| non-root (Unix)| `~/.local/bin/mole`               |
-| Windows        | `%LOCALAPPDATA%\Programs\mole\`   |
-
-When installing to `~/.local/bin` (or any other non-`PATH` folder)
-the script prints a hint with the exact line to add to your shell
-profile.
-
-Override the destination with `--prefix` or the `INSTALL_DIR` env var:
+The installer picks the destination automatically (same table as
+Option 1). Override with `--prefix` or the `INSTALL_DIR` env var:
 
 ```bash
 ./scripts/install.sh --prefix /opt            # → /opt/bin/mole
 INSTALL_DIR=~/bin/mole ./scripts/install.sh   # → ~/bin/mole
 ```
 
-### Option 3 — `make install` from a clone
+### Option 4 — `make install` from a clone
 
-Same as Option 2 but uses `make`. Default destination is
+Same as Option 3 but driven by `make`. Default destination is
 `$(go env GOPATH)/bin/mole`:
 
 ```bash
@@ -119,12 +153,16 @@ go build -trimpath -o ./mole ./cmd/mole
 
 ### Uninstall
 
-Whichever method you used:
+The uninstaller mirrors the installer and is one command either way:
 
 ```bash
 # from a clone
 ./scripts/uninstall.sh                 # Unix
 ./scripts/uninstall.ps1                # Windows
+
+# one-liner (no clone)
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/uninstall.sh | sh
+iwr -useb https://raw.githubusercontent.com/Luqueee/mole/main/scripts/uninstall.ps1 | iex
 
 # add --purge to also drop ~/.config/mole/ (Unix) or
 # %LOCALAPPDATA%\mole\ (Windows)
