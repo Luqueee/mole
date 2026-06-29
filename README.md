@@ -42,6 +42,16 @@ new dev servers as you start them.
 | 🎨 **Beautiful logs** | `mole logs` renders the daemon log with colour level badges, a green `FORWARD` badge, and `(×N)` collapsing of repeats. |
 | 📦 **Single binary** | No runtime, no `node_modules`, no background service to manage. |
 
+## 🎨 Beautiful logs
+
+`mole logs` renders the daemon's structured log with coloured level badges, a
+distinct green **FORWARD** badge for forwarded ports, dimmed timestamps, and
+`(×N)` collapsing of repeated lines:
+
+<div align="center">
+  <img src="docs/mole-logs.png" alt="mole logs — colourised daemon log with level badges and a green FORWARD badge" width="920">
+</div>
+
 ## 🚀 Quickstart
 
 ```bash
