@@ -97,7 +97,18 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 		return conn, nil
 	}
 
-	// Connection failed — try once to reconnect.
+	// A rejected channel open (e.g. "connect failed (Connection
+	// refused)") means the remote refused the forwarded connection —
+	// nothing is listening on that port, or an ACL blocked it. The SSH
+	// transport itself is fine, so surface the error without tearing
+	// down and reconnecting. This is the common case during auto-
+	// discovery, where most probed ports are closed.
+	var openErr *ssh.OpenChannelError
+	if errors.As(err, &openErr) {
+		return nil, err
+	}
+
+	// Otherwise the transport itself likely died — try once to reconnect.
 	m.log.Warn("ssh dial failed, attempting reconnect", "err", err, "addr", addr)
 	m.mu.Lock()
 	if m.client != nil {
