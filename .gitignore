@@ -1,0 +1,11 @@
+# Build output
+/dist/
+/fallback-proxy
+/fallback-proxy.exe
+
+# Test output
+*.test
+*.out
+
+# Local config overrides
+fallback-proxy.local.yaml

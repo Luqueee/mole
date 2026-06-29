@@ -1,0 +1,32 @@
+# fallback-proxy — example configuration
+#
+# Place this file in your project root as `fallback-proxy.yaml`
+# (the default path), or pass --config=/path/to/file.yaml.
+#
+# All fields are optional EXCEPT `remote`.
+
+# SSH target. Uses your default key/agent from ~/.ssh/config.
+# Forms accepted: "user@host", "user@host:port"
+remote: dev@workstation
+
+# Explicit list of ports to forward (same number on the remote).
+ports:
+  - 3000
+  - 5173
+  - 8080
+
+# Probe the remote for common dev ports and forward any that respond.
+# Merged with `ports`.
+auto_discover: true
+
+# Override the default probe list (optional).
+# discover_ports: [3000, 5173, 8080, 9000]
+
+# Admin HTTP API (set to "" to disable).
+admin_addr: 127.0.0.1:9999
+
+# Log verbosity: debug | info | warn | error
+log_level: info
+
+# SSH port on the remote (default 22).
+ssh_port: 22
