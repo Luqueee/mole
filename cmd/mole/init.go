@@ -256,9 +256,9 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 	// Interactive: prompt for anything still missing.
 	fmt.Fprintln(opt.Out, "configuring mole — press Enter to accept the default in [brackets]")
 	for {
-		raw := prompt(opt.In, opt.Out, "SSH remote (user@host[:port])", ans.Remote)
+		raw := prompt(opt.In, opt.Out, "SSH remote (user@host[:port] or ssh config alias)", ans.Remote)
 		if raw == "" && !opt.Yes {
-			fmt.Fprintln(opt.Out, "  remote is required. Examples: dev@workstation, deploy@1.2.3.4:2222")
+			fmt.Fprintln(opt.Out, "  remote is required. Examples: dev@workstation, deploy@1.2.3.4:2222, or an ssh config Host alias like 'dev'")
 			continue
 		}
 		if err := validateRemote(raw); err != nil {
@@ -391,13 +391,22 @@ func validateRemote(r string) error {
 	if r == "" {
 		return errors.New("remote is required")
 	}
-	at := strings.LastIndex(r, "@")
-	if at <= 0 || at == len(r)-1 {
-		return fmt.Errorf("invalid remote %q: must be user@host[:port]", r)
+	// A spec with '@' must be a well-formed user@host[:port].
+	if strings.Contains(r, "@") {
+		at := strings.LastIndex(r, "@")
+		if at <= 0 || at == len(r)-1 {
+			return fmt.Errorf("invalid remote %q: must be user@host[:port]", r)
+		}
+		// Reject a second '@' to catch typos.
+		if strings.Count(r, "@") != 1 {
+			return fmt.Errorf("invalid remote %q: must be user@host[:port]", r)
+		}
+		return nil
 	}
-	// Reject a second '@' to catch typos.
-	if strings.Count(r, "@") != 1 {
-		return fmt.Errorf("invalid remote %q: must be user@host[:port]", r)
+	// Otherwise it's an ssh_config Host alias, resolved at connect time
+	// via `ssh -G`. Only reject obviously-malformed input (whitespace).
+	if strings.ContainsAny(r, " \t") {
+		return fmt.Errorf("invalid remote %q: use user@host[:port] or an ssh config Host alias", r)
 	}
 	return nil
 }

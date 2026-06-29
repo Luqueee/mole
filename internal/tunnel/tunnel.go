@@ -5,13 +5,17 @@
 package tunnel
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,15 +34,16 @@ type Manager struct {
 	client *ssh.Client
 }
 
-// New constructs a Manager and opens the first SSH connection.
-func New(addr, user string, log *slog.Logger) (*Manager, error) {
-	cfg, err := buildSSHConfig(user)
+// New constructs a Manager and opens the first SSH connection using the
+// resolved remote (see ResolveRemote).
+func New(r Remote, log *slog.Logger) (*Manager, error) {
+	cfg, err := buildSSHConfig(r.User, r.IdentityFiles)
 	if err != nil {
 		return nil, err
 	}
 
 	m := &Manager{
-		addr:   addr,
+		addr:   r.Addr,
 		config: cfg,
 		log:    log,
 	}
@@ -162,8 +167,8 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func buildSSHConfig(user string) (*ssh.ClientConfig, error) {
-	methods, err := authMethods()
+func buildSSHConfig(user string, identityFiles []string) (*ssh.ClientConfig, error) {
+	methods, err := authMethods(identityFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +181,23 @@ func buildSSHConfig(user string) (*ssh.ClientConfig, error) {
 	}, nil
 }
 
-func authMethods() ([]ssh.AuthMethod, error) {
+func authMethods(identityFiles []string) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
+
+	// 0. Explicit identity files from ssh_config (resolved via
+	//    `ssh -G` when the remote is a Host alias). These reflect the
+	//    user's intent for this host, so try them first.
+	for _, path := range identityFiles {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		signer, err := ssh.ParsePrivateKey(data)
+		if err != nil {
+			continue
+		}
+		methods = append(methods, ssh.PublicKeys(signer))
+	}
 
 	// 1. ssh-agent (preferred).
 	//
@@ -217,6 +237,93 @@ func authMethods() ([]ssh.AuthMethod, error) {
 	return methods, nil
 }
 
+// Remote holds resolved SSH connection parameters.
+type Remote struct {
+	User          string   // login user
+	Addr          string   // host:port to dial
+	IdentityFiles []string // key files from ssh_config, may be empty
+}
+
+// ResolveRemote turns a remote spec into concrete connection params.
+//
+//   - A spec containing '@' is parsed directly as user@host[:port].
+//   - Otherwise it's treated as an ssh_config Host alias and resolved
+//     with `ssh -G <alias>`, so ~/.ssh/config directives (HostName,
+//     User, Port, IdentityFile, Include, Match) are honoured. This is
+//     why a bare alias like "dev" connects to the real host instead of
+//     trying to dial a literal "dev".
+func ResolveRemote(spec string, defaultPort int) (Remote, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return Remote{}, errors.New("remote is required")
+	}
+	if strings.Contains(spec, "@") {
+		user, addr, err := ParseRemote(spec, defaultPort)
+		if err != nil {
+			return Remote{}, err
+		}
+		return Remote{User: user, Addr: addr}, nil
+	}
+	return resolveAlias(spec, defaultPort)
+}
+
+// resolveAlias shells out to `ssh -G <alias>` and parses the fully
+// resolved configuration. Relying on OpenSSH means every ssh_config
+// feature (Include, Match, canonicalisation) works without us
+// re-implementing the parser.
+func resolveAlias(alias string, defaultPort int) (Remote, error) {
+	sshBin, err := exec.LookPath("ssh")
+	if err != nil {
+		return Remote{}, fmt.Errorf("remote %q looks like an ssh host alias but 'ssh' is not on PATH to resolve it; use user@host[:port] instead", alias)
+	}
+	out, err := exec.Command(sshBin, "-G", alias).Output()
+	if err != nil {
+		return Remote{}, fmt.Errorf("resolve ssh alias %q via 'ssh -G': %w", alias, err)
+	}
+
+	var host, user, port string
+	var ids []string
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "hostname":
+			host = fields[1]
+		case "user":
+			user = fields[1]
+		case "port":
+			port = fields[1]
+		case "identityfile":
+			ids = append(ids, expandHome(strings.Join(fields[1:], " ")))
+		}
+	}
+	if host == "" {
+		host = alias // ssh always prints hostname, but be defensive
+	}
+	if port == "" {
+		port = strconv.Itoa(defaultPort)
+	}
+	return Remote{
+		User:          user,
+		Addr:          net.JoinHostPort(host, port),
+		IdentityFiles: ids,
+	}, nil
+}
+
+// expandHome expands a leading "~/" (or bare "~") to the user's home
+// directory. `ssh -G` prints identityfile paths with "~" unexpanded.
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	return p
+}
+
 // ParseRemote splits "user@host[:port]" into (user, host:port). If the
 // port is missing, defaultPort is appended.
 func ParseRemote(remote string, defaultPort int) (user, addr string, err error) {
@@ -230,7 +337,7 @@ func ParseRemote(remote string, defaultPort int) (user, addr string, err error) 
 		return "", "", errors.New("remote must be in the form user@host[:port]")
 	}
 	if !strings.Contains(host, ":") {
-		host = fmt.Sprintf("%s:%d", host, defaultPort)
+		host = net.JoinHostPort(host, strconv.Itoa(defaultPort))
 	}
 	return user, host, nil
 }

@@ -147,14 +147,14 @@ Either -remote or a config file with 'remote:' is required.`)
 
 	log := newLogger(cfg.LogLevel)
 
-	user, addr, err := tunnel.ParseRemote(cfg.Remote, cfg.SSHPort)
+	rem, err := tunnel.ResolveRemote(cfg.Remote, cfg.SSHPort)
 	if err != nil {
 		log.Error("invalid remote", "err", err)
 		return 1
 	}
 
-	log.Info("connecting to remote", "remote", cfg.Remote, "ssh_addr", addr)
-	mgr, err := tunnel.New(addr, user, log)
+	log.Info("connecting to remote", "remote", cfg.Remote, "ssh_addr", rem.Addr, "user", rem.User)
+	mgr, err := tunnel.New(rem, log)
 	if err != nil {
 		log.Error("ssh connect failed", "err", err)
 		return 1
