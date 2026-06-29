@@ -180,13 +180,17 @@ func authMethods() ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 
 	// 1. ssh-agent (preferred).
-	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-		conn, err := net.Dial("unix", sock)
-		if err == nil {
-			signers, err := agent.NewClient(conn).Signers()
-			if err == nil && len(signers) > 0 {
-				methods = append(methods, ssh.PublicKeys(signers...))
-			}
+	//
+	// dialAgent is OS-specific (see agent_unix.go / agent_windows.go):
+	// it dials a Unix socket on Linux/macOS and a Windows named pipe
+	// on Windows. It fails silently (returns an error) when no agent
+	// is configured, which lets us fall through to direct key files.
+	if conn, err := dialAgent(os.Getenv("SSH_AUTH_SOCK")); err == nil {
+		if signers, err := agent.NewClient(conn).Signers(); err == nil && len(signers) > 0 {
+			methods = append(methods, ssh.PublicKeys(signers...))
+			// conn stays open for the lifetime of the SSH session —
+			// the ssh.PublicKeys wrapper above retains a reference
+			// and uses it for signing operations.
 		}
 	}
 

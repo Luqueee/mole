@@ -25,7 +25,8 @@ dev ports and forwards the ones that respond.
   forward the ones that respond.
 - **Auto-reconnect**: transparent reconnect on tunnel drop, with
   periodic health checks.
-- **Multi-auth**: ssh-agent first, then `~/.ssh/id_*` keys.
+- **Multi-auth**: ssh-agent first (Unix socket on Linux/macOS, named
+  pipe on Windows), then `~/.ssh/id_*` keys.
 - **Admin API**: `GET /status` for live stats, `GET /health` for
   liveness probes.
 - **Single binary**: no runtime, no `node_modules`.
@@ -141,6 +142,16 @@ Default `discover_ports`:
 4. A background goroutine periodically probes the SSH session and
    reconnects if it has died.
 
+## Platforms
+
+Single static Go binary — runs on **Linux**, **macOS**, and **Windows**
+(amd64 and arm64). SSH authentication is native on each platform:
+
+- **Linux / macOS / BSD**: ssh-agent over a Unix domain socket
+  (`SSH_AUTH_SOCK`).
+- **Windows**: ssh-agent over the OpenSSH named pipe
+  (`\\.\pipe\openssh-ssh-agent`, or whatever `SSH_AUTH_SOCK` points to).
+
 ## Limitations
 
 - **Host key verification is off** (`InsecureIgnoreHostKey`). Fine for
@@ -148,6 +159,8 @@ Default `discover_ports`:
 - **No daemonization**: runs in foreground. Use your shell's job
   control or wrap it (systemd, tmux, `nohup`, …).
 - **TCP only**: no UDP forwarding yet.
+- **Pageant** (PuTTY's Windows agent) is not supported — only the
+  OpenSSH agent on Windows.
 
 ## Development
 
