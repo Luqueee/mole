@@ -19,9 +19,10 @@ LISTEN 0      128                           [::]:22            [::]:*
 LISTEN 0      4096   [fd7a:115c:a1e0::6938:357e]:62391         [::]:*`
 
 	got := parseListeners(out)
-	// 22 skipped (SSH transport); 33562 (specific LAN IP) and 62391
-	// (specific IPv6) skipped as not loopback-reachable. Dedup + sorted.
-	want := []int{25, 3301, 9749, 20241}
+	// 33562 (specific LAN IP) and 62391 (specific IPv6) skipped as not
+	// loopback-reachable. Exclusion of reserved ports is the caller's
+	// job, so 22 is still returned here. Dedup + sorted.
+	want := []int{22, 25, 3301, 9749, 20241}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseListeners = %v, want %v", got, want)
 	}

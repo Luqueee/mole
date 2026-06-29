@@ -50,12 +50,10 @@ func RemoteListeners(r Runner, log *slog.Logger) []int {
 	return nil
 }
 
-// skipPorts are never auto-forwarded: 22 is the SSH transport itself.
-var skipPorts = map[int]bool{22: true}
-
 // parseListeners extracts loopback-reachable LISTEN ports from the
 // output of `ss -tlnH` or `netstat -tln`. Both put the local address in
-// the 4th whitespace field of every LISTEN line.
+// the 4th whitespace field of every LISTEN line. Filtering of
+// excluded/reserved ports is the caller's job.
 func parseListeners(out string) []int {
 	seen := make(map[int]bool)
 	var ports []int
@@ -74,7 +72,7 @@ func parseListeners(out string) []int {
 			continue
 		}
 		port, err := strconv.Atoi(portStr)
-		if err != nil || skipPorts[port] || seen[port] {
+		if err != nil || seen[port] {
 			continue
 		}
 		seen[port] = true

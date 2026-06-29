@@ -31,6 +31,12 @@ type Config struct {
 	// AutoDiscover is enabled. Overrides the built-in defaults.
 	DiscoverPorts []int `yaml:"discover_ports"`
 
+	// ExcludePorts are never auto-forwarded (system/reserved ports like
+	// SSH, SMTP, DNS). Auto-discovery skips them. Setting this in the
+	// config replaces the built-in default; an empty list excludes
+	// nothing. Explicit Ports are always forwarded regardless.
+	ExcludePorts []int `yaml:"exclude_ports"`
+
 	// AdminAddr is the address of the local admin HTTP API.
 	// Set to empty string to disable.
 	AdminAddr string `yaml:"admin_addr"`
@@ -50,6 +56,15 @@ func Default() *Config {
 			3000, 3001, 3002, 3003, 3004, 3005,
 			4200, 5173, 5174, 5327,
 			6006, 8000, 8080, 8081, 8443, 9000, 9090,
+		},
+		// System/reserved ports that are almost never a dev server.
+		// Override via `exclude_ports:` in the config.
+		ExcludePorts: []int{
+			22,  // SSH (the transport itself)
+			25,  // SMTP
+			53,  // DNS
+			111, // rpcbind
+			631, // CUPS / printing
 		},
 		LogLevel: "info",
 		SSHPort:  22,

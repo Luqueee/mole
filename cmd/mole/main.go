@@ -209,10 +209,14 @@ Either -remote or a config file with 'remote:' is required.`)
 	}
 
 	if cfg.AutoDiscover {
+		exclude := make(map[int]bool, len(cfg.ExcludePorts))
+		for _, p := range cfg.ExcludePorts {
+			exclude[p] = true
+		}
 		// Initial sweep, then keep re-discovering so dev servers that
 		// come up after launch are forwarded automatically — no need to
 		// restart mole when you start your dev server.
-		discoverInto(fwd, mgr, cfg.DiscoverPorts, log)
+		discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
 		go func() {
 			t := time.NewTicker(15 * time.Second)
 			defer t.Stop()
@@ -221,7 +225,7 @@ Either -remote or a config file with 'remote:' is required.`)
 				case <-ctx.Done():
 					return
 				case <-t.C:
-					discoverInto(fwd, mgr, cfg.DiscoverPorts, log)
+					discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
 				}
 			}
 		}()
@@ -335,12 +339,15 @@ func (f *forwarder) closeAll() {
 // new ones via fwd. It prefers enumerating the remote's actual TCP
 // listeners (so any port is found), falling back to probing the fixed
 // candidate list when ss/netstat aren't available on the remote.
-func discoverInto(fwd *forwarder, mgr *tunnel.Manager, candidates []int, log *slog.Logger) {
+func discoverInto(fwd *forwarder, mgr *tunnel.Manager, candidates []int, exclude map[int]bool, log *slog.Logger) {
 	found := discover.RemoteListeners(mgr, log)
 	if len(found) == 0 {
 		found = discover.Probe(mgr, candidates, log)
 	}
 	for _, p := range found {
+		if exclude[p] {
+			continue
+		}
 		fwd.ensure(p)
 	}
 }

@@ -368,6 +368,9 @@ func renderYAML(ans *initAnswers) string {
 	b.WriteString("\n")
 	if ans.AutoDiscover {
 		b.WriteString("auto_discover: true\n")
+		b.WriteString("\n# Ports never auto-forwarded (system/reserved). Uncomment to\n")
+		b.WriteString("# override the default [22, 25, 53, 111, 631]; [] excludes nothing.\n")
+		b.WriteString("# exclude_ports: [22, 25, 53, 111, 631]\n")
 	}
 	if len(ans.Ports) > 0 {
 		b.WriteString("ports:\n")
