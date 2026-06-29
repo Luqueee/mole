@@ -331,10 +331,15 @@ func (f *forwarder) closeAll() {
 	}
 }
 
-// discoverInto probes the remote for open candidate ports and forwards
-// any newly-found ones via fwd.
-func discoverInto(fwd *forwarder, d discover.Dialer, candidates []int, log *slog.Logger) {
-	found := discover.Probe(d, candidates, log)
+// discoverInto finds ports to forward on the remote and forwards any
+// new ones via fwd. It prefers enumerating the remote's actual TCP
+// listeners (so any port is found), falling back to probing the fixed
+// candidate list when ss/netstat aren't available on the remote.
+func discoverInto(fwd *forwarder, mgr *tunnel.Manager, candidates []int, log *slog.Logger) {
+	found := discover.RemoteListeners(mgr, log)
+	if len(found) == 0 {
+		found = discover.Probe(mgr, candidates, log)
+	}
 	for _, p := range found {
 		fwd.ensure(p)
 	}

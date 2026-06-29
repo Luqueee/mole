@@ -127,6 +127,29 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 	return client.Dial(network, addr)
 }
 
+// Run executes a command on the remote over a fresh SSH session and
+// returns its combined stdout+stderr. Used by listener-based discovery
+// to enumerate what's actually listening on the remote.
+func (m *Manager) Run(cmd string) ([]byte, error) {
+	m.mu.RLock()
+	client := m.client
+	m.mu.RUnlock()
+	if client == nil {
+		if err := m.connect(); err != nil {
+			return nil, err
+		}
+		m.mu.RLock()
+		client = m.client
+		m.mu.RUnlock()
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer sess.Close()
+	return sess.CombinedOutput(cmd)
+}
+
 // Watch periodically verifies the SSH connection and reconnects if it
 // has died. Runs until ctx is cancelled.
 func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
