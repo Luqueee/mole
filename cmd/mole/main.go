@@ -54,6 +54,8 @@ func main() {
 		os.Exit(runDown(args))
 	case "status":
 		os.Exit(runStatus(args))
+	case "logs":
+		os.Exit(runLogs(args))
 	case "init":
 		os.Exit(runInit(args))
 	case "version", "-v", "--version":
@@ -74,6 +76,7 @@ Usage:
   mole up [flags]
   mole down
   mole status [flags]
+  mole logs [flags]
   mole init [flags]
   mole version
   mole help
@@ -82,6 +85,7 @@ Commands:
   up       Start the forwarder (foreground, or -d for background)
   down     Stop a backgrounded mole (started with 'up -d')
   status   Query the local admin API
+  logs     Show the background daemon log (colourised; -f to follow)
   init     Generate a mole.yaml interactively (or via flags)
   version  Print version and exit
 
