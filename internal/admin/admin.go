@@ -50,14 +50,24 @@ type snapshot struct {
 
 // Server is a tiny HTTP server exposing /status and /health.
 type Server struct {
-	stats *Stats
-	extra map[string]any
+	stats   *Stats
+	extra   map[string]any
+	portsFn func() []int
 }
 
 // New creates an admin Server. extra is returned in /status under
 // "info" so callers can add their own fields (ports, remote, etc.).
 func New(stats *Stats, extra map[string]any) *Server {
 	return &Server{stats: stats, extra: extra}
+}
+
+// WithPorts registers a callback returning the currently forwarded
+// ports. When set, /status reports them live under info.ports — useful
+// when the port set changes at runtime (periodic auto-discovery). The
+// callback must be safe for concurrent use; it's invoked per request.
+func (s *Server) WithPorts(fn func() []int) *Server {
+	s.portsFn = fn
+	return s
 }
 
 // Handler returns the HTTP handler for the admin endpoints.
@@ -75,9 +85,19 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		TotalConns:  s.stats.totalConns.Load(),
 		FailedDials: s.stats.failedDials.Load(),
 	}
+	info := s.extra
+	if s.portsFn != nil {
+		// Overlay live ports without mutating the shared extra map.
+		merged := make(map[string]any, len(s.extra)+1)
+		for k, v := range s.extra {
+			merged[k] = v
+		}
+		merged["ports"] = s.portsFn()
+		info = merged
+	}
 	out := map[string]any{
 		"stats": snap,
-		"info":  s.extra,
+		"info":  info,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

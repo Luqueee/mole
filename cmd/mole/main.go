@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -161,20 +162,6 @@ Either -remote or a config file with 'remote:' is required.`)
 	}
 	defer mgr.Close()
 
-	// Determine final port list.
-	forwardPorts := cfg.Ports
-	if cfg.AutoDiscover {
-		log.Info("auto-discovering ports on remote", "candidates", len(cfg.DiscoverPorts))
-		found := discover.Probe(mgr, cfg.DiscoverPorts, log)
-		sort.Ints(found)
-		log.Info("discovery complete", "found", found)
-		forwardPorts = config.MergePorts(forwardPorts, found)
-	}
-	if len(forwardPorts) == 0 {
-		log.Error("no ports to forward — use -ports or -auto-discover")
-		return 1
-	}
-
 	stats := admin.NewStats()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,32 +170,53 @@ Either -remote or a config file with 'remote:' is required.`)
 	// Watch SSH connection and auto-reconnect.
 	go mgr.Watch(ctx, 10*time.Second)
 
-	// Start a TCP listener per port.
-	var listeners []net.Listener
-	for _, p := range forwardPorts {
-		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
-		if err != nil {
-			log.Warn("could not bind local port, skipping", "port", p, "err", err)
-			continue
-		}
-		listeners = append(listeners, ln)
-		remoteAddr := fmt.Sprintf("127.0.0.1:%d", p)
-		log.Info("forwarding", "local", ln.Addr().String(), "remote", fmt.Sprintf("%s:%d", cfg.Remote, p))
-
-		hooks := proxy.Hooks{
+	// The forwarder owns the per-port listeners and can add new ones at
+	// runtime, which is what makes periodic auto-discovery work.
+	fwd := &forwarder{
+		active:      make(map[int]net.Listener),
+		mgr:         mgr,
+		remoteLabel: cfg.Remote,
+		log:         log,
+		hooks: proxy.Hooks{
 			OnConnect:    stats.OnConnect,
 			OnDisconnect: stats.OnDisconnect,
 			OnDialFail:   stats.OnDialFail,
-		}
-		go func(ln net.Listener, p int) {
-			if err := proxy.Serve(ln, mgr, remoteAddr, hooks, log); err != nil {
-				log.Warn("proxy terminated", "port", p, "err", err)
-			}
-		}(ln, p)
+		},
 	}
-	if len(listeners) == 0 {
-		log.Error("no listeners could be opened")
+	defer fwd.closeAll()
+
+	// Forward any explicitly-configured ports up front.
+	for _, p := range cfg.Ports {
+		fwd.ensure(p)
+	}
+
+	if cfg.AutoDiscover {
+		// Initial sweep, then keep re-discovering so dev servers that
+		// come up after launch are forwarded automatically — no need to
+		// restart mole when you start your dev server.
+		discoverInto(fwd, mgr, cfg.DiscoverPorts, log)
+		go func() {
+			t := time.NewTicker(15 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					discoverInto(fwd, mgr, cfg.DiscoverPorts, log)
+				}
+			}
+		}()
+	}
+
+	// Without auto-discover, an empty port set is a usage error. With
+	// it, an empty set just means "nothing up yet" — keep watching.
+	if !cfg.AutoDiscover && len(fwd.ports()) == 0 {
+		log.Error("no ports to forward — use -ports or -auto-discover")
 		return 1
+	}
+	if len(fwd.ports()) == 0 {
+		log.Info("no dev ports up on the remote yet — watching; start a server there and mole will forward it", "recheck", "15s")
 	}
 
 	// Admin HTTP API.
@@ -216,10 +224,9 @@ Either -remote or a config file with 'remote:' is required.`)
 	if cfg.AdminAddr != "" {
 		info := map[string]any{
 			"remote":        cfg.Remote,
-			"ports":         forwardPorts,
 			"auto_discover": cfg.AutoDiscover,
 		}
-		srv := admin.New(stats, info)
+		srv := admin.New(stats, info).WithPorts(fwd.ports)
 		adminSrv = &http.Server{
 			Addr:              cfg.AdminAddr,
 			Handler:           srv.Handler(),
@@ -240,15 +247,79 @@ Either -remote or a config file with 'remote:' is required.`)
 	log.Info("shutting down")
 
 	cancel()
-	for _, ln := range listeners {
-		_ = ln.Close()
-	}
 	if adminSrv != nil {
 		shutdownCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
 		defer c()
 		_ = adminSrv.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// forwarder owns the set of active local listeners, one per forwarded
+// port, and can add new ones on the fly. Safe for concurrent use so the
+// periodic auto-discovery goroutine and startup path can both call
+// ensure without racing.
+type forwarder struct {
+	mgr         *tunnel.Manager
+	remoteLabel string
+	log         *slog.Logger
+	hooks       proxy.Hooks
+
+	mu     sync.Mutex
+	active map[int]net.Listener
+}
+
+// ensure starts forwarding port p if it isn't already. Binding failures
+// (e.g. the local port is taken) are logged and skipped, not fatal.
+func (f *forwarder) ensure(p int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.active[p]; ok {
+		return
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
+	if err != nil {
+		f.log.Warn("could not bind local port, skipping", "port", p, "err", err)
+		return
+	}
+	f.active[p] = ln
+	remoteAddr := fmt.Sprintf("127.0.0.1:%d", p)
+	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", fmt.Sprintf("%s:%d", f.remoteLabel, p))
+	go func() {
+		if err := proxy.Serve(ln, f.mgr, remoteAddr, f.hooks, f.log); err != nil {
+			f.log.Warn("proxy terminated", "port", p, "err", err)
+		}
+	}()
+}
+
+// ports returns the sorted list of currently forwarded ports.
+func (f *forwarder) ports() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]int, 0, len(f.active))
+	for p := range f.active {
+		out = append(out, p)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// closeAll shuts down every active listener.
+func (f *forwarder) closeAll() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, ln := range f.active {
+		_ = ln.Close()
+	}
+}
+
+// discoverInto probes the remote for open candidate ports and forwards
+// any newly-found ones via fwd.
+func discoverInto(fwd *forwarder, d discover.Dialer, candidates []int, log *slog.Logger) {
+	found := discover.Probe(d, candidates, log)
+	for _, p := range found {
+		fwd.ensure(p)
+	}
 }
 
 func runStatus(args []string) int {
