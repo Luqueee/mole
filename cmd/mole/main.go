@@ -103,6 +103,7 @@ func runUp(args []string) int {
 		logLevel   = fs.String("log-level", "", "debug|info|warn|error")
 		detach     = fs.Bool("d", false, "run in the background (daemon)")
 		detachLong = fs.Bool("detach", false, "alias for -d")
+		insecure   = fs.Bool("insecure", false, "disable SSH host key verification (UNSAFE; dev only)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `Usage: mole up [flags]
@@ -114,6 +115,7 @@ Flags:
   -auto-discover  probe remote for common dev ports
   -admin          admin HTTP address (empty to disable)
   -log-level      debug|info|warn|error
+  -insecure       disable SSH host key verification (UNSAFE; dev only)
   -d, -detach     run in the background (daemon); stop with 'mole down'
 
 Either -remote or a config file with 'remote:' is required.`)
@@ -162,6 +164,9 @@ Either -remote or a config file with 'remote:' is required.`)
 	if *logLevel != "" {
 		cfg.LogLevel = *logLevel
 	}
+	if *insecure {
+		cfg.Insecure = true
+	}
 
 	if cfg.Remote == "" {
 		fmt.Fprintln(os.Stderr, "error: -remote is required (or set 'remote:' in config)")
@@ -177,7 +182,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	}
 
 	log.Info("connecting to remote", "remote", cfg.Remote, "ssh_addr", rem.Addr, "user", rem.User)
-	mgr, err := tunnel.New(rem, log)
+	mgr, err := tunnel.New(rem, cfg.Insecure, log)
 	if err != nil {
 		log.Error("ssh connect failed", "err", err)
 		return 1

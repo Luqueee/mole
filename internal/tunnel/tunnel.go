@@ -36,8 +36,8 @@ type Manager struct {
 
 // New constructs a Manager and opens the first SSH connection using the
 // resolved remote (see ResolveRemote).
-func New(r Remote, log *slog.Logger) (*Manager, error) {
-	cfg, err := buildSSHConfig(r.User, r.IdentityFiles)
+func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
+	cfg, err := buildSSHConfig(r.User, r.IdentityFiles, insecure, log)
 	if err != nil {
 		return nil, err
 	}
@@ -201,16 +201,19 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func buildSSHConfig(user string, identityFiles []string) (*ssh.ClientConfig, error) {
+func buildSSHConfig(user string, identityFiles []string, insecure bool, log *slog.Logger) (*ssh.ClientConfig, error) {
 	methods, err := authMethods(identityFiles)
 	if err != nil {
 		return nil, err
 	}
+	hostKey, err := hostKeyCallback(insecure, log)
+	if err != nil {
+		return nil, err
+	}
 	return &ssh.ClientConfig{
-		User: user,
-		Auth: methods,
-		// TODO: implement known_hosts verification in v0.2.
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User:            user,
+		Auth:            methods,
+		HostKeyCallback: hostKey,
 		Timeout:         10 * time.Second,
 	}, nil
 }

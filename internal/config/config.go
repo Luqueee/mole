@@ -46,6 +46,11 @@ type Config struct {
 
 	// SSHPort is the port on the remote to connect to for SSH (default 22).
 	SSHPort int `yaml:"ssh_port"`
+
+	// Insecure disables SSH host key verification (legacy
+	// InsecureIgnoreHostKey behaviour). Off by default; only enable on
+	// trusted networks for throwaway hosts. Equivalent to `--insecure`.
+	Insecure bool `yaml:"insecure"`
 }
 
 // Default returns a Config populated with sensible defaults.

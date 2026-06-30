@@ -297,6 +297,7 @@ mole up [flags]
   -auto-discover  forward whatever is listening on the remote
   -admin          admin HTTP address (empty to disable)
   -log-level      debug|info|warn|error
+  -insecure       disable SSH host key verification (UNSAFE; dev only)
   -d, -detach     run in the background; stop with 'mole down'
 
 mole down
@@ -318,6 +319,7 @@ mole version · mole help
 | `admin_addr`     | string | `127.0.0.1:9999`     | Admin HTTP address (empty to disable)              |
 | `log_level`      | string | `info`               | `debug`, `info`, `warn`, `error`                   |
 | `ssh_port`       | int    | `22`                 | SSH port on the remote                             |
+| `insecure`       | bool   | `false`              | Disable SSH host key verification (UNSAFE; dev only) |
 
 Fallback `discover_ports`:
 
@@ -352,8 +354,10 @@ SSH auth is native per platform:
 
 ## ⚠️ Limitations
 
-- **Host key verification is off** (`InsecureIgnoreHostKey`) — fine for dev, not
-  for untrusted networks. *(known_hosts support planned for v0.2.)*
+- **Host keys are verified** against `~/.ssh/known_hosts`. Unknown hosts are
+  trusted on first use (recorded automatically, like OpenSSH); a later key
+  *mismatch* is refused as a possible MITM. Pass `--insecure` (or
+  `insecure: true`) to turn verification off for throwaway dev hosts.
 - **Forwarded ports are added, not removed** — when a remote server stops, its
   local listener stays open until mole restarts.
 - **TCP only** — no UDP forwarding yet.

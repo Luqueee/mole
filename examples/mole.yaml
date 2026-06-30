@@ -30,3 +30,7 @@ log_level: info
 
 # SSH port on the remote (default 22).
 ssh_port: 22
+
+# Disable SSH host key verification. UNSAFE — leaves the tunnel open to
+# man-in-the-middle. Off by default; only for throwaway dev hosts.
+# insecure: false
