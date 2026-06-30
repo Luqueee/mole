@@ -33,6 +33,8 @@ func styleFor(level, msg string) badgeStyle {
 	switch strings.ToLower(msg) {
 	case "forwarding":
 		return badgeStyle{"FORWARD", 16, 24, 16, 63, 185, 80} // dark on green
+	case "unforwarding":
+		return badgeStyle{"UNFWD", 24, 16, 16, 191, 97, 63} // dark on burnt orange
 	}
 	switch strings.ToUpper(level) {
 	case "ERROR":
@@ -58,16 +60,23 @@ func renderBadge(st badgeStyle, color bool) string {
 
 // collapser folds consecutive identical log lines (ignoring their
 // timestamp) into a single rendered line with a "(×N)" repeat counter.
-// It buffers the current run and prints on flush — when a differing
-// line arrives, at end of input, or on a follow idle tick.
+//
+// In buffered mode (piping, static `mole logs`) it holds the current run
+// and prints it on flush — when a differing line arrives or at end of
+// input. In live mode (`mole logs -f` on a TTY) it prints the first line
+// of a run immediately and rewrites it in place with carriage return as
+// repeats arrive, so warns seconds apart collapse onto one updating line
+// instead of being split by the follow loop's idle polling.
 type collapser struct {
 	color bool
 	raw   bool
 	dedup bool
+	live  bool // follow on a TTY: rewrite the run line in place with \r
 
 	key   string // identity of the current run (line minus timestamp)
 	first string // rendered text of the run's first line
 	count int
+	open  bool // live: a run line is on screen, not yet newline-terminated
 }
 
 func (c *collapser) emit(line string) {
@@ -81,16 +90,34 @@ func (c *collapser) emit(line string) {
 	k := collapseKey(line)
 	if c.count > 0 && k == c.key {
 		c.count++
+		if c.live {
+			c.rewrite()
+		}
 		return
 	}
-	c.flush()
+	c.seal()
 	c.key = k
 	c.first = c.render(line)
 	c.count = 1
+	if c.live {
+		fmt.Print(c.first)
+		c.open = true
+	}
 }
 
-func (c *collapser) flush() {
+// seal terminates the current run. Buffered: print the run's line with
+// its repeat count. Live: the line is already on screen, so just end it
+// with a newline.
+func (c *collapser) seal() {
 	if c.count == 0 {
+		return
+	}
+	if c.live {
+		if c.open {
+			fmt.Print("\n")
+			c.open = false
+		}
+		c.count = 0
 		return
 	}
 	out := c.first
@@ -99,6 +126,35 @@ func (c *collapser) flush() {
 	}
 	fmt.Println(out)
 	c.count = 0
+}
+
+// rewrite redraws the current live run in place: carriage return, the
+// first line + (×N) counter, then clear-to-end-of-line so a shorter
+// redraw doesn't leave stale characters behind.
+func (c *collapser) rewrite() {
+	out := c.first
+	if c.count > 1 {
+		out += countSuffix(c.count, c.color)
+	}
+	fmt.Print("\r" + out + "\x1b[K")
+}
+
+// flush terminates and emits the current run. Used at end of input and
+// by static (non-follow) rendering.
+func (c *collapser) flush() {
+	c.seal()
+}
+
+// idle is called when following and the log has momentarily run dry. In
+// live (TTY) mode it does nothing, so a run stays open and repeats
+// arriving seconds apart keep updating the same line in place instead of
+// being split into separate (×N) lines. In non-live mode it flushes,
+// preserving the previous piped-follow behaviour.
+func (c *collapser) idle() {
+	if c.live {
+		return
+	}
+	c.flush()
 }
 
 func (c *collapser) render(line string) string {

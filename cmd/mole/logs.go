@@ -56,11 +56,15 @@ Flags:
 	}
 	defer f.Close()
 
-	color := *forceColor || (!*noColor && os.Getenv("NO_COLOR") == "" && isTerminal(os.Stdout))
+	tty := isTerminal(os.Stdout)
+	color := *forceColor || (!*noColor && os.Getenv("NO_COLOR") == "" && tty)
 	if *noColor {
 		color = false
 	}
-	col := &collapser{color: color, raw: *raw, dedup: !*noDedup}
+	// Live in-place collapse only on a real TTY in follow mode: it uses
+	// carriage returns, which would corrupt a pipe or file.
+	live := *follow && tty && !*raw && !*noDedup
+	col := &collapser{color: color, raw: *raw, dedup: !*noDedup, live: live}
 
 	// Print the last n lines.
 	tail, err := lastLines(f, *lines)
@@ -91,10 +95,11 @@ Flags:
 			}
 		}
 		if err == io.EOF {
-			// Nothing more right now: flush any pending collapsed group
-			// so the latest count is visible without waiting for a
-			// differing line.
-			col.flush()
+			// Nothing more right now. In buffered mode, flush the pending
+			// group so its count is visible without waiting for a
+			// differing line. In live mode, idle is a no-op: the run line
+			// stays open and keeps updating in place as repeats arrive.
+			col.idle()
 			// Detect truncation/rotation: if the file shrank, reopen.
 			if fi, statErr := os.Stat(path); statErr == nil && fi.Size() < off {
 				if nf, oErr := os.Open(path); oErr == nil {

@@ -135,3 +135,72 @@ func TestCollapser_CountsRepeats(t *testing.T) {
 		t.Errorf("non-repeated line must not carry a count: %q", got[1])
 	}
 }
+
+func TestCollapser_LiveCollapsesAcrossIdle(t *testing.T) {
+	out := captureStdout(t, func() {
+		col := &collapser{color: false, dedup: true, live: true}
+		col.emit(`time=2026-06-29T20:00:00Z level=WARN msg="dup" port=25`)
+		col.idle()
+		col.emit(`time=2026-06-29T20:00:15Z level=WARN msg="dup" port=25`)
+		col.idle()
+		col.emit(`time=2026-06-29T20:00:30Z level=WARN msg="dup" port=25`)
+		col.flush()
+	})
+	// The run collapsed despite the idle polls between emits.
+	if !strings.Contains(out, "(×3)") {
+		t.Errorf("live run should collapse across idle() into (×3): %q", out)
+	}
+	// In-place rewrite uses a carriage return and clear-to-end-of-line.
+	if !strings.Contains(out, "\r") {
+		t.Errorf("live rewrite should emit a carriage return: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[K") {
+		t.Errorf("live rewrite should clear to end of line: %q", out)
+	}
+	// One open run must terminate with exactly one newline, not one per repeat.
+	if !strings.HasSuffix(out, "\n") {
+		t.Errorf("live run should end with a trailing newline: %q", out)
+	}
+	if got := strings.Count(out, "\n"); got != 1 {
+		t.Errorf("live run must emit exactly one newline, got %d: %q", got, out)
+	}
+}
+
+func TestCollapser_LiveSealsOnDifferentKey(t *testing.T) {
+	out := captureStdout(t, func() {
+		col := &collapser{color: false, dedup: true, live: true}
+		col.emit(`time=2026-06-29T20:00:00Z level=WARN msg="dup" port=25`)
+		col.idle()
+		col.emit(`time=2026-06-29T20:00:15Z level=WARN msg="dup" port=25`)
+		col.emit(`time=2026-06-29T20:01:00Z level=INFO msg="other"`)
+		col.flush()
+	})
+	if !strings.Contains(out, "(×2)") {
+		t.Errorf("the A run should carry (×2) before sealing: %q", out)
+	}
+	idx := strings.Index(out, "other")
+	if idx < 0 {
+		t.Fatalf("the differing B line was never rendered: %q", out)
+	}
+	// A differing key seals the open A run with a newline before B prints.
+	if !strings.Contains(out[:idx], "\n") {
+		t.Errorf("A run should be sealed (newline) before B's text: %q", out)
+	}
+}
+
+func TestCollapser_NonLiveStaysBuffered(t *testing.T) {
+	out := captureStdout(t, func() {
+		col := &collapser{color: false, dedup: true, live: false}
+		col.emit(`time=2026-06-29T20:00:00Z level=WARN msg="dup" port=25`)
+		col.flush()
+	})
+	if !strings.Contains(out, "dup") {
+		t.Errorf("buffered output should contain the rendered message: %q", out)
+	}
+	if !strings.HasSuffix(out, "\n") {
+		t.Errorf("buffered output should end with a trailing newline: %q", out)
+	}
+	if strings.Contains(out, "\r") {
+		t.Errorf("buffered (non-live) output must not rewrite in place: %q", out)
+	}
+}
