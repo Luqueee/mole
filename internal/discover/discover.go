@@ -30,24 +30,32 @@ type Runner interface {
 // RemoteListeners enumerates TCP ports in LISTEN state on the remote
 // that are reachable through the tunnel — i.e. bound to loopback
 // (127.0.0.1, ::1) or all interfaces (0.0.0.0, ::). It runs `ss` and
-// falls back to `netstat`; returns nil if neither tool is available,
-// letting the caller fall back to probing a fixed candidate list.
+// falls back to `netstat`.
+//
+// The bool return reports whether enumeration was authoritative: true if
+// at least one of ss/netstat ran successfully — even when it found zero
+// ports, meaning the remote genuinely has nothing listening — and false
+// if neither tool was available or the transport was down. Callers use
+// it to tell "prune everything" (authoritative empty) apart from "can't
+// tell, fall back to probing the candidate list" (enumeration failed).
 //
 // Unlike the fixed-list Probe, this forwards whatever is actually
 // listening, so a server on an unusual port (e.g. 3301) is picked up
 // without being pre-registered.
-func RemoteListeners(r Runner, log *slog.Logger) []int {
+func RemoteListeners(r Runner, log *slog.Logger) ([]int, bool) {
+	ok := false
 	for _, cmd := range []string{"ss -tlnH", "netstat -tln"} {
 		out, err := r.Run(cmd)
 		if err != nil {
 			log.Debug("listener enumeration failed", "cmd", cmd, "err", err)
 			continue
 		}
+		ok = true
 		if ports := parseListeners(string(out)); len(ports) > 0 {
-			return ports
+			return ports, true
 		}
 	}
-	return nil
+	return nil, ok
 }
 
 // parseListeners extracts loopback-reachable LISTEN ports from the

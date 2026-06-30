@@ -202,6 +202,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	fwd := &forwarder{
 		active:      make(map[int]net.Listener),
 		failed:      make(map[int]bool),
+		pinned:      make(map[int]bool, len(cfg.Ports)),
 		mgr:         mgr,
 		remoteLabel: cfg.Remote,
 		log:         log,
@@ -213,8 +214,11 @@ Either -remote or a config file with 'remote:' is required.`)
 	}
 	defer fwd.closeAll()
 
-	// Forward any explicitly-configured ports up front.
+	// Forward any explicitly-configured ports up front. These are pinned:
+	// auto-discovery's pruning never closes them, even if the remote
+	// service is momentarily down.
 	for _, p := range cfg.Ports {
+		fwd.pinned[p] = true
 		fwd.ensure(p)
 	}
 
@@ -300,6 +304,7 @@ type forwarder struct {
 	mu     sync.Mutex
 	active map[int]net.Listener
 	failed map[int]bool // ports whose bind failed (warned once already)
+	pinned map[int]bool // explicitly-configured ports; never auto-pruned
 }
 
 // ensure starts forwarding port p if it isn't already. Binding failures
@@ -344,6 +349,27 @@ func (f *forwarder) ports() []int {
 	return out
 }
 
+// retain prunes auto-discovered listeners that are no longer present on
+// the remote. keep is the set of ports currently listening there; any
+// active port not in keep — and not pinned (explicitly configured) — is
+// closed and removed, so a dead remote service stops being advertised by
+// `mole status` and stops accepting local connections that can only fail.
+// When the same port comes back, ensure() forwards it afresh and logs it
+// again. Pinned ports are never pruned: the user asked for them by name.
+func (f *forwarder) retain(keep map[int]bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for p, ln := range f.active {
+		if keep[p] || f.pinned[p] {
+			continue
+		}
+		_ = ln.Close()
+		delete(f.active, p)
+		delete(f.failed, p)
+		f.log.Info("unforwarding", "port", p, "remote", fmt.Sprintf("%s:%d", f.remoteLabel, p))
+	}
+}
+
 // closeAll shuts down every active listener.
 func (f *forwarder) closeAll() {
 	f.mu.Lock()
@@ -353,21 +379,33 @@ func (f *forwarder) closeAll() {
 	}
 }
 
-// discoverInto finds ports to forward on the remote and forwards any
-// new ones via fwd. It prefers enumerating the remote's actual TCP
-// listeners (so any port is found), falling back to probing the fixed
-// candidate list when ss/netstat aren't available on the remote.
+// discoverInto reconciles the forwarded port set with what's live on the
+// remote. It prefers enumerating the remote's actual TCP listeners (so
+// any port is found); when that enumeration is authoritative it also
+// prunes ports that have since died (see forwarder.retain). It falls back
+// to probing the fixed candidate list — add-only, no pruning — when
+// ss/netstat aren't available, since a probe can't prove a port is gone.
 func discoverInto(fwd *forwarder, mgr *tunnel.Manager, candidates []int, exclude map[int]bool, log *slog.Logger) {
-	found := discover.RemoteListeners(mgr, log)
-	if len(found) == 0 {
-		found = discover.Probe(mgr, candidates, log)
+	found, authoritative := discover.RemoteListeners(mgr, log)
+	if !authoritative {
+		// Couldn't enumerate (tool missing or transport down). Probe the
+		// candidate list and only add — never prune on a guess.
+		for _, p := range discover.Probe(mgr, candidates, log) {
+			if !exclude[p] {
+				fwd.ensure(p)
+			}
+		}
+		return
 	}
+	keep := make(map[int]bool, len(found))
 	for _, p := range found {
 		if exclude[p] {
 			continue
 		}
+		keep[p] = true
 		fwd.ensure(p)
 	}
+	fwd.retain(keep)
 }
 
 func runStatus(args []string) int {
