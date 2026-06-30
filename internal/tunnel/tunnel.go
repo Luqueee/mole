@@ -24,14 +24,28 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
+// sshConn is the subset of *ssh.Client the Manager depends on.
+// *ssh.Client satisfies it as-is; tests inject a fake so reconnect
+// coordination can be exercised without standing up a real SSH server.
+type sshConn interface {
+	Dial(network, addr string) (net.Conn, error)
+	NewSession() (*ssh.Session, error)
+	Close() error
+}
+
 // Manager owns the SSH client and transparently reconnects on failure.
 type Manager struct {
 	addr   string // host:port to dial
 	config *ssh.ClientConfig
 	log    *slog.Logger
+	dial   func() (sshConn, error) // opens a fresh transport; swappable in tests
 
 	mu     sync.RWMutex
-	client *ssh.Client
+	client sshConn
+
+	// reconnectMu serialises reconnects so a herd of concurrent dials
+	// failing on a dead transport triggers ONE redial, not one per port.
+	reconnectMu sync.Mutex
 }
 
 // New constructs a Manager and opens the first SSH connection using the
@@ -47,6 +61,15 @@ func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
 		config: cfg,
 		log:    log,
 	}
+	// Default transport opener: a real SSH dial. Tests override m.dial
+	// before triggering reconnects.
+	m.dial = func() (sshConn, error) {
+		c, err := ssh.Dial("tcp", m.addr, m.config)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
 
 	if err := m.connect(); err != nil {
 		return nil, err
@@ -59,10 +82,11 @@ func (m *Manager) Addr() string {
 	return m.addr
 }
 
-// connect establishes a new SSH client and stores it. The previous
-// client (if any) is closed.
+// connect establishes a new client via m.dial and stores it, closing the
+// previous one. Callers that need herd-safe reconnection should go
+// through reconnect, not call connect directly.
 func (m *Manager) connect() error {
-	client, err := ssh.Dial("tcp", m.addr, m.config)
+	client, err := m.dial()
 	if err != nil {
 		return fmt.Errorf("ssh dial %s: %w", m.addr, err)
 	}
@@ -75,6 +99,37 @@ func (m *Manager) connect() error {
 	return nil
 }
 
+// reconnect replaces a dead transport, but only once across a herd of
+// concurrent callers. dead is the client the caller observed as broken
+// (nil if it just found no client). Holding reconnectMu, it re-checks the
+// current client: if another goroutine already swapped in a fresh one,
+// it returns that instead of dialing again — so N ports failing on a
+// dropped transport produce ONE redial and ONE warn, not N.
+func (m *Manager) reconnect(dead sshConn) (sshConn, error) {
+	m.reconnectMu.Lock()
+	defer m.reconnectMu.Unlock()
+
+	m.mu.RLock()
+	cur := m.client
+	m.mu.RUnlock()
+	if cur != nil && cur != dead {
+		// Someone already reconnected while we waited for the lock.
+		return cur, nil
+	}
+
+	if dead != nil {
+		m.log.Warn("ssh transport down, reconnecting", "addr", m.addr)
+	}
+	if err := m.connect(); err != nil {
+		return nil, err
+	}
+	m.log.Info("reconnected to remote")
+	m.mu.RLock()
+	cur = m.client
+	m.mu.RUnlock()
+	return cur, nil
+}
+
 // Dial opens a TCP connection through the SSH tunnel to addr (typically
 // "127.0.0.1:PORT"). If the SSH client is dead, Dial attempts to
 // reconnect once before failing.
@@ -84,12 +139,11 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 	m.mu.RUnlock()
 
 	if client == nil {
-		if err := m.connect(); err != nil {
+		c, err := m.reconnect(nil)
+		if err != nil {
 			return nil, err
 		}
-		m.mu.RLock()
-		client = m.client
-		m.mu.RUnlock()
+		client = c
 	}
 
 	conn, err := client.Dial(network, addr)
@@ -108,22 +162,14 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 		return nil, err
 	}
 
-	// Otherwise the transport itself likely died — try once to reconnect.
-	m.log.Warn("ssh dial failed, attempting reconnect", "err", err, "addr", addr)
-	m.mu.Lock()
-	if m.client != nil {
-		_ = m.client.Close()
-		m.client = nil
-	}
-	m.mu.Unlock()
-
-	if rerr := m.connect(); rerr != nil {
+	// Otherwise the transport itself likely died. Route through reconnect
+	// so a herd of ports failing at once shares ONE redial: the per-addr
+	// detail is debug; reconnect emits the single transport-level warn.
+	m.log.Debug("ssh dial failed, reconnecting", "err", err, "addr", addr)
+	client, rerr := m.reconnect(client)
+	if rerr != nil {
 		return nil, fmt.Errorf("reconnect: %w (original: %v)", rerr, err)
 	}
-
-	m.mu.RLock()
-	client = m.client
-	m.mu.RUnlock()
 	return client.Dial(network, addr)
 }
 
@@ -151,7 +197,9 @@ func (m *Manager) Run(cmd string) ([]byte, error) {
 }
 
 // Watch periodically verifies the SSH connection and reconnects if it
-// has died. Runs until ctx is cancelled.
+// has died. Runs until ctx is cancelled. Reconnection goes through the
+// shared singleflight path, so a Watch-detected drop and a Dial-detected
+// drop can't double-redial.
 func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -164,25 +212,17 @@ func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
 			c := m.client
 			m.mu.RUnlock()
 			if c == nil {
-				if err := m.connect(); err != nil {
+				if _, err := m.reconnect(nil); err != nil {
 					m.log.Debug("reconnect failed", "err", err)
-				} else {
-					m.log.Info("reconnected to remote")
 				}
 				continue
 			}
 			// Probe by opening a session and immediately closing it.
 			sess, err := c.NewSession()
 			if err != nil {
-				m.log.Warn("ssh session failed, reconnecting", "err", err)
-				_ = c.Close()
-				m.mu.Lock()
-				m.client = nil
-				m.mu.Unlock()
-				if rerr := m.connect(); rerr != nil {
+				m.log.Debug("ssh health check failed", "err", err)
+				if _, rerr := m.reconnect(c); rerr != nil {
 					m.log.Debug("reconnect failed", "err", rerr)
-				} else {
-					m.log.Info("reconnected to remote")
 				}
 				continue
 			}
