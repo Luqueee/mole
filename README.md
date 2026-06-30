@@ -45,11 +45,12 @@ new dev servers as you start them.
 ## 🎨 Beautiful logs
 
 `mole logs` renders the daemon's structured log with coloured level badges, a
-distinct green **FORWARD** badge for forwarded ports, dimmed timestamps, and
+distinct green **FORWARD** badge when a port starts forwarding and a burnt-orange
+**UNFWD** badge when a dead remote port is pruned, dimmed timestamps, and
 `(×N)` collapsing of repeated lines:
 
 <div align="center">
-  <img src="docs/mole-logs.png" alt="mole logs — colourised daemon log with level badges and a green FORWARD badge" width="920">
+  <img src="docs/mole-logs.png" alt="mole logs — colourised daemon log with level badges, a green FORWARD badge, an UNFWD badge, and (×N) collapsing" width="920">
 </div>
 
 ## 🚀 Quickstart
