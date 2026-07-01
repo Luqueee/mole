@@ -171,10 +171,10 @@ is_mole_repo() {
 
 resolve_source() {
 	if [ -n "${MOLE_SRC:-}" ] && is_mole_repo "$MOLE_SRC"; then
-		echo "$MOLE_SRC"; return 0
+		PROJECT_ROOT="$MOLE_SRC"; return 0
 	fi
 	if is_mole_repo "$PWD"; then
-		echo "$PWD"; return 0
+		PROJECT_ROOT="$PWD"; return 0
 	fi
 	local script_dir=""
 	# $SELF was resolved at the top of the script and points at a
@@ -184,7 +184,7 @@ resolve_source() {
 		script_dir="$(cd "$(dirname "$SELF")" && pwd 2>/dev/null || true)"
 	fi
 	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
-		echo "$(cd "$script_dir/.." && pwd)"; return 0
+		PROJECT_ROOT="$(cd "$script_dir/.." && pwd)"; return 0
 	fi
 	if ! command -v git >/dev/null 2>&1; then
 		die "no mole repo in CWD and 'git' not available to clone one"
@@ -197,10 +197,11 @@ resolve_source() {
 		git clone --depth 1 "$REPO" "$tmp/mole" >/dev/null
 	fi
 	CLEANUP_DIR="$tmp"
-	echo "$tmp/mole"
+	PROJECT_ROOT="$tmp/mole"
 }
 
-PROJECT_ROOT="$(resolve_source)"
+resolve_source
+
 step "using source: $PROJECT_ROOT"
 
 # ---------------------------------------------------------------------------
