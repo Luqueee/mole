@@ -1,0 +1,62 @@
+---
+interface Line {
+  prefix?: "prompt" | "ok" | "ask" | "arrow"
+  content: string
+  badge?: "FORWARD" | "UNFWD" | "INFO"
+}
+
+interface Props {
+  title?: string
+  lines: Line[]
+  animated?: boolean
+  showCaret?: boolean
+  id?: string
+}
+
+const {
+  title = "mole",
+  lines = [],
+  animated = true,
+  showCaret = false,
+  id,
+} = Astro.props
+
+const prefixText: Record<string, string> = {
+  prompt: "$ ",
+  ok: "✓ ",
+  ask: "? ",
+  arrow: "→ ",
+}
+---
+
+<div id={id} class="overflow-hidden rounded-xl border border-border bg-card terminal-glow">
+  <div class="flex items-center gap-2 border-b border-border px-4 py-2.5">
+    <span class="size-3 rounded-full bg-destructive/60"></span>
+    <span class="size-3 rounded-full bg-terminal-orange/60"></span>
+    <span class="size-3 rounded-full bg-terminal-green/60"></span>
+    <span class="ml-2 font-mono text-xs text-muted-foreground">{title}</span>
+  </div>
+  <div class="px-5 py-4 font-mono text-sm">
+    {lines.map((line, i) => (
+      <div
+        data-terminal-line
+        style={animated ? `--i: ${i}; animation: terminal-reveal 250ms forwards; animation-delay: calc(var(--i) * 350ms);` : undefined}
+        class="whitespace-pre-wrap"
+      >
+        {line.prefix && (
+          <span class={line.prefix === "prompt" || line.prefix === "ok" ? "text-terminal-green" : "text-terminal-cyan"}>{prefixText[line.prefix]}</span>
+        )}
+        {line.badge ? (
+          <>
+            <span class={`log-badge log-badge--${line.badge.toLowerCase()}`}>{line.badge}</span>&nbsp;{line.content}
+          </>
+        ) : (
+          line.content
+        )}
+      </div>
+    ))}
+    {showCaret && animated && (
+      <span class="caret ml-0.5 inline-block h-3.5 w-1.5 -mb-0.5 bg-terminal-green align-middle" style="animation: caret-blink 1s step-end infinite;">&nbsp;</span>
+    )}
+  </div>
+</div>

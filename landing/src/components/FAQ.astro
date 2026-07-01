@@ -1,0 +1,52 @@
+---
+import { Badge } from "@/components/ui/badge"
+import { HelpCircle, ChevronDown } from "lucide-react"
+
+const faqs = [
+  {
+    q: "How is mole different from `ssh -L`?",
+    a: "A single SSH client multiplexes every forwarded port. mole auto-discovers what's listening on the remote, so you don't keep a port list. It transparently reconnects when the tunnel drops, and `mole logs` gives you colourised, structured output.",
+  },
+  {
+    q: "Does it work with my existing `~/.ssh/config`?",
+    a: "Yes. Pass an alias as the remote (e.g. `mole up --remote dev`) and mole resolves it via `ssh -G` — HostName, User, Port, IdentityFile, Include and Match are all honoured.",
+  },
+  {
+    q: "Where does the binary run — on my laptop or the remote?",
+    a: "On your laptop. The remote only needs sshd. The mole daemon opens the SSH connection, enumerates listeners over the encrypted channel, and binds the forwarded ports on 127.0.0.1 locally.",
+  },
+  {
+    q: "What if the SSH connection drops?",
+    a: "A watchdog goroutine reconnects the tunnel. Re-discovery picks up any new servers that came up while the connection was down, and a UNFWD badge prunes ports that closed on the remote.",
+  },
+]
+---
+
+<section id="faq" data-reveal class="scroll-mt-nav relative py-24">
+  <div class="relative z-10 mx-auto max-w-5xl px-6">
+    <div class="mb-10 flex flex-col items-center gap-3 text-center">
+      <Badge variant="outline" className="gap-1.5">
+        <HelpCircle className="text-primary" />
+        FAQ
+      </Badge>
+      <h2 class="font-mono text-3xl font-bold text-foreground">
+        Common questions
+      </h2>
+      <p class="max-w-2xl text-base text-muted-foreground">
+        If yours isn't here, the README and the GitHub Issues have the rest.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+      {faqs.map((f) => (
+        <details class="group rounded-xl border border-border bg-card p-5 transition-colors open:border-primary/40 [&_summary::-webkit-details-marker]:hidden">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-medium text-foreground">
+            <span>{f.q}</span>
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <p class="mt-3 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>

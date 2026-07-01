@@ -81,6 +81,7 @@ appear.
 | `mole status` | Query the local admin API for live stats + forwarded ports. |
 | `mole logs` | Show the daemon log, colourised; `-f` to follow. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
+| `mole update` | Update mole in place to the latest release (re-runs the installer). |
 | `mole version` · `mole help` | The obvious. |
 
 ## 📦 Install
@@ -179,6 +180,20 @@ set `$env:MOLE_*` and run `iwr … | iex -Init`.
 make build      # → ./dist/mole
 # or: go build -trimpath -o ./mole ./cmd/mole
 ```
+
+### Update
+
+Update an installed mole in place — no manual re-clone. It re-runs the official
+installer against the running binary's own location:
+
+```bash
+mole update                  # update to the latest main
+mole update -version v0.2.0  # pin a specific git ref (branch, tag, or commit)
+mole update -dry-run         # print what it would run, change nothing
+```
+
+Needs `go` plus `curl`/`wget` (Unix) or PowerShell (Windows). For a `go install`
+setup, re-run `go install github.com/Luqueee/mole/cmd/mole@latest` instead.
 
 ### Uninstall
 
@@ -305,6 +320,7 @@ mole down
 mole status [-admin 127.0.0.1:9999]
 mole logs   [-f] [-n N] [-raw] [-color] [-no-color] [-no-dedup]
 mole init   [flags]
+mole update [-version REF] [-dry-run] [-no-verify]
 mole version · mole help
 ```
 

@@ -1,0 +1,66 @@
+---
+import "@/styles/global.css"
+import BackgroundGrid from "@/components/BackgroundGrid.astro"
+
+interface Props {
+  title?: string
+  description?: string
+}
+
+const {
+  title = "mole — SSH port forwarding, auto-discovered",
+  description =
+    "SSH port forwarding that auto-discovers your remote's listeners. One binary, one connection, zero port lists.",
+} = Astro.props
+---
+
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <!-- TODO: regenerate a 1200×630 OG card and replace /mole-logs.png with /og.png -->
+    <meta property="og:image" content="/mole-logs.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Fonts: JetBrains Mono + Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <BackgroundGrid />
+    <div class="relative z-10"><slot /></div>
+    <script>
+      const obs = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add(
+                "revealed",
+                "animate-in",
+                "fade-in",
+                "slide-in-from-bottom-4",
+                "duration-500",
+                "fill-mode-both"
+              );
+              obs.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.1, rootMargin: "0px 0px -50px 0px" }
+      );
+      document.querySelectorAll("[data-reveal]").forEach((el) => obs.observe(el));
+    </script>
+  </body>
+</html>

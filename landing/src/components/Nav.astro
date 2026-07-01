@@ -1,0 +1,86 @@
+---
+import { Button } from "@/components/ui/button"
+import { Menu } from "lucide-react"
+import Logo from "@/components/Logo.astro"
+
+const REPO = "https://github.com/Luqueee/mole"
+
+const navLinks = [
+  { href: "#features", label: "Features" },
+  { href: "#quickstart", label: "Quickstart" },
+  { href: "#commands", label: "Commands" },
+]
+---
+
+<nav
+  data-nav
+  class="sticky top-0 z-50 scroll-mt-nav border-b border-border/60 bg-background/60 backdrop-blur-md"
+>
+  <div
+    class="mx-auto flex max-w-5xl items-center justify-between px-6 py-3"
+  >
+    <a href="/" class="text-primary">
+      <Logo size={28} withWordmark={true} />
+    </a>
+    <div class="flex items-center gap-1 text-sm">
+      <div class="hidden items-center gap-1 text-sm md:flex">
+        {navLinks.map((l) => (
+          <a
+            href={l.href}
+            class="px-3 py-2 text-foreground/70 transition-colors hover:text-foreground"
+            >{l.label}</a
+          >
+        ))}
+        <span class="hidden font-mono text-xs text-muted-foreground sm:inline">v0.1.0</span>
+      </div>
+      <Button variant="ghost" size="sm" asChild>
+        <a href={REPO} target="_blank" rel="noopener noreferrer">GitHub</a>
+      </Button>
+      <button
+        id="nav-toggle"
+        aria-expanded="false"
+        aria-label="Toggle navigation"
+        class="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+      >
+        <Menu className="size-5" />
+      </button>
+    </div>
+  </div>
+  <div id="nav-mobile" class="hidden border-t border-border md:hidden">
+    <div class="flex flex-col gap-1 px-6 py-3">
+      {navLinks.map((l) => (
+        <a
+          href={l.href}
+          data-nav-close
+          class="px-3 py-2 text-sm text-foreground/70 transition-colors hover:text-foreground"
+          >{l.label}</a
+        >
+      ))}
+      <a
+        href={REPO}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-nav-close
+        class="px-3 py-2 text-sm text-foreground/70 transition-colors hover:text-foreground"
+        >GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<script>
+  const toggle = document.getElementById("nav-toggle");
+  const menu = document.getElementById("nav-mobile");
+
+  toggle?.addEventListener("click", () => {
+    const expanded = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!expanded));
+    menu?.classList.toggle("hidden");
+  });
+
+  menu?.querySelectorAll("[data-nav-close]").forEach((link) => {
+    link.addEventListener("click", () => {
+      menu.classList.add("hidden");
+      toggle?.setAttribute("aria-expanded", "false");
+    });
+  });
+</script>

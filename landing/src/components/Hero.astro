@@ -1,0 +1,52 @@
+---
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import TerminalBlock from "@/components/TerminalBlock.astro"
+
+const REPO = "https://github.com/Luqueee/mole"
+
+const lines = [
+  { prefix: "prompt" as const, content: "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh" },
+  { prefix: "ok" as const, content: "installed mole v0.1.0 → /usr/local/bin/mole" },
+  { prefix: "prompt" as const, content: "mole init" },
+  { prefix: "ask" as const, content: "SSH remote: dev" },
+  { prefix: "ok" as const, content: "wrote ~/.config/mole/config.yaml" },
+  { prefix: "ask" as const, content: "Start mole in the background? [Y/n] y" },
+  { prefix: "ok" as const, content: "mole running — forwarding 3 ports" },
+  { prefix: "arrow" as const, content: "localhost:3000  workstation:3000" },
+  { prefix: "arrow" as const, content: "localhost:5173  workstation:5173" },
+  { prefix: "arrow" as const, content: "localhost:8080  workstation:8080" },
+]
+---
+
+<section id="hero" class="scroll-mt-nav relative pt-32 pb-24 sm:pt-40 sm:pb-28">
+  <div class="relative z-10 mx-auto max-w-5xl px-6 text-center">
+    <Badge variant="outline" className="animate-in fade-in slide-in-from-top-4 duration-500 gap-2">
+      <span class="relative flex size-2"><span class="absolute inset-0 animate-ping rounded-full bg-primary/60"></span><span class="relative inline-flex size-2 rounded-full bg-primary"></span></span>
+      single binary · MIT · v0.1.0
+    </Badge>
+
+    <h1 class="mt-6 animate-in fade-in slide-in-from-top-6 duration-700 delay-100 font-mono text-5xl font-bold text-primary text-glow sm:text-7xl">mole</h1>
+
+    <p class="mx-auto mt-6 max-w-2xl animate-in fade-in slide-in-from-top-4 duration-700 delay-200 text-lg text-foreground sm:text-xl">
+      Hit <code class="font-mono text-terminal-cyan">localhost:3000</code> as if it were always running — even when the real service lives on another machine.
+    </p>
+
+    <div class="mx-auto mt-14 max-w-3xl animate-in fade-in zoom-in-95 duration-700 delay-300 text-left">
+      <TerminalBlock title="bash — mole" animated={true} showCaret={true} lines={lines} />
+    </div>
+
+    <div class="mt-10 flex animate-in fade-in slide-in-from-bottom-6 duration-700 delay-[1200ms] flex-wrap items-center justify-center gap-3">
+      <Button size="lg" asChild>
+        <a href="#quickstart">Install</a>
+      </Button>
+      <Button variant="outline" size="lg" asChild>
+        <a href={REPO} target="_blank" rel="noopener noreferrer">GitHub</a>
+      </Button>
+    </div>
+
+    <p class="mt-6 animate-in fade-in duration-700 delay-[1400ms] font-mono text-xs text-muted-foreground">
+      Linux · macOS · Windows · *BSD
+    </p>
+  </div>
+</section>

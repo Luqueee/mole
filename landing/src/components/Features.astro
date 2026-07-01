@@ -1,0 +1,101 @@
+---
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  CardDescription,
+} from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import {
+  Plug,
+  Telescope,
+  Compass,
+  ShieldCheck,
+  RefreshCw,
+  KeyRound,
+  Moon,
+  Palette,
+  Sparkles,
+} from "lucide-react"
+
+const features = [
+  {
+    icon: Plug,
+    title: "One connection",
+    desc: "A single SSH client multiplexes every forwarded port.",
+  },
+  {
+    icon: Telescope,
+    title: "Smart auto-discover",
+    desc: "Enumerates the remote's real TCP listeners (ss/netstat) and forwards them — any port, not a fixed list. Re-scans every 15s, so servers you start after launch get picked up.",
+  },
+  {
+    icon: Compass,
+    title: "SSH config aliases",
+    desc: "A remote like dev is resolved through ~/.ssh/config (ssh -G): HostName, User, Port, IdentityFile, Include, Match — all honoured.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Exclude list",
+    desc: "System/reserved ports (22, 25, 53, 111, 631) are skipped by default; fully configurable.",
+  },
+  {
+    icon: RefreshCw,
+    title: "Auto-reconnect",
+    desc: "Transparent reconnect on tunnel drop, with periodic health checks.",
+  },
+  {
+    icon: KeyRound,
+    title: "Native auth",
+    desc: "ssh-agent first (Unix socket / Windows named pipe), then ~/.ssh/id_* keys.",
+  },
+  {
+    icon: Moon,
+    title: "Background daemon",
+    desc: "mole up -d detaches; mole down stops it; mole status and mole logs introspect it.",
+  },
+  {
+    icon: Palette,
+    title: "Beautiful logs",
+    desc: "mole logs renders the daemon log with colour level badges, a green FORWARD badge, and (×N) collapsing of repeats.",
+  },
+]
+---
+
+<section id="features" data-reveal class="scroll-mt-nav relative py-24">
+  <div class="relative z-10 mx-auto max-w-5xl px-6">
+  <div class="mb-10 flex flex-col items-center gap-3 text-center">
+    <Badge variant="outline" className="gap-1.5">
+      <Sparkles className="text-primary" />
+      Features
+    </Badge>
+    <h2 class="font-mono text-3xl font-bold text-foreground">
+      Everything mole handles for you
+    </h2>
+    <p class="max-w-2xl text-base text-muted-foreground">
+      From auto-discovered dev servers to periodic health checks — mole removes the busywork of port forwarding.
+    </p>
+  </div>
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
+    {features.map((f) => {
+      const Icon = f.icon
+      return (
+        <Card className="bg-card border border-border transition-all duration-200 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3">
+              <span class="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Icon className="size-4" />
+              </span>
+              <span>{f.title}</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CardDescription>{f.desc}</CardDescription>
+          </CardContent>
+        </Card>
+      )
+    })}
+  </div>
+  </div>
+</section>

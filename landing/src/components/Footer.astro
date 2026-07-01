@@ -1,0 +1,60 @@
+---
+import Logo from "@/components/Logo.astro"
+
+const REPO = "https://github.com/Luqueee/mole"
+---
+
+<footer class="border-t border-border bg-card">
+  <div class="mx-auto max-w-5xl px-6 py-12">
+    <div class="grid grid-cols-1 gap-8 md:grid-cols-4">
+      <div>
+        <Logo size={32} withWordmark={true} />
+        <p class="mt-2 text-sm text-muted-foreground">
+          SSH port forwarding, auto-discovered.
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-2 text-sm">
+        <a
+          href={REPO}
+          class="text-accent transition-opacity hover:opacity-80"
+          target="_blank"
+          rel="noopener noreferrer">GitHub</a
+        >
+        <a
+          href={REPO + "#readme"}
+          class="text-accent transition-opacity hover:opacity-80"
+          target="_blank"
+          rel="noopener noreferrer">README</a
+        >
+        <a
+          href="#quickstart"
+          class="text-accent transition-opacity hover:opacity-80">Install</a
+        >
+      </div>
+
+      <div class="flex flex-col gap-2 text-sm">
+        <a
+          href={REPO + "/issues"}
+          class="text-accent transition-opacity hover:opacity-80"
+          target="_blank"
+          rel="noopener noreferrer">Issues</a
+        >
+        <a
+          href={REPO + "/releases"}
+          class="text-accent transition-opacity hover:opacity-80"
+          target="_blank"
+          rel="noopener noreferrer">Releases</a
+        >
+      </div>
+
+      <div class="text-sm text-muted-foreground md:text-right">
+        MIT License
+      </div>
+    </div>
+
+    <div class="mt-10 border-t border-border pt-6 text-center text-sm text-muted-foreground">
+      Built with Astro · Tailwind · shadcn/ui
+    </div>
+  </div>
+</footer>

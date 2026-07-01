@@ -1,0 +1,43 @@
+---
+import { Badge } from "@/components/ui/badge"
+import { Microscope } from "lucide-react"
+
+const steps = [
+  { n: "01", title: "Connect", text: "Open one SSH client connection to the remote. ssh-agent or ~/.ssh/id_* keys; aliases resolved via ssh -G." },
+  { n: "02", title: "Discover", text: "Enumerate the remote's TCP listeners (ss/netstat) every 15 s, or fall back to probing discover_ports. Skip exclude_ports." },
+  { n: "03", title: "Forward", text: "For each port, bind 127.0.0.1:<port> locally; on a local connection, dial 127.0.0.1:<port> through the tunnel and bridge bytes both ways." },
+  { n: "04", title: "Heal", text: "A watchdog reconnects the SSH session if it dies; re-discovery picks up new servers; UNFWD prunes dead ones." },
+]
+---
+
+<section id="how-it-works" data-reveal class="scroll-mt-nav relative py-24">
+  <div class="relative z-10 mx-auto max-w-5xl px-6">
+    <div class="mb-10 flex flex-col items-center gap-3 text-center">
+      <Badge variant="outline" className="gap-1.5">
+        <Microscope className="text-primary" />
+        How it works
+      </Badge>
+      <h2 class="font-mono text-3xl font-bold text-foreground">
+        Under the hood
+      </h2>
+      <p class="max-w-2xl text-base text-muted-foreground">
+        Four goroutines, one SSH client, no port list to maintain.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-x-12">
+      {steps.map((s) => (
+        <div class="relative flex gap-6 pb-10 last:pb-0">
+          <div class="flex flex-col items-center">
+            <span class="font-mono text-2xl font-bold text-primary">{s.n}</span>
+            <span class="mt-1 w-px flex-1 bg-gradient-to-b from-primary/60 to-transparent" aria-hidden="true"></span>
+          </div>
+          <div class="flex-1 pt-1">
+            <h3 class="text-base font-semibold text-foreground">{s.title}</h3>
+            <p class="mt-1 text-sm text-muted-foreground">{s.text}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

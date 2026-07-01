@@ -1,0 +1,79 @@
+---
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { Wrench } from "lucide-react"
+
+const commands = [
+  {
+    cmd: "mole up",
+    desc: "Start the forwarder in the foreground (add -d to background it).",
+  },
+  {
+    cmd: "mole down",
+    desc: "Stop a backgrounded mole (started with up -d).",
+  },
+  {
+    cmd: "mole status",
+    desc: "Query the local admin API for live stats + forwarded ports.",
+  },
+  {
+    cmd: "mole logs",
+    desc: "Show the daemon log, colourised; -f to follow.",
+  },
+  {
+    cmd: "mole init",
+    desc: "Generate a mole.yaml interactively (or scripted).",
+  },
+  {
+    cmd: "mole update",
+    desc: "Update mole in place to the latest release (re-runs the installer).",
+  },
+  {
+    cmd: "mole version · mole help",
+    desc: "The obvious.",
+  },
+]
+---
+
+<section id="commands" data-reveal class="scroll-mt-nav relative py-24">
+  <div class="relative z-10 mx-auto max-w-5xl px-6">
+  <div class="mb-10 flex flex-col items-center gap-3 text-center">
+    <Badge variant="outline" className="gap-1.5">
+      <Wrench className="text-primary" />
+      Commands
+    </Badge>
+    <h2 class="font-mono text-3xl font-bold text-foreground">
+      The full CLI surface
+    </h2>
+    <p class="max-w-2xl text-base text-muted-foreground">
+      Eight commands cover the full lifecycle. <span class="font-mono text-foreground">mole help</span> lists them all.
+    </p>
+  </div>
+
+  <div class="overflow-x-auto rounded-xl border border-border">
+    <Table>
+      <TableHeader>
+        <TableRow className="bg-secondary hover:bg-secondary">
+          <TableHead className="w-[35%] font-mono text-foreground">Command</TableHead>
+          <TableHead className="font-mono text-foreground">What it does</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {commands.map((c) => (
+          <TableRow className="hover:bg-secondary/50 transition-colors">
+            <TableCell className="font-mono text-terminal-cyan">{c.cmd}<span class="ml-2 text-muted-foreground">›</span></TableCell>
+            <TableCell className="text-muted-foreground">{c.desc}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
+  </div>
+</section>

@@ -1,0 +1,262 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Dark-only site: class="dark" on <html> activates the dark: variant
+   used by shadcn components. All token values are dark, set in :root. */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-terminal-green: var(--terminal-green);
+  --color-terminal-orange: var(--terminal-orange);
+  --color-terminal-cyan: var(--terminal-cyan);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* Terminal dark — GitHub-dark derived palette */
+  --background: hsl(213 27% 7%);        /* #0d1117 — page background */
+  --foreground: hsl(213 22% 78%);       /* #c9d1d9 — base text */
+  --card: hsl(215 25% 10%);             /* #161b22 — cards / code blocks */
+  --card-foreground: hsl(213 22% 78%);
+  --popover: hsl(215 25% 10%);
+  --popover-foreground: hsl(213 22% 78%);
+  --primary: hsl(137 47% 47%);          /* #3fb950 — green FORWARD — main CTA */
+  --primary-foreground: hsl(213 27% 7%);
+  --secondary: hsl(222 21% 14%);        /* #1c2230 — elevated surface */
+  --secondary-foreground: hsl(213 22% 78%);
+  --muted: hsl(222 21% 14%);
+  --muted-foreground: hsl(212 15% 58%); /* #8b949e — secondary text */
+  --accent: hsl(213 68% 64%);           /* #58a6ff — cyan — links */
+  --accent-foreground: hsl(213 27% 7%);
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(213 27% 98%);
+  --border: hsl(215 14% 21%);           /* #30363d — borders */
+  --input: hsl(215 14% 21%);
+  --ring: hsl(137 47% 47%);             /* green ring for focus */
+  --radius: 0.5rem;
+
+  /* Chart tokens (kept for completeness, dark-appropriate) */
+  --chart-1: hsl(137 47% 47%);
+  --chart-2: hsl(213 68% 64%);
+  --chart-3: hsl(41 76% 54%);
+  --chart-4: hsl(280 60% 65%);
+  --chart-5: hsl(0 72% 51%);
+
+  /* Sidebar tokens (kept for completeness, dark-appropriate) */
+  --sidebar: hsl(215 25% 10%);
+  --sidebar-foreground: hsl(213 22% 78%);
+  --sidebar-primary: hsl(137 47% 47%);
+  --sidebar-primary-foreground: hsl(213 27% 7%);
+  --sidebar-accent: hsl(222 21% 14%);
+  --sidebar-accent-foreground: hsl(213 22% 78%);
+  --sidebar-border: hsl(215 14% 21%);
+  --sidebar-ring: hsl(137 47% 47%);
+
+  /* Custom terminal tokens */
+  --terminal-green: hsl(137 47% 47%);   /* FORWARD badge */
+  --terminal-orange: hsl(41 76% 54%);   /* UNFWD / warning badge */
+  --terminal-cyan: hsl(213 68% 64%);    /* links / secondary accent */
+  /* Brand additive tokens (glow + grid) */
+  --glow-primary: hsl(137 47% 47% / 0.35);
+  --glow-accent: hsl(213 68% 64% / 0.30);
+  --grid-line: hsl(215 14% 21% / 0.35);
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+  html {
+    @apply font-sans;
+    overflow-x: hidden;
+  }
+}
+
+/* Hide scrollbar but keep scroll functionality */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Scroll-reveal: elements with [data-reveal] start hidden, animate in when
+   the IntersectionObserver adds .revealed. tw-animate-css provides the
+   animate-in / fade-in / slide-in utilities; fill-mode-both prevents flash. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal]:not(.revealed) {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  [data-reveal],
+  [data-terminal-line],
+  .caret,
+  .flow-dot {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .caret {
+    display: none;
+  }
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes terminal-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes flow-dot {
+  0% {
+    top: 0;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    top: calc(100% - 6px);
+    opacity: 0;
+  }
+}
+
+@layer utilities {
+  .bg-grid {
+    background-image: linear-gradient(
+        to right,
+        var(--grid-line) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      black 30%,
+      transparent 80%
+    );
+    -webkit-mask-image: radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      black 30%,
+      transparent 80%
+    );
+  }
+  .text-glow {
+    text-shadow: 0 0 24px var(--glow-primary);
+  }
+  .terminal-glow {
+    box-shadow: 0 0 0 1px var(--border),
+      0 20px 60px -20px var(--glow-primary), 0 0 80px -30px var(--glow-accent);
+  }
+  .log-badge {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+  }
+  .log-badge--forward {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    background: hsl(137 47% 47% / 0.15);
+    color: var(--terminal-green);
+  }
+  .log-badge--unfwd {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    background: hsl(41 76% 54% / 0.15);
+    color: var(--terminal-orange);
+  }
+  .log-badge--info {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    background: hsl(213 68% 64% / 0.12);
+    color: var(--terminal-cyan);
+  }
+  .scroll-mt-nav {
+    scroll-margin-top: 5rem;
+  }
+}

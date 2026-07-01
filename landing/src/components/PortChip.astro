@@ -1,0 +1,16 @@
+---
+interface Props {
+  local: string
+  remote: string
+  status?: "forwarding" | "pending"
+}
+
+const { local, remote, status = "forwarding" } = Astro.props
+---
+
+<div class="flex items-center gap-2 whitespace-nowrap font-mono text-xs">
+  <span class:list={["size-1.5 rounded-full", status === "forwarding" ? "bg-terminal-green" : "bg-terminal-orange animate-pulse"]}></span>
+  <span class="text-terminal-cyan">{local}</span>
+  <span class="text-muted-foreground">→</span>
+  <span class="text-foreground">{remote}</span>
+</div>
