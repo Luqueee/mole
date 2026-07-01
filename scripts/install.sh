@@ -158,6 +158,7 @@ CLEANUP_DIR=""
 
 cleanup() {
 	[ -n "$CLEANUP_DIR" ] && [ -d "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR"
+	return 0
 }
 trap cleanup EXIT
 
