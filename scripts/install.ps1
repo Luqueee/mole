@@ -58,10 +58,10 @@ function C($code, $text) {
     return $text
 }
 
-function Step($msg) { Write-Host "$(C '1;36' '==') $msg" }
-function Ok($msg)   { Write-Host "  $(C '32' [char]0x2713) $msg" }
-function Warn($msg) { Write-Host "  $(C '33' '!') $msg" }
-function Die($msg)  { Write-Host "$(C '31' 'error:') $msg"; exit 1 }
+function Step($msg) { Write-Host "$(C '1;38;2;125;133;144' '==') $msg" }
+function Ok($msg)   { Write-Host "  $(C '38;2;63;185;80' [char]0x2713) $msg" }
+function Warn($msg) { Write-Host "  $(C '38;2;210;153;34' '!') $msg" }
+function Die($msg)  { Write-Host "$(C '38;2;248;81;73' 'error:') $msg"; exit 1 }
 
 function Test-MoleRepo {
     param([string]$dir)
@@ -273,11 +273,11 @@ if ($Init) {
 
 Step "done"
 Write-Host ""
-Write-Host "  $(C '1' $(C '35' 'mole')) $(C '32' 'installed successfully')"
-Write-Host "  $(C '2' '─────────────────────────────────────────────────')"
-Write-Host "  $(C '2' 'binary    ')$dest"
-Write-Host "  $(C '2' 'configure ')$(C '32' 'mole init')   (interactive, run once per machine)"
-Write-Host "  $(C '2' 'start     ')$(C '32' 'mole up')      (uses .\mole.yaml by default)"
+Write-Host "  $(C '1' $(C '38;2;230;237;243' 'mole')) $(C '38;2;63;185;80' 'installed successfully')"
+Write-Host "  $(C '38;2;110;114;125' '─────────────────────────────────────────────────')"
+Write-Host "  $(C '38;2;110;114;125' 'binary    ')$dest"
+Write-Host "  $(C '38;2;110;114;125' 'configure ')$(C '38;2;173;186;199' 'mole init')   (interactive, run once per machine)"
+Write-Host "  $(C '38;2;110;114;125' 'start     ')$(C '38;2;173;186;199' 'mole up')      (uses .\mole.yaml by default)"
 
 # ---------------------------------------------------------------------------
 # 7. Cleanup

@@ -69,17 +69,17 @@ VERSION_REF="${MOLE_VERSION:-$DEFAULT_REF}"
 
 # Colour setup — only when stderr is a TTY and NO_COLOR is unset.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
-	C_STEP=$(printf '\033[1;36m')
-	C_OK=$(printf '\033[32m')
-	C_WARN=$(printf '\033[33m')
-	C_ERR=$(printf '\033[31m')
-	C_DIM=$(printf '\033[2m')
-	C_BOLD=$(printf '\033[1m')
-	C_MAGENTA=$(printf '\033[35m')
-	C_GREEN=$(printf '\033[32m')
+	C_STEP=$(printf '\033[1;38;2;125;133;144m')   # bold dim label (section headers)
+	C_OK=$(printf '\033[38;2;63;185;80m')          # FORWARD green
+	C_WARN=$(printf '\033[38;2;210;153;34m')       # WARN amber
+	C_ERR=$(printf '\033[38;2;248;81;73m')         # ERROR red
+	C_DIM=$(printf '\033[38;2;110;114;125m')       # timestamp dim
+	C_BOLD=$(printf '\033[1m')                      # bold style
+	C_BRIGHT=$(printf '\033[38;2;230;237;243m')    # bright message
+	C_VALUE=$(printf '\033[38;2;173;186;199m')     # attr value
 	C_RESET=$(printf '\033[0m')
 else
-	C_STEP="" C_OK="" C_WARN="" C_ERR="" C_DIM="" C_BOLD="" C_MAGENTA="" C_GREEN="" C_RESET=""
+	C_STEP="" C_OK="" C_WARN="" C_ERR="" C_DIM="" C_BOLD="" C_BRIGHT="" C_VALUE="" C_RESET=""
 fi
 
 step() { printf '%s==%s %s\n' "$C_STEP" "$C_RESET" "$*" >&2; }
@@ -300,8 +300,8 @@ fi
 
 step "done"
 printf '\n  %s%smole%s %sinstalled successfully%s\n' \
-	"$C_BOLD" "$C_MAGENTA" "$C_RESET" "$C_GREEN" "$C_RESET"
+	"$C_BOLD" "$C_BRIGHT" "$C_RESET" "$C_OK" "$C_RESET"
 printf '  %s\n' "$C_DIM─────────────────────────────────────────────────$C_RESET"
 printf '  %s%s%s%s\n' "$C_DIM" "binary     " "$C_RESET" "$DEST"
-printf '  %s%s%s%s   (interactive, run once per machine)\n' "$C_DIM" "configure  " "$C_RESET" "${C_GREEN}mole init${C_RESET}"
-printf '  %s%s%s%s      (uses ./mole.yaml by default)\n' "$C_DIM" "start      " "$C_RESET" "${C_GREEN}mole up${C_RESET}"
+printf '  %s%s%s%s   (interactive, run once per machine)\n' "$C_DIM" "configure  " "$C_RESET" "${C_VALUE}mole init${C_RESET}"
+printf '  %s%s%s%s      (uses ./mole.yaml by default)\n' "$C_DIM" "start      " "$C_RESET" "${C_VALUE}mole up${C_RESET}"
