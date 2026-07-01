@@ -146,6 +146,7 @@
   .animate-in,
   [data-reveal],
   [data-terminal-line],
+  .animate-float,
   .caret,
   .flow-dot {
     animation: none !important;
@@ -191,6 +192,16 @@
   }
 }
 
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
 @layer utilities {
   .bg-grid {
     background-image: linear-gradient(
@@ -217,6 +228,14 @@
   .terminal-glow {
     box-shadow: 0 0 0 1px var(--border),
       0 20px 60px -20px var(--glow-primary), 0 0 80px -30px var(--glow-accent);
+  }
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  .mascot-glow {
+    filter: drop-shadow(0 10px 28px var(--glow-primary)) drop-shadow(
+        0 0 44px var(--glow-accent)
+      );
   }
   .log-badge {
     display: inline-block;
