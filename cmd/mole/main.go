@@ -58,6 +58,8 @@ func main() {
 		os.Exit(runLogs(args))
 	case "init":
 		os.Exit(runInit(args))
+	case "update":
+		os.Exit(runUpdate(args))
 	case "version", "-v", "--version":
 		fmt.Println("mole", version)
 	case "help", "-h", "--help":
@@ -78,7 +80,7 @@ Usage:
   mole status [flags]
   mole logs [flags]
   mole init [flags]
-  mole version
+  mole update [flags]
   mole help
 
 Commands:
@@ -87,6 +89,7 @@ Commands:
   status   Query the local admin API
   logs     Show the background daemon log (colourised; -f to follow)
   init     Generate a mole.yaml interactively (or via flags)
+  update   Update mole in place to the latest release
   version  Print version and exit
 
 Run 'mole up -h' for up flags, 'mole init -h' for init flags.`)
