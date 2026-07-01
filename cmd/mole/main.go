@@ -61,38 +61,46 @@ func main() {
 	case "update":
 		os.Exit(runUpdate(args))
 	case "version", "-v", "--version":
-		fmt.Println("mole", version)
+		color := cliColor(os.Stdout)
+		fmt.Printf("%s %s\n", cBold(cMagenta("mole", color), color), cDim("v"+version, color))
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd)
+		ec := cliColor(os.Stderr)
+		fmt.Fprintf(os.Stderr, "%s unknown command: %s\n\n", cRed("✗", ec), cBold(cmd, ec))
 		printUsage()
 		os.Exit(1)
 	}
 }
 
 func printUsage() {
-	fmt.Println(`mole — local-port forwarder with auto-discover
+	color := cliColor(os.Stdout)
 
-Usage:
-  mole up [flags]
-  mole down
-  mole status [flags]
-  mole logs [flags]
-  mole init [flags]
-  mole update [flags]
-  mole help
+	fmt.Printf("\n%s\n\n", banner(version, color))
 
-Commands:
-  up       Start the forwarder (foreground, or -d for background)
-  down     Stop a backgrounded mole (started with 'up -d')
-  status   Query the local admin API
-  logs     Show the background daemon log (colourised; -f to follow)
-  init     Generate a mole.yaml interactively (or via flags)
-  update   Update mole in place to the latest release
-  version  Print version and exit
+	fmt.Printf("  %s\n", cBold("USAGE", color))
+	fmt.Printf("    %s\n", commandLine("<command>", color))
+	fmt.Println()
 
-Run 'mole up -h' for up flags, 'mole init -h' for init flags.`)
+	fmt.Printf("  %s\n", cBold("COMMANDS", color))
+	commands := [][2]string{
+		{"up", "Start the forwarder (foreground, or -d for background)"},
+		{"down", "Stop a backgrounded mole (started with 'up -d')"},
+		{"status", "Query the local admin API"},
+		{"logs", "Show the background daemon log (colourised; -f to follow)"},
+		{"init", "Generate a mole.yaml interactively (or via flags)"},
+		{"update", "Update mole in place to the latest release"},
+		{"version", "Print version and exit"},
+	}
+	for _, c := range commands {
+		fmt.Printf("    %s  %s\n", cGreen(fmt.Sprintf("%-8s", c[0]), color), c[1])
+	}
+	fmt.Println()
+
+	hint := fmt.Sprintf("Run '%s' for up flags, '%s' for init flags.",
+		commandLine("up -h", color), commandLine("init -h", color))
+	fmt.Printf("  %s\n", cDim(hint, color))
+	fmt.Println()
 }
 
 func runUp(args []string) int {

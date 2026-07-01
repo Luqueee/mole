@@ -36,29 +36,35 @@ func runUpdate(args []string) int {
 		noVerify = fs.Bool("no-verify", false, "skip the post-install version check")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `Usage: mole update [flags]
-
-Updates mole in place by re-running the official installer against this
-binary's own location. The installer clones the latest source, builds it
-with Go, and replaces the current executable.
-
-Flags:
-  -version <ref>   git ref to install (branch, tag, or commit; default: main)
-  -dry-run         print the installer command instead of running it
-  -no-verify       skip the installer's post-install version check
-
-Requires 'go' and either 'curl'/'wget' (Unix) or PowerShell (Windows),
-plus network access to github.com.`)
+		c := cliColor(os.Stderr)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, banner(version, c))
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("USAGE", c))
+		fmt.Fprintf(os.Stderr, "    %s\n", commandLine("update [flags]", c))
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("DESCRIPTION", c))
+		fmt.Fprintln(os.Stderr, "    Updates mole in place by re-running the official installer")
+		fmt.Fprintln(os.Stderr, "    against this binary's own location. The installer clones the")
+		fmt.Fprintln(os.Stderr, "    latest source, builds it with Go, and replaces the current")
+		fmt.Fprintln(os.Stderr, "    executable.")
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("FLAGS", c))
+		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -version <ref>", c), "git ref to install (branch, tag, or commit; default: main)")
+		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -dry-run", c), "print the installer command instead of running it")
+		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -no-verify", c), "skip the installer's post-install version check")
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'go' and either 'curl'/'wget' (Unix) or PowerShell (Windows),", c))
+		fmt.Fprintf(os.Stderr, "  %s\n", cDim("plus network access to github.com.", c))
+		fmt.Fprintln(os.Stderr)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
+	color := cliColor(os.Stdout)
+
 	// Resolve the running binary and follow any symlinks so we overwrite
 	// the real file, not a link into it.
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "update: cannot locate current binary:", err)
+		fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "cannot locate current binary:", err)
 		return 1
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
@@ -68,36 +74,45 @@ plus network access to github.com.`)
 	// The installer needs 'go' to build from source; fail early with a
 	// clear message rather than deep inside the shell/PowerShell pipeline.
 	if _, err := exec.LookPath("go"); err != nil {
-		fmt.Fprintln(os.Stderr, "update: 'go' is not installed or not on PATH.")
+		fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "'go' is not installed or not on PATH.")
 		fmt.Fprintln(os.Stderr, "        Install Go 1.22+ from https://go.dev/dl/ and re-run.")
 		return 1
 	}
 
 	cmd, err := buildUpdateCommand(exe, *ref, *noVerify)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "update:", err)
+		fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), err)
 		return 1
 	}
 
 	if *dryRun {
-		fmt.Println("would run:", cmd.Path, quoteArgs(cmd.Args[1:]))
-		fmt.Println("  INSTALL_DIR =", exe)
+		fmt.Printf("\n  %s\n", cDim("─ dry-run ─", color))
+		fmt.Printf("  %s  %s %s\n", cDim("would run:", color), cCyan(cmd.Path, color), cCyan(quoteArgs(cmd.Args[1:]), color))
+		fmt.Printf("  %s %s\n", cDim("INSTALL_DIR =", color), cBold(exe, color))
 		if *ref != "" {
-			fmt.Println("  MOLE_VERSION =", *ref)
+			fmt.Printf("  %s %s\n", cDim("MOLE_VERSION =", color), cBold(*ref, color))
 		}
+		fmt.Println()
 		return 0
 	}
 
-	fmt.Printf("mole %s → updating from %s\n", version, sourceRef(*ref))
-	fmt.Println("  target:", exe)
+	fmt.Printf("\n  %s %s %s %s\n",
+		cBold(cMagenta("mole", color), color),
+		cDim("v"+version, color),
+		cCyan("→", color),
+		cBold(sourceRef(*ref), color))
+	fmt.Printf("  %s  %s\n", cDim("target", color), cBlue(exe, color))
+	fmt.Println()
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "update: installer failed:", err)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, cRed("  ✗ update failed:", color), err)
 		return 1
 	}
+	fmt.Printf("  %s\n\n", cGreen("✓ mole updated successfully", color))
 	return 0
 }
 

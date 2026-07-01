@@ -47,10 +47,21 @@ trap {
 # Helpers
 # ---------------------------------------------------------------------------
 
-function Step($msg) { Write-Host "== $msg" }
-function Ok($msg)   { Write-Host "   ok $msg" }
-function Warn($msg) { Write-Warning $msg }
-function Die($msg)  { throw $msg }
+# ANSI escape codes for coloured output. PowerShell 5.1+ supports them
+# on Windows 10+; older versions just show raw codes harmlessly.
+$esc = [char]27
+$script:UseColor = $true
+if ($env:NO_COLOR) { $script:UseColor = $false }
+
+function C($code, $text) {
+    if ($script:UseColor) { return "$esc[${code}m$text$esc[0m" }
+    return $text
+}
+
+function Step($msg) { Write-Host "$(C '1;36' '==') $msg" }
+function Ok($msg)   { Write-Host "  $(C '32' [char]0x2713) $msg" }
+function Warn($msg) { Write-Host "  $(C '33' '!') $msg" }
+function Die($msg)  { Write-Host "$(C '31' 'error:') $msg"; exit 1 }
 
 function Test-MoleRepo {
     param([string]$dir)
@@ -261,9 +272,12 @@ if ($Init) {
 }
 
 Step "done"
-Write-Host "  binary:    $dest"
-Write-Host "  configure: mole init   (interactive, run once per machine)"
-Write-Host "  start:     mole up      (uses .\mole.yaml by default)"
+Write-Host ""
+Write-Host "  $(C '1' $(C '35' 'mole')) $(C '32' 'installed successfully')"
+Write-Host "  $(C '2' '─────────────────────────────────────────────────')"
+Write-Host "  $(C '2' 'binary    ')$dest"
+Write-Host "  $(C '2' 'configure ')$(C '32' 'mole init')   (interactive, run once per machine)"
+Write-Host "  $(C '2' 'start     ')$(C '32' 'mole up')      (uses .\mole.yaml by default)"
 
 # ---------------------------------------------------------------------------
 # 7. Cleanup

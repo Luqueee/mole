@@ -67,10 +67,25 @@ BINARY="mole"
 DEFAULT_REF="main"
 VERSION_REF="${MOLE_VERSION:-$DEFAULT_REF}"
 
-step() { printf '== %s\n' "$*" >&2; }
-ok()   { printf '   ok %s\n' "$*" >&2; }
-warn() { printf '  warn %s\n' "$*" >&2; }
-die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+# Colour setup — only when stderr is a TTY and NO_COLOR is unset.
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+	C_STEP=$(printf '\033[1;36m')
+	C_OK=$(printf '\033[32m')
+	C_WARN=$(printf '\033[33m')
+	C_ERR=$(printf '\033[31m')
+	C_DIM=$(printf '\033[2m')
+	C_BOLD=$(printf '\033[1m')
+	C_MAGENTA=$(printf '\033[35m')
+	C_GREEN=$(printf '\033[32m')
+	C_RESET=$(printf '\033[0m')
+else
+	C_STEP="" C_OK="" C_WARN="" C_ERR="" C_DIM="" C_BOLD="" C_MAGENTA="" C_GREEN="" C_RESET=""
+fi
+
+step() { printf '%s==%s %s\n' "$C_STEP" "$C_RESET" "$*" >&2; }
+ok()   { printf '  %s✓%s %s\n' "$C_OK" "$C_RESET" "$*" >&2; }
+warn() { printf '  %s!%s %s\n' "$C_WARN" "$C_RESET" "$*" >&2; }
+die()  { printf '%serror:%s %s\n' "$C_ERR" "$C_RESET" "$*" >&2; exit 1; }
 
 usage() {
 	# Embedded so it works identically whether the script is run from a
@@ -256,9 +271,9 @@ path_contains() {
 
 printf '\n'
 if ! path_contains "${PATH:-}" "$DEST_DIR"; then
-	printf 'NOTE: %s is not on your PATH.\n' "$DEST_DIR"
+	printf '%sNOTE:%s %s is not on your PATH.\n' "$C_WARN" "$C_RESET" "$DEST_DIR"
 	printf '  Add it to your shell profile, e.g.:\n'
-	printf '    export PATH="%s:$PATH"\n' "$DEST_DIR"
+	printf '    %sexport PATH="%s:$PATH"%s\n' "$C_DIM" "$DEST_DIR" "$C_RESET"
 	printf '\n'
 fi
 
@@ -284,6 +299,9 @@ if [ "$RUN_INIT" = "yes" ]; then
 fi
 
 step "done"
-printf '  binary:    %s\n' "$DEST"
-printf '  configure: %smole init%s   (interactive, run once per machine)\n' "" ""
-printf '  start:     %smole up%s      (uses ./mole.yaml by default)\n' "" ""
+printf '\n  %s%smole%s %sinstalled successfully%s\n' \
+	"$C_BOLD" "$C_MAGENTA" "$C_RESET" "$C_GREEN" "$C_RESET"
+printf '  %s\n' "$C_DIM─────────────────────────────────────────────────$C_RESET"
+printf '  %s%s%s%s\n' "$C_DIM" "binary     " "$C_RESET" "$DEST"
+printf '  %s%s%s%s   (interactive, run once per machine)\n' "$C_DIM" "configure  " "$C_RESET" "${C_GREEN}mole init${C_RESET}"
+printf '  %s%s%s%s      (uses ./mole.yaml by default)\n' "$C_DIM" "start      " "$C_RESET" "${C_GREEN}mole up${C_RESET}"
