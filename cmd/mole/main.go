@@ -65,6 +65,8 @@ func main() {
 		os.Exit(runClip(args))
 	case "ports":
 		os.Exit(runPorts(args))
+	case "config":
+		os.Exit(runConfig(args))
 		color := cliColor(os.Stdout)
 		fmt.Printf("%s %s\n", cBold(cMagenta("mole", color), color), cDim("v"+version, color))
 	case "help", "-h", "--help":
@@ -93,8 +95,8 @@ func printUsage() {
 		{"logs", "Show the background daemon log (colourised; -f to follow)"},
 		{"update", "Update mole in place to the latest release"},
 		{"restart", "Stop and re-launch a backgrounded mole using the same config"},
-		{"clip", "Share clipboard images over a WireGuard link (see `mole clip -h`)"},
 		{"ports", "Manage the auto-discover port list (add/remove/list)"},
+		{"config", "Open the active mole.yaml in $VISUAL / $EDITOR (see `mole config -h`)"},
 		{"version", "Print version and exit"},
 	}
 	for _, c := range commands {
