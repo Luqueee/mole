@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -275,5 +276,203 @@ func TestStats_UptimeAdvances(t *testing.T) {
 		// If both are the same string and it's not 0s, the clock isn't advancing.
 		// This is just a heuristic — we mainly want to ensure no panic.
 		t.Logf("uptime did not change in 1.1s: first=%q second=%q", first, second)
+	}
+}
+
+// fakePortCtl is a PortController backed by a map + sync.Mutex.
+// It also exposes an excluded set so we can test the 409 path.
+type fakePortCtl struct {
+	mu       sync.Mutex
+	active   map[int]bool
+	excluded map[int]bool
+	failNext error // returned by Add/Remove on the next call
+}
+
+func newFakePortCtl() *fakePortCtl {
+	return &fakePortCtl{active: map[int]bool{}, excluded: map[int]bool{}}
+}
+
+func (f *fakePortCtl) AddDiscover(p int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failNext != nil {
+		err := f.failNext
+		f.failNext = nil
+		return err
+	}
+	if f.excluded[p] {
+		return fmt.Errorf("port %d is in exclude_ports", p)
+	}
+	if f.active[p] {
+		return fmt.Errorf("port %d is already forwarded", p)
+	}
+	f.active[p] = true
+	return nil
+}
+
+func (f *fakePortCtl) RemoveDiscover(p int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failNext != nil {
+		err := f.failNext
+		f.failNext = nil
+		return err
+	}
+	delete(f.active, p)
+	return nil
+}
+
+func TestServer_PortAdd_HappyPath(t *testing.T) {
+	ctl := newFakePortCtl()
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{"port":3330}`)
+	resp, err := http.Post(ts.URL+"/ports/discover", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", resp.StatusCode)
+	}
+	ctl.mu.Lock()
+	defer ctl.mu.Unlock()
+	if !ctl.active[3330] {
+		t.Error("controller was not asked to add 3330")
+	}
+}
+
+func TestServer_PortAdd_RejectsExcluded(t *testing.T) {
+	ctl := newFakePortCtl()
+	ctl.excluded[22] = true
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/ports/discover", "application/json", strings.NewReader(`{"port":22}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "exclude_ports") {
+		t.Errorf("body = %q, want it to mention exclude_ports", body)
+	}
+}
+
+func TestServer_PortAdd_RejectsDuplicate(t *testing.T) {
+	ctl := newFakePortCtl()
+	ctl.active[3330] = true
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/ports/discover", "application/json", strings.NewReader(`{"port":3330}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestServer_PortAdd_ValidatesPort(t *testing.T) {
+	ctl := newFakePortCtl()
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	for _, p := range []string{`{"port":0}`, `{"port":70000}`, `{"port":-1}`, `not json`} {
+		resp, err := http.Post(ts.URL+"/ports/discover", "application/json", strings.NewReader(p))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", p, resp.StatusCode)
+		}
+	}
+}
+
+func TestServer_PortDelete_HappyPath(t *testing.T) {
+	ctl := newFakePortCtl()
+	ctl.active[3330] = true
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/ports/discover/3330", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	ctl.mu.Lock()
+	defer ctl.mu.Unlock()
+	if ctl.active[3330] {
+		t.Error("controller still has 3330 after delete")
+	}
+}
+
+func TestServer_PortDelete_Idempotent(t *testing.T) {
+	ctl := newFakePortCtl() // empty
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/ports/discover/9999", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("delete of missing port: status = %d, want 200 (idempotent)", resp.StatusCode)
+	}
+}
+
+func TestServer_PortDelete_ValidatesPort(t *testing.T) {
+	ctl := newFakePortCtl()
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	for _, p := range []string{"abc", "-1", "0", "70000"} {
+		req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/ports/discover/"+p, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("path %q: status = %d, want 400", p, resp.StatusCode)
+		}
+	}
+}
+
+func TestServer_PortEndpoints_UnregisteredWithoutController(t *testing.T) {
+	// If WithPortController was never called, the endpoints must
+	// not be served. This protects against accidentally exposing
+	// the routes on a forwarder that doesn't support live mutation.
+	srv := New(NewStats(), nil) // no WithPortController
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/ports/discover", "application/json", strings.NewReader(`{"port":3330}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("POST without controller: status = %d, want 404", resp.StatusCode)
 	}
 }

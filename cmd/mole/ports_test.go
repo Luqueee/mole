@@ -1,9 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Luqueee/mole/internal/config"
@@ -288,4 +293,147 @@ func equalInts(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// --- live path tests ---
+
+// mockAdminServer is a tiny admin API stand-in for testing the
+// live-add path. It implements /health (200), POST /ports/discover
+// (201), and DELETE /ports/discover/{port} (200), and tracks the
+// port set in memory.
+type mockAdminServer struct {
+	mu     sync.Mutex
+	active map[int]bool
+}
+
+func newMockAdmin(t *testing.T) *httptest.Server {
+	t.Helper()
+	m := &mockAdminServer{active: map[int]bool{}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("POST /ports/discover", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Port int }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", 400)
+			return
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.active[req.Port] {
+			http.Error(w, "already", 409)
+			return
+		}
+		m.active[req.Port] = true
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("DELETE /ports/discover/", func(w http.ResponseWriter, r *http.Request) {
+		var p int
+		fmt.Sscanf(r.URL.Path, "/ports/discover/%d", &p)
+		m.mu.Lock()
+		delete(m.active, p)
+		m.mu.Unlock()
+		w.WriteHeader(200)
+	})
+	return httptest.NewServer(mux)
+}
+
+func TestPortsAdd_LiveNotifiesAdmin(t *testing.T) {
+	admin := newMockAdmin(t)
+	defer admin.Close()
+
+	dir := t.TempDir()
+	chdir(t, dir)
+	addr := strings.TrimPrefix(admin.URL, "http://")
+	writeConfig(t, dir, "remote: devlabs\ndiscover_ports: [3000]\nadmin_addr: "+addr+"\n")
+
+	var code int
+	out := captureStdout(t, func() {
+		code = runPorts([]string{"add", "4440"})
+	})
+	if code != 0 {
+		t.Fatalf("add returned %d, want 0", code)
+	}
+	if !strings.Contains(out, "live:") {
+		t.Errorf("expected live message in output, got:\n%s", out)
+	}
+	cfg, _ := config.Load(filepath.Join(dir, "mole.yaml"))
+	if !equalInts(cfg.DiscoverPorts, []int{3000, 4440}) {
+		t.Errorf("DiscoverPorts = %v, want [3000 4440]", cfg.DiscoverPorts)
+	}
+}
+
+func TestPortsAdd_AdminDownFallsBackToYAML(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	writeConfig(t, dir, "remote: devlabs\ndiscover_ports: [3000]\nadmin_addr: 127.0.0.1:1\n")
+
+	var code int
+	out := captureStdout(t, func() {
+		code = runPorts([]string{"add", "4440"})
+	})
+	if code != 0 {
+		t.Errorf("add with admin down: code = %d, want 0", code)
+	}
+	if !strings.Contains(out, "not running") {
+		t.Errorf("expected 'not running' note, got:\n%s", out)
+	}
+	cfg, _ := config.Load(filepath.Join(dir, "mole.yaml"))
+	if !equalInts(cfg.DiscoverPorts, []int{3000, 4440}) {
+		t.Errorf("YAML should still be updated; got %v", cfg.DiscoverPorts)
+	}
+}
+
+func TestPortsAdd_NoAdminAddr_OnlyYAML(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	writeConfig(t, dir, "remote: devlabs\ndiscover_ports: [3000]\n") // no admin_addr
+
+	var code int
+	out := captureStdout(t, func() {
+		code = runPorts([]string{"add", "4440"})
+	})
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if strings.Contains(out, "live:") || strings.Contains(out, "not running") {
+		t.Errorf("expected no live messaging; got:\n%s", out)
+	}
+}
+
+func TestPortsRemove_LiveNotifiesAdmin(t *testing.T) {
+	admin := newMockAdmin(t)
+	defer admin.Close()
+
+	dir := t.TempDir()
+	chdir(t, dir)
+	addr := strings.TrimPrefix(admin.URL, "http://")
+	writeConfig(t, dir, "remote: devlabs\ndiscover_ports: [3000, 4440]\nadmin_addr: "+addr+"\n")
+
+	var code int
+	out := captureStdout(t, func() {
+		code = runPorts([]string{"remove", "3000"})
+	})
+	if code != 0 {
+		t.Errorf("remove returned %d, want 0", code)
+	}
+	if !strings.Contains(out, "live:") {
+		t.Errorf("expected live message; got:\n%s", out)
+	}
+}
+
+func TestDaemonLive_DeadAddr(t *testing.T) {
+	if daemonLive("127.0.0.1:1") {
+		t.Error("daemonLive on a closed port should return false")
+	}
+}
+
+func TestDaemonLive_LiveAddr(t *testing.T) {
+	admin := newMockAdmin(t)
+	defer admin.Close()
+	addr := strings.TrimPrefix(admin.URL, "http://")
+	if !daemonLive(addr) {
+		t.Errorf("daemonLive(%q) = false, want true (admin is up)", addr)
+	}
 }

@@ -12,22 +12,25 @@
 //	mole ports remove <port>  remove a port from discover_ports:
 //	mole ports list           print the current discover_ports:
 //
-// The changes are persisted to disk but do NOT affect a running
-// `mole up` daemon. Restart mole to pick them up — that's the
-// honest contract: live-update would require a coordination
-// protocol the SSH-tunnel side doesn't speak, and silently
-// rewriting the YAML while mole is reading it is a recipe for
-// races.
+// The changes are persisted to disk AND, if `mole up` is running,
+// are pushed live to its admin API so the change applies without
+// a restart. If the daemon is not running, the YAML is still
+// updated; the user will see a "restart mole up" hint and that's
+// it. Idempotent throughout: re-adding an already-present port
+// is a no-op whether the daemon is up or down.
 package main
 
 import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
-
+	"strings"
+	"time"
 	"github.com/Luqueee/mole/internal/config"
 )
 
@@ -124,9 +127,14 @@ Flags:
 	}
 
 	// Idempotent: already present → exit 0 without touching the file.
+	// The live-add path below is attempted regardless so even an
+	// "already present" port can be re-applied to a running daemon
+	// (e.g. after `mole up` was restarted and lost the runtime
+	// listener).
 	for _, p := range cfg.DiscoverPorts {
 		if p == port {
-			fmt.Printf("%d is already in discover_ports: (no change)\n", port)
+			fmt.Printf("%d is already in discover_ports:\n", port)
+			tryLiveAdd(cfg, port)
 			return 0
 		}
 	}
@@ -139,7 +147,81 @@ Flags:
 		return 1
 	}
 	fmt.Printf("added %d to discover_ports: in %s\n", port, resolved)
+	tryLiveAdd(cfg, port)
 	return 0
+}
+
+// tryLiveAdd probes the admin API and, if mole up is alive, POSTs
+// the port to /ports/discover so the running daemon picks it up
+// without a restart. On any failure (daemon down, network error,
+// admin_addr unset) we just print a note and return 0 — the YAML
+// was the source of truth and is already saved.
+func tryLiveAdd(cfg *config.Config, port int) {
+	if cfg.AdminAddr == "" {
+		return
+	}
+	if !daemonLive(cfg.AdminAddr) {
+		fmt.Printf("note: mole up not running at %s; restart it to apply the new port\n", cfg.AdminAddr)
+		return
+	}
+	if err := adminPostPort(cfg.AdminAddr, port); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: live add failed (%v); the YAML is updated, restart mole up to apply\n", err)
+		return
+	}
+	fmt.Printf("live: mole up is forwarding %d now (no restart needed)\n", port)
+}
+
+// daemonLive returns true iff the admin API at addr responds to
+// GET /health with 200 OK within a short timeout. We use a tight
+// timeout because this is a hot path on every `mole ports` call —
+// if the user is on a slow VPN we'd rather skip the live path
+// than hang the command.
+func daemonLive(addr string) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get("http://" + addr + "/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
+// adminPostPort POSTs {"port": N} to the admin API. Returns nil
+// on 201 Created; non-nil on any other status or transport error.
+func adminPostPort(addr string, port int) error {
+	body := fmt.Sprintf(`{"port":%d}`, port)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post("http://"+addr+"/ports/discover", "application/json", strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusCreated {
+		return nil
+	}
+	// Read a bit of the body for a useful error message.
+	preview, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+	return fmt.Errorf("admin %s: %s", resp.Status, strings.TrimSpace(string(preview)))
+}
+
+// adminDeletePort DELETEs /ports/discover/{port} on the admin API.
+func adminDeletePort(addr string, port int) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	u := fmt.Sprintf("http://%s/ports/discover/%d", addr, port)
+	req, err := http.NewRequest(http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	preview, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+	return fmt.Errorf("admin %s: %s", resp.Status, strings.TrimSpace(string(preview)))
 }
 
 // runPortsRemove drops a port from discover_ports. Idempotent:
@@ -200,7 +282,26 @@ Flags:
 		return 1
 	}
 	fmt.Printf("removed %d from discover_ports: in %s\n", port, resolved)
+	tryLiveRemove(cfg, port)
 	return 0
+}
+
+// tryLiveRemove is the remove-side counterpart of tryLiveAdd. As
+// with add, the YAML is the source of truth; the live call is
+// best-effort and failure is non-fatal.
+func tryLiveRemove(cfg *config.Config, port int) {
+	if cfg.AdminAddr == "" {
+		return
+	}
+	if !daemonLive(cfg.AdminAddr) {
+		fmt.Printf("note: mole up not running at %s; no live action needed\n", cfg.AdminAddr)
+		return
+	}
+	if err := adminDeletePort(cfg.AdminAddr, port); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: live remove failed (%v); the YAML is updated, restart mole up to apply\n", err)
+		return
+	}
+	fmt.Printf("live: mole up stopped forwarding %d now (no restart needed)\n", port)
 }
 
 // runPortsList prints the current discover_ports list, one per

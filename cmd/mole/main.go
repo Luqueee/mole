@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -212,6 +213,15 @@ Either -remote or a config file with 'remote:' is required.`)
 	// Watch SSH connection and auto-reconnect.
 	go mgr.Watch(ctx, 10*time.Second)
 
+	// Build the exclude set up front so the forwarder can use it
+	// (the admin API's live-add path consults it via
+	// AddDiscover). If auto-discover is off we still need the map
+	// for symmetry — it's just empty.
+	exclude := make(map[int]bool, len(cfg.ExcludePorts))
+	for _, p := range cfg.ExcludePorts {
+		exclude[p] = true
+	}
+
 	// The forwarder owns the per-port listeners and can add new ones at
 	// runtime, which is what makes periodic auto-discovery work.
 	fwd := &forwarder{
@@ -221,6 +231,7 @@ Either -remote or a config file with 'remote:' is required.`)
 		mgr:         mgr,
 		remoteLabel: cfg.Remote,
 		log:         log,
+		exclude:     exclude,
 		hooks: proxy.Hooks{
 			OnConnect:    stats.OnConnect,
 			OnDisconnect: stats.OnDisconnect,
@@ -229,36 +240,32 @@ Either -remote or a config file with 'remote:' is required.`)
 	}
 	defer fwd.closeAll()
 
-	// Forward any explicitly-configured ports up front. These are pinned:
-	// auto-discovery's pruning never closes them, even if the remote
-	// service is momentarily down.
-	for _, p := range cfg.Ports {
-		fwd.pinned[p] = true
-		fwd.ensure(p)
-	}
+// Forward any explicitly-configured ports up front. These are pinned:
+// auto-discovery's pruning never closes them, even if the remote
+// service is momentarily down.
+for _, p := range cfg.Ports {
+	fwd.pinned[p] = true
+	fwd.ensure(p)
+}
 
-	if cfg.AutoDiscover {
-		exclude := make(map[int]bool, len(cfg.ExcludePorts))
-		for _, p := range cfg.ExcludePorts {
-			exclude[p] = true
-		}
-		// Initial sweep, then keep re-discovering so dev servers that
-		// come up after launch are forwarded automatically — no need to
-		// restart mole when you start your dev server.
-		discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
-		go func() {
-			t := time.NewTicker(15 * time.Second)
-			defer t.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
-				}
+if cfg.AutoDiscover {
+	// Initial sweep, then keep re-discovering so dev servers that
+	// come up after launch are forwarded automatically — no need to
+	// restart mole when you start your dev server.
+	discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
 			}
-		}()
-	}
+		}
+	}()
+}
 
 	// Without auto-discover, an empty port set is a usage error. With
 	// it, an empty set just means "nothing up yet" — keep watching.
@@ -267,29 +274,30 @@ Either -remote or a config file with 'remote:' is required.`)
 		return 1
 	}
 	if len(fwd.ports()) == 0 {
-		log.Info("no dev ports up on the remote yet — watching; start a server there and mole will forward it", "recheck", "15s")
-	}
+}
 
-	// Admin HTTP API.
-	var adminSrv *http.Server
-	if cfg.AdminAddr != "" {
-		info := map[string]any{
-			"remote":        cfg.Remote,
-			"auto_discover": cfg.AutoDiscover,
-		}
-		srv := admin.New(stats, info).WithPorts(fwd.ports)
-		adminSrv = &http.Server{
-			Addr:              cfg.AdminAddr,
-			Handler:           srv.Handler(),
-			ReadHeaderTimeout: 5 * time.Second,
-		}
-		go func() {
-			log.Info("admin listening", "addr", cfg.AdminAddr)
-			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Warn("admin server stopped", "err", err)
-			}
-		}()
+// Admin HTTP API.
+var adminSrv *http.Server
+if cfg.AdminAddr != "" {
+	info := map[string]any{
+		"remote":        cfg.Remote,
+		"auto_discover": cfg.AutoDiscover,
 	}
+	srv := admin.New(stats, info).
+		WithPorts(fwd.ports).
+		WithPortController(fwd)
+	adminSrv = &http.Server{
+		Addr:              cfg.AdminAddr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		log.Info("admin listening", "addr", cfg.AdminAddr)
+		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Warn("admin server stopped", "err", err)
+		}
+	}()
+}
 
 	log.Info("mole up. Press Ctrl+C to stop.")
 	sig := make(chan os.Signal, 1)
@@ -320,6 +328,13 @@ type forwarder struct {
 	active map[int]net.Listener
 	failed map[int]bool // ports whose bind failed (warned once already)
 	pinned map[int]bool // explicitly-configured ports; never auto-pruned
+
+	// exclude is consulted by AddDiscover (the live-add path) so
+	// the admin API returns 409 Conflict for excluded ports
+	// instead of starting a listener that auto-discover would
+	// immediately prune. Set once at construction; the same set
+	// of excluded ports is enforced everywhere.
+	exclude map[int]bool
 }
 
 // ensure starts forwarding port p if it isn't already. Binding failures
@@ -342,9 +357,8 @@ func (f *forwarder) ensure(p int) {
 		return
 	}
 	delete(f.failed, p)
-	f.active[p] = ln
-	remoteAddr := fmt.Sprintf("127.0.0.1:%d", p)
-	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", fmt.Sprintf("%s:%d", f.remoteLabel, p))
+	remoteAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(p))
+	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(p)))
 	go func() {
 		if err := proxy.Serve(ln, f.mgr, remoteAddr, f.hooks, f.log); err != nil {
 			f.log.Warn("proxy terminated", "port", p, "err", err)
@@ -380,8 +394,7 @@ func (f *forwarder) retain(keep map[int]bool) {
 		}
 		_ = ln.Close()
 		delete(f.active, p)
-		delete(f.failed, p)
-		f.log.Info("unforwarding", "port", p, "remote", fmt.Sprintf("%s:%d", f.remoteLabel, p))
+		f.log.Info("unforwarding", "port", p, "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(p)))
 	}
 }
 
@@ -394,6 +407,61 @@ func (f *forwarder) closeAll() {
 	}
 }
 
+
+// AddDiscover starts forwarding port as if it had been on the
+// discover_ports: list at startup. Thread-safe; idempotent.
+// Returns a non-nil error if the port is in the excluded set or
+// the local bind fails — the admin API maps both to HTTP 409.
+//
+// Note: the underlying ensure() does not know that the port was
+// added "live", so a subsequent retain() (auto-discover pruning)
+// may close the listener if the remote isn't actually serving on
+// that port. That's correct behaviour: the user added the port,
+// but the remote service isn't there. They'll see "unforwarding"
+// in the log and can either start the service or remove the
+// port. The pinned set, not this method, is the right tool for
+// "always forward regardless of what the remote is doing".
+func (f *forwarder) AddDiscover(port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("port out of range: %d", port)
+	}
+	f.mu.Lock()
+	if f.exclude[port] {
+		f.mu.Unlock()
+		return fmt.Errorf("port %d is in exclude_ports", port)
+	}
+	if _, ok := f.active[port]; ok {
+		f.mu.Unlock()
+		return fmt.Errorf("port %d is already forwarded", port)
+	}
+	f.mu.Unlock()
+	// ensure() takes the lock again; that's safe (sync.Mutex is
+	// not re-entrant, but Lock+Unlock here guarantees no
+	// deadlock because ensure() goes Lock→Unlock atomically).
+	f.ensure(port)
+	return nil
+}
+
+// RemoveDiscover stops forwarding port if it was started via
+// AddDiscover (or, equivalently, was in the on-disk discover list
+// at startup). Thread-safe; idempotent — a port that isn't active
+// is a no-op, not an error.
+func (f *forwarder) RemoveDiscover(port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("port out of range: %d", port)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ln, ok := f.active[port]
+	if !ok {
+		return nil // not forwarded; nothing to do
+	}
+	_ = ln.Close()
+	delete(f.active, port)
+	delete(f.failed, port)
+	f.log.Info("unforwarded (live remove)", "port", port, "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(port)))
+	return nil
+}
 // discoverInto reconciles the forwarded port set with what's live on the
 // remote. It prefers enumerating the remote's actual TCP listeners (so
 // any port is found); when that enumeration is authoritative it also
