@@ -51,6 +51,20 @@ type Config struct {
 	// InsecureIgnoreHostKey behaviour). Off by default; only enable on
 	// trusted networks for throwaway hosts. Equivalent to `--insecure`.
 	Insecure bool `yaml:"insecure"`
+
+	// ClipURL is the HTTP endpoint of the clip server on the Mac
+	// (e.g. http://10.0.0.1:7777), as reachable from the LXC over
+	// WireGuard. Read by `mole clip pull`.
+	ClipURL string `yaml:"clip_url"`
+
+	// ClipListen is the address the clip server binds on the Mac.
+	// Default 0.0.0.0:7777; the WireGuard perimeter is the security
+	// boundary, so no auth is enforced. Read by `mole clip serve`.
+	ClipListen string `yaml:"clip_listen"`
+
+	// ClipIntervalMs controls the clipboard poll cadence on the Mac.
+	// 0 falls back to the runClipServe flag default (500ms).
+	ClipIntervalMs int `yaml:"clip_interval_ms"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -71,8 +85,9 @@ func Default() *Config {
 			111, // rpcbind
 			631, // CUPS / printing
 		},
-		LogLevel: "info",
-		SSHPort:  22,
+		LogLevel:   "info",
+		SSHPort:    22,
+		ClipListen: "0.0.0.0:7777",
 	}
 }
 

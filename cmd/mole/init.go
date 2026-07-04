@@ -37,6 +37,10 @@ type initAnswers struct {
 	ConfigPath   string // where to write the YAML
 	PrintOnly    bool   // true → write to stdout instead of a file
 	Global       bool   // true → ~/.config/mole/config.yaml
+	ClipEnabled  bool   // true → also write clip_* keys for `mole clip`
+	ClipURL      string // URL the LXC pulls from; e.g. http://10.0.0.1:7777
+	ClipListen   string // address the Mac serves on; defaults to 0.0.0.0:7777
+	ClipIntervalMs int  // clipboard poll cadence on the Mac
 }
 
 func runInit(args []string) int {
@@ -48,11 +52,15 @@ func runInit(args []string) int {
 		cfgPath   = fs.String("config", "", "where to write the YAML (default: ./mole.yaml)")
 		global    = fs.Bool("global", false, "write to the user-global config (~/.config/mole/config.yaml)")
 		printOnly = fs.Bool("print", false, "print the generated YAML to stdout instead of writing a file")
+		up        = fs.Bool("up", false, "start mole (mole up) immediately after writing the config")
 		noPrompt  = fs.Bool("no-prompt", false, "don't ask questions; require all flags / env vars")
 		yes       = fs.Bool("yes", false, "accept defaults for any unanswered questions")
 		test      = fs.Bool("test", false, "after writing the config, test the SSH connection")
 		force     = fs.Bool("force", false, "overwrite the config file if it already exists")
-		up        = fs.Bool("up", false, "start mole (mole up) immediately after writing the config")
+		clip      = fs.Bool("clip", false, "configure clip_* keys so `mole clip` works (skip the interactive prompt)")
+		clipURL   = fs.String("clip-url", "", "URL the LXC pulls from (only used with -clip); e.g. http://10.0.0.1:7777")
+		clipListen = fs.String("clip-listen", "0.0.0.0:7777", "address the Mac serves on (only used with -clip)")
+		clipInterval = fs.Int("clip-interval-ms", 500, "clipboard poll cadence in ms (only used with -clip)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `Usage: mole init [flags]
@@ -95,6 +103,10 @@ Environment (read when the corresponding flag is empty):
 		Config:    *cfgPath,
 		Global:    *global,
 		PrintOnly: *printOnly,
+		ClipEnabled: *clip,
+		ClipURL:   *clipURL,
+		ClipListen: *clipListen,
+		ClipIntervalMs: *clipInterval,
 	}, initOptions{
 		Interactive: interactive,
 		Yes:         *yes,
@@ -163,10 +175,6 @@ Environment (read when the corresponding flag is empty):
 	return 0
 }
 
-// ---------------------------------------------------------------------------
-// Answer gathering
-// ---------------------------------------------------------------------------
-
 type initInputs struct {
 	Remote    string
 	PortsCSV  string
@@ -174,6 +182,10 @@ type initInputs struct {
 	Config    string
 	Global    bool
 	PrintOnly bool
+	ClipEnabled bool
+	ClipURL string
+	ClipListen string
+	ClipIntervalMs int
 }
 
 type initOptions struct {
@@ -223,6 +235,17 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 			in.Global = b
 		}
 	}
+	if !in.ClipEnabled {
+		if b, ok := envBool("MOLE_CLIP"); ok {
+			in.ClipEnabled = b
+		}
+	}
+	if in.ClipURL == "" {
+		in.ClipURL = envDefault("MOLE_CLIP_URL", "")
+	}
+	if in.ClipListen == "" {
+		in.ClipListen = envDefault("MOLE_CLIP_LISTEN", "0.0.0.0:7777")
+	}
 
 	ans := &initAnswers{
 		Remote:       strings.TrimSpace(in.Remote),
@@ -230,6 +253,10 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 		PrintOnly:    in.PrintOnly,
 		Global:       in.Global,
 		ConfigPath:   strings.TrimSpace(in.Config),
+		ClipEnabled:  in.ClipEnabled,
+		ClipURL:      strings.TrimSpace(in.ClipURL),
+		ClipListen:   strings.TrimSpace(in.ClipListen),
+		ClipIntervalMs: in.ClipIntervalMs,
 	}
 	ans.Ports = config.ParsePorts(in.PortsCSV)
 
@@ -314,7 +341,33 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 	default:
 		ans.AutoDiscover = false
 		ans.Ports = nil
+	// Clipboard sharing: ask once whether to wire it up. Default is
+	// "no" so an unsuspecting user doesn't open a port they don't
+	// need. We only ask in interactive mode; -clip / -clip-url on
+	// the command line skip the question entirely.
+	if !ans.ClipEnabled && in.ClipURL == "" {
+		raw := prompt(opt.In, opt.Out, "Sync clipboard screenshots over WireGuard? [y/N]", "n")
+		ans.ClipEnabled = strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "y")
+		if ans.ClipEnabled {
+			// Ask for the URL the LXC will pull from. We default to
+			// 10.0.0.1:7777 (a common WireGuard /24) but the user
+			// almost certainly needs to override this with their
+			// actual wg IP.
+			urlRaw := prompt(opt.In, opt.Out, "Mac WireGuard IP the LXC will pull from (e.g. 10.0.0.1:7777)", "10.0.0.1:7777")
+			if !strings.HasPrefix(urlRaw, "http://") && !strings.HasPrefix(urlRaw, "https://") {
+				urlRaw = "http://" + urlRaw
+			}
+			ans.ClipURL = urlRaw
+			ans.ClipListen = prompt(opt.In, opt.Out, "Address mole clip serve binds on the Mac", "0.0.0.0:7777")
+			intervalRaw := prompt(opt.In, opt.Out, "Clipboard poll interval (ms)", "500")
+			if n, perr := strconv.Atoi(strings.TrimSpace(intervalRaw)); perr == nil && n > 0 {
+				ans.ClipIntervalMs = n
+			} else {
+				ans.ClipIntervalMs = 500
+			}
+		}
 	}
+}
 
 	// Save location. If the user already pinned a path via -config /
 	// -global / env var, respect that and don't ask.
@@ -379,6 +432,18 @@ func renderYAML(ans *initAnswers) string {
 			b.WriteString(strconv.Itoa(p))
 			b.WriteString("\n")
 		}
+	}
+	if ans.ClipEnabled {
+		b.WriteString("\n# Clipboard sharing over a WireGuard link. `mole clip serve`\n")
+		b.WriteString("# on the Mac binds clip_listen; `mole clip pull` on the remote\n")
+		b.WriteString("# reaches clip_url. Both commands auto-read these keys.\n")
+		b.WriteString("clip_url: ")
+		b.WriteString(ans.ClipURL)
+		b.WriteString("\nclip_listen: ")
+		b.WriteString(ans.ClipListen)
+		b.WriteString("\nclip_interval_ms: ")
+		b.WriteString(strconv.Itoa(ans.ClipIntervalMs))
+		b.WriteString("\n")
 	}
 	b.WriteString("\n# Admin HTTP API (set to \"\" to disable).\n")
 	b.WriteString("admin_addr: 127.0.0.1:9999\n\n")
