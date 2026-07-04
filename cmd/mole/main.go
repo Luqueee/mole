@@ -57,10 +57,10 @@ func main() {
 		os.Exit(runStatus(args))
 	case "logs":
 		os.Exit(runLogs(args))
-	case "init":
-		os.Exit(runInit(args))
 	case "update":
 		os.Exit(runUpdate(args))
+	case "restart":
+		os.Exit(runRestart(args))
 	case "clip":
 		os.Exit(runClip(args))
 	case "ports":
@@ -91,8 +91,8 @@ func printUsage() {
 		{"down", "Stop a backgrounded mole (started with 'up -d')"},
 		{"status", "Query the local admin API"},
 		{"logs", "Show the background daemon log (colourised; -f to follow)"},
-		{"init", "Generate a mole.yaml interactively (or via flags)"},
 		{"update", "Update mole in place to the latest release"},
+		{"restart", "Stop and re-launch a backgrounded mole using the same config"},
 		{"clip", "Share clipboard images over a WireGuard link (see `mole clip -h`)"},
 		{"ports", "Manage the auto-discover port list (add/remove/list)"},
 		{"version", "Print version and exit"},

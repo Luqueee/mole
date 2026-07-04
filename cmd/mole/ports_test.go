@@ -386,13 +386,18 @@ func TestPortsAdd_AdminDownFallsBackToYAML(t *testing.T) {
 }
 
 func TestPortsAdd_NoAdminAddr_OnlyYAML(t *testing.T) {
+	// Use an explicit -config so the test is hermetic. Without it,
+	// config.Find() picks up the user-global config (which may have
+	// admin_addr set), and the live path could fire spuriously.
 	dir := t.TempDir()
-	chdir(t, dir)
-	writeConfig(t, dir, "remote: devlabs\ndiscover_ports: [3000]\n") // no admin_addr
+	cfgPath := filepath.Join(dir, "mole.yaml")
+	if err := os.WriteFile(cfgPath, []byte("remote: devlabs\ndiscover_ports: [3000]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var code int
 	out := captureStdout(t, func() {
-		code = runPorts([]string{"add", "4440"})
+		code = runPorts([]string{"add", "-config", cfgPath, "4440"})
 	})
 	if code != 0 {
 		t.Errorf("code = %d, want 0", code)

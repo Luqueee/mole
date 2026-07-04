@@ -71,7 +71,7 @@ type Config struct {
 // Default returns a Config populated with sensible defaults.
 func Default() *Config {
 	return &Config{
-		AdminAddr: "127.0.0.1:9999",
+		AdminAddr: "",
 		DiscoverPorts: []int{
 			3000, 3001, 3002, 3003, 3004, 3005,
 			4200, 5173, 5174, 5327,

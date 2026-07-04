@@ -8,12 +8,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Luqueee/mole/internal/config"
 )
@@ -97,6 +99,87 @@ func runDown(_ []string) int {
 	_ = os.Remove(pidPath())
 	fmt.Printf("mole stopped (pid %d)\n", pid)
 	return 0
+}
+
+// runRestart stops a backgrounded mole (if any) and re-launches it
+// in the background using the same config the user was running
+// before. The flow is:
+//
+//  1. Load the active config (same resolution as `mole up`: explicit
+//     -config, then ./mole.yaml, then user-global).
+//  2. If there's no remote in the config, refuse — we don't know
+//     what to reconnect to. Tell the user to run `mole init` or
+//     `mole up -remote X` first.
+//  3. If a daemon is running, runDown-equivalent: signal the PID
+//     from the pidfile and wait for it to exit.
+//  4. daemonize with the same config + remote.
+//
+// This is the operation the user reaches for when they want
+// "the live ports I just added to take effect" without re-typing
+// -remote. It's intentionally a thin wrapper: a future change
+// (e.g. a config-reload endpoint) would obviate it.
+func runRestart(args []string) int {
+	fs := flag.NewFlagSet("restart", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to YAML config (default: ./mole.yaml, then user-global)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	// Load config to find the remote.
+	resolved := *configPath
+	if resolved == "" {
+		resolved = config.Find()
+	}
+	cfg, err := config.Load(resolved)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config:", err)
+		return 1
+	}
+	if cfg.Remote == "" {
+		fmt.Fprintln(os.Stderr, "no remote configured; run `mole init` or `mole up -remote <name>` first")
+		return 1
+	}
+
+	// Stop the running daemon if any. We use the same primitive as
+	// `mole down`: read pidfile, signal, remove. If no daemon is
+	// running, print a note and proceed to start one (so `mole
+	// restart` doubles as `mole up -d` when nothing is up yet).
+	if pid, ok := readPid(); ok {
+		if !processAlive(pid) {
+			fmt.Fprintf(os.Stderr, "stale pidfile (pid %d not running); cleaning up\n", pid)
+			_ = os.Remove(pidPath())
+		} else {
+			if err := terminate(pid); err != nil {
+				fmt.Fprintf(os.Stderr, "could not stop pid %d: %v\n", pid, err)
+				return 1
+			}
+			// Wait for the process to actually exit. SIGTERM gives
+			// it a moment; up to ~2s is plenty for a Go program
+			// tearing down SSH tunnels and HTTP listeners.
+			for i := 0; i < 20; i++ {
+				if !processAlive(pid) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if processAlive(pid) {
+				fmt.Fprintf(os.Stderr, "pid %d did not exit within 2s; refusing to start a second instance\n", pid)
+				return 1
+			}
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "note: no mole up running; starting one")
+	}
+
+	// Re-launch. Pass -config and -remote so the new daemon reads
+	// the same config file (which may have been edited by `mole
+	// ports add` etc.) and connects to the same target. daemonize
+	// handles -d internally; we don't pass it here.
+	upArgs := []string{"-remote", cfg.Remote}
+	if resolved != "" {
+		upArgs = append(upArgs, "-config", resolved)
+	}
+	return daemonize(upArgs)
 }
 
 func readPid() (int, bool) {

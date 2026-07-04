@@ -14,8 +14,8 @@ func TestDefault(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("Default() returned nil")
 	}
-	if cfg.AdminAddr != "127.0.0.1:9999" {
-		t.Errorf("AdminAddr = %q, want %q", cfg.AdminAddr, "127.0.0.1:9999")
+	if cfg.AdminAddr != "" {
+		t.Errorf("AdminAddr = %q, want empty (default is empty; user opts in via YAML)", cfg.AdminAddr)
 	}
 	if cfg.LogLevel != "info" {
 		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "info")
@@ -106,8 +106,10 @@ func TestLoad_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load of missing file should not error, got: %v", err)
 	}
-	// Should fall back to defaults.
-	if cfg.AdminAddr == "" {
+	// Should fall back to defaults. AdminAddr now defaults to "" by
+	// design (opt-in via YAML), so we use LogLevel — another field
+	// that is always populated by Default() — to verify defaults.
+	if cfg.LogLevel == "" {
 		t.Error("expected defaults to be populated when file is missing")
 	}
 }
