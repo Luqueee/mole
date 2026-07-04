@@ -62,7 +62,8 @@ func main() {
 		os.Exit(runUpdate(args))
 	case "clip":
 		os.Exit(runClip(args))
-	case "version", "-v", "--version":
+	case "ports":
+		os.Exit(runPorts(args))
 		color := cliColor(os.Stdout)
 		fmt.Printf("%s %s\n", cBold(cMagenta("mole", color), color), cDim("v"+version, color))
 	case "help", "-h", "--help":
@@ -80,7 +81,6 @@ func printUsage() {
 
 	fmt.Printf("\n%s\n\n", banner(version, color))
 
-	fmt.Printf("  %s\n", cBold("USAGE", color))
 	fmt.Printf("    %s\n", commandLine("<command>", color))
 	fmt.Println()
 
@@ -93,6 +93,7 @@ func printUsage() {
 		{"init", "Generate a mole.yaml interactively (or via flags)"},
 		{"update", "Update mole in place to the latest release"},
 		{"clip", "Share clipboard images over a WireGuard link (see `mole clip -h`)"},
+		{"ports", "Manage the auto-discover port list (add/remove/list)"},
 		{"version", "Print version and exit"},
 	}
 	for _, c := range commands {
