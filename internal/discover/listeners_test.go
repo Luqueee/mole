@@ -48,3 +48,44 @@ func TestParseListeners_Empty(t *testing.T) {
 		t.Errorf("parseListeners(empty) = %v, want nil", got)
 	}
 }
+
+// TestParseListeners_SS_Wildcard is the regression test for the bug where
+// ss's "*" dual-stack shorthand (printed for a service bound to :: with
+// v6only=0, e.g. `react-router dev --host` / Vite on 3330) was dropped
+// because loopbackReachable did not treat "*" as a wildcard. Port 3330's
+// ONLY appearance here is the "*" line, so if "*" were removed from the
+// accepted set (the bug) 3330 vanishes and this test reddens. It also
+// pins that a specific non-loopback IP (Tailscale 100.x) stays excluded.
+func TestParseListeners_SS_Wildcard(t *testing.T) {
+	// Real captured `ss -tlnH` output. `*:3330` is the dual-stack Vite /
+	// react-router server; `127.0.0.1:20241` a loopback service;
+	// `100.89.53.125:33562` a Tailscale-bound service (must be excluded).
+	out := `LISTEN 0      511                              *:3330        *:*
+LISTEN 0      4096                     127.0.0.1:20241      0.0.0.0:*
+LISTEN 0      4096                 100.89.53.125:33562      0.0.0.0:*`
+
+	got := parseListeners(out)
+	// 3330 accepted via the "*" wildcard, 20241 via loopback; 33562
+	// (specific Tailscale IP) excluded. Sorted ascending.
+	want := []int{3330, 20241}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseListeners = %v, want %v", got, want)
+	}
+	for _, p := range got {
+		if p == 33562 {
+			t.Errorf("parseListeners returned excluded non-loopback port 33562: %v", got)
+		}
+	}
+}
+
+// TestLoopbackReachable_Wildcard pins the helper contract directly: ss's
+// "*" shorthand is loopback-reachable, a specific LAN IP is not. Removing
+// "*" from the accepted set (the bug) reddens the first assertion.
+func TestLoopbackReachable_Wildcard(t *testing.T) {
+	if !loopbackReachable("*") {
+		t.Error(`loopbackReachable("*") = false, want true (ss dual-stack shorthand)`)
+	}
+	if loopbackReachable("192.168.1.60") {
+		t.Error(`loopbackReachable("192.168.1.60") = true, want false (specific LAN IP)`)
+	}
+}

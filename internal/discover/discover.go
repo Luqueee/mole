@@ -29,7 +29,7 @@ type Runner interface {
 
 // RemoteListeners enumerates TCP ports in LISTEN state on the remote
 // that are reachable through the tunnel — i.e. bound to loopback
-// (127.0.0.1, ::1) or all interfaces (0.0.0.0, ::). It runs `ss` and
+// (127.0.0.1, ::1) or all interfaces (0.0.0.0, ::, or ss's "*"). It runs
 // falls back to `netstat`.
 //
 // The bool return reports whether enumeration was authoritative: true if
@@ -103,11 +103,13 @@ func splitHostPort(s string) (host, port string, ok bool) {
 }
 
 // loopbackReachable reports whether a service bound to host is reachable
-// via the tunnel, which dials the remote's 127.0.0.1. Anything bound to
-// a specific non-loopback address (e.g. a Tailscale or LAN IP) is not.
+// via the tunnel, which dials the remote's 127.0.0.1. The unspecified
+// address — 0.0.0.0, ::, or the "*" shorthand ss prints for a dual-stack
+// bind — and loopback (127.0.0.0/8, ::1) qualify; a specific non-loopback
+// address (e.g. a Tailscale or LAN IP) does not.
 func loopbackReachable(host string) bool {
 	switch host {
-	case "0.0.0.0", "::", "127.0.0.1", "::1":
+	case "*", "0.0.0.0", "::", "127.0.0.1", "::1":
 		return true
 	}
 	return strings.HasPrefix(host, "127.")
