@@ -5,6 +5,7 @@ package clip
 import (
 	"context"
 	"log/slog"
+	"time"
 )
 
 // Watcher is a Darwin-only feature; on other platforms we expose the
