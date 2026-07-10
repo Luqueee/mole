@@ -67,6 +67,9 @@ func main() {
 		os.Exit(runPorts(args))
 	case "config":
 		os.Exit(runConfig(args))
+	case "init":
+		os.Exit(runInit(args))
+	case "version":
 		color := cliColor(os.Stdout)
 		fmt.Printf("%s %s\n", cBold(cMagenta("mole", color), color), cDim("v"+version, color))
 	case "help", "-h", "--help":
@@ -96,6 +99,7 @@ func printUsage() {
 		{"update", "Update mole in place to the latest release"},
 		{"restart", "Stop and re-launch a backgrounded mole using the same config"},
 		{"ports", "Manage the auto-discover port list (add/remove/list)"},
+		{"init", "Generate a mole.yaml (interactive; run once per machine)"},
 		{"config", "Open the active mole.yaml in $VISUAL / $EDITOR (see `mole config -h`)"},
 		{"version", "Print version and exit"},
 	}
