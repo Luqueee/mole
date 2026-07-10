@@ -61,48 +61,51 @@ done
 
 # ---------------------------------------------------------------------------
 # Candidate paths to remove
+#
+# POSIX sh has no arrays, so the candidate list lives in the positional
+# parameters ($@). The CLI has already been consumed by the parse loop
+# above ($# is 0 here), so overwriting $@ with `set --` is safe.
 # ---------------------------------------------------------------------------
 
-CANDIDATES=()
 if [ -n "$PREFIX" ]; then
-	CANDIDATES+=("$PREFIX/bin/mole")
+	set -- "$PREFIX/bin/mole"
 else
+	set --
 	# Honour INSTALL_DIR (file, not directory).
 	if [ -n "${INSTALL_DIR:-}" ]; then
-		CANDIDATES+=("$INSTALL_DIR")
+		set -- "$@" "$INSTALL_DIR"
 	fi
 	# Common install locations, root and user.
-	CANDIDATES+=("/usr/local/bin/mole" "/usr/bin/mole")
+	set -- "$@" "/usr/local/bin/mole" "/usr/bin/mole"
 	if [ -n "${HOME:-}" ]; then
-		CANDIDATES+=(
-			"$HOME/.local/bin/mole"
-			"$HOME/bin/mole"
-		)
+		set -- "$@" "$HOME/.local/bin/mole" "$HOME/bin/mole"
 	fi
 fi
 
-# De-dup while preserving order.
-declare -A seen=()
-UNIQUE=()
-for c in "${CANDIDATES[@]}"; do
-	[ -z "$c" ] && continue
-	if [ -z "${seen[$c]:-}" ]; then
-		seen[$c]=1
-		UNIQUE+=("$c")
-	fi
-done
-
 # ---------------------------------------------------------------------------
 # Remove
+#
+# `seen` is a newline-delimited set used to de-dup while preserving order
+# (INSTALL_DIR may repeat a default path). Install paths never contain
+# newlines, so newline framing is an unambiguous membership test.
 # ---------------------------------------------------------------------------
 
 REMOVED=0
-for path in "${UNIQUE[@]}"; do
+seen="
+"
+for path in "$@"; do
+	[ -z "$path" ] && continue
+	case "$seen" in
+	*"
+$path
+"*) continue ;;
+	esac
+	seen="$seen$path
+"
 	if [ -e "$path" ]; then
 		# Refuse to rm anything that doesn't look like our binary
 		# (name match is good enough; mole is a unique name).
-		base="$(basename "$path")"
-		if [ "$base" != "mole" ]; then
+		if [ "${path##*/}" != "mole" ]; then
 			echo "skip: $path (name does not match 'mole')" >&2
 			continue
 		fi
@@ -127,14 +130,14 @@ fi
 # ---------------------------------------------------------------------------
 
 if [ "$PURGE" = "true" ]; then
-	CONFIG_DIRS=()
+	set --
 	if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-		CONFIG_DIRS+=("$XDG_CONFIG_HOME/mole")
+		set -- "$@" "$XDG_CONFIG_HOME/mole"
 	fi
 	if [ -n "${HOME:-}" ]; then
-		CONFIG_DIRS+=("$HOME/.config/mole")
+		set -- "$@" "$HOME/.config/mole"
 	fi
-	for d in "${CONFIG_DIRS[@]}"; do
+	for d in "$@"; do
 		if [ -d "$d" ]; then
 			echo ">> purging $d"
 			rm -rf "$d"
