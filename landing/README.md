@@ -20,10 +20,10 @@ npm run preview  # serve dist/ locally
 
 ## Deploy
 
-The site is static — no Astro adaptor needed. Configs for both platforms are
-included; **Vercel** is the intended target.
+The site is static — no Astro adaptor needed. **Vercel** is the deploy target,
+configured by `vercel.json`.
 
-### Vercel (recommended)
+### Vercel
 
 1. Push the repo to GitHub.
 2. In Vercel: **Add New → Project**, import the repo.
@@ -31,14 +31,6 @@ included; **Vercel** is the intended target.
 4. Vercel auto-detects Astro via `vercel.json` — Build Command `npm run build`,
    Output Directory `dist`.
 5. Add your custom domain under **Settings → Domains**.
-
-### Netlify (alternative)
-
-1. Push the repo to GitHub.
-2. In Netlify: **Add new site → Import an existing project**.
-3. Set **Base directory** to `landing/`. `netlify.toml` handles the rest
-   (build command `npm run build`, publish directory `dist`).
-4. Add your custom domain under **Domain settings**.
 
 ## Customize
 
