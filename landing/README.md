@@ -1,7 +1,8 @@
 # mole — landing page
 
 Static landing page for [mole](https://github.com/Luqueee/mole), built with
-Astro + Tailwind v4 + shadcn/ui. Output is a fully static site in `dist/`.
+Astro + Tailwind v4 — no UI framework, no client-side JS runtime. Output is a
+fully static site in `dist/`.
 
 ## Develop
 

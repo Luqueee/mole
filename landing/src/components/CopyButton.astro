@@ -1,0 +1,45 @@
+---
+import Button from "@/components/Button.astro"
+import Icon from "@/components/Icon.astro"
+
+interface Props {
+  text: string
+}
+
+const { text } = Astro.props
+---
+
+<Button
+  type="button"
+  variant="ghost"
+  size="icon-sm"
+  class="group"
+  aria-label="Copy to clipboard"
+  data-copy={text}
+>
+  <Icon name="copy" class="group-data-[copied]:hidden" />
+  <Icon name="check" class="hidden group-data-[copied]:block" />
+</Button>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-copy]").forEach((button) => {
+    let timer: number | undefined
+
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? "")
+      } catch {
+        return // clipboard unavailable — silent fail
+      }
+
+      button.dataset.copied = ""
+      button.setAttribute("aria-label", "Copied")
+
+      clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        delete button.dataset.copied
+        button.setAttribute("aria-label", "Copy to clipboard")
+      }, 2000)
+    })
+  })
+</script>

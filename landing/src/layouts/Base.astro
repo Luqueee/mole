@@ -9,8 +9,7 @@ interface Props {
 
 const {
   title = "mole — SSH port forwarding, auto-discovered",
-  description =
-    "SSH port forwarding that auto-discovers your remote's listeners. One binary, one connection, zero port lists.",
+  description = "SSH port forwarding that auto-discovers your remote's listeners. One binary, one connection, zero port lists.",
 } = Astro.props
 ---
 
@@ -55,14 +54,16 @@ const {
                 "slide-in-from-bottom-4",
                 "duration-500",
                 "fill-mode-both"
-              );
-              obs.unobserve(e.target);
+              )
+              obs.unobserve(e.target)
             }
-          });
+          })
         },
         { threshold: 0.1, rootMargin: "0px 0px -50px 0px" }
-      );
-      document.querySelectorAll("[data-reveal]").forEach((el) => obs.observe(el));
+      )
+      document
+        .querySelectorAll("[data-reveal]")
+        .forEach((el) => obs.observe(el))
     </script>
   </body>
 </html>

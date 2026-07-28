@@ -1,13 +1,20 @@
 ---
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import Badge from "@/components/Badge.astro"
+import Button from "@/components/Button.astro"
 import TerminalBlock from "@/components/TerminalBlock.astro"
 
 const REPO = "https://github.com/Luqueee/mole"
 
 const lines = [
-  { prefix: "prompt" as const, content: "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh" },
-  { prefix: "ok" as const, content: "installed mole v0.1.0 → /usr/local/bin/mole" },
+  {
+    prefix: "prompt" as const,
+    content:
+      "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh",
+  },
+  {
+    prefix: "ok" as const,
+    content: "installed mole v0.1.0 → /usr/local/bin/mole",
+  },
   { prefix: "prompt" as const, content: "mole init" },
   { prefix: "ask" as const, content: "SSH remote: dev" },
   { prefix: "ok" as const, content: "wrote ~/.config/mole/config.yaml" },
@@ -21,7 +28,7 @@ const lines = [
 
 <section id="hero" class="scroll-mt-nav relative pt-32 pb-24 sm:pt-40 sm:pb-28">
   <div class="relative z-10 mx-auto max-w-5xl px-6 text-center">
-    <div class="mx-auto mb-6 w-fit animate-in fade-in zoom-in-95 duration-700">
+    <div class="mx-auto mb-6 w-fit animate-in duration-700 zoom-in-95 fade-in">
       <img
         src="/mole.webp"
         alt="mole mascot"
@@ -32,31 +39,56 @@ const lines = [
         draggable="false"
       />
     </div>
-    <Badge variant="outline" className="animate-in fade-in slide-in-from-top-4 duration-500 gap-2">
-      <span class="relative flex size-2"><span class="absolute inset-0 animate-ping rounded-full bg-primary/60"></span><span class="relative inline-flex size-2 rounded-full bg-primary"></span></span>
+    <Badge class="animate-in gap-2 duration-500 fade-in slide-in-from-top-4">
+      <span class="relative flex size-2"
+        ><span class="absolute inset-0 animate-ping rounded-full bg-primary/60"
+        ></span><span
+          class="relative inline-flex size-2 rounded-full bg-primary"
+        ></span></span
+      >
       single binary · MIT · v0.1.0
     </Badge>
 
-    <h1 class="mt-6 animate-in fade-in slide-in-from-top-6 duration-700 delay-100 font-mono text-5xl font-bold text-primary text-glow sm:text-7xl">mole</h1>
+    <h1
+      class="text-glow mt-6 animate-in font-mono text-5xl font-bold text-primary delay-100 duration-700 fade-in slide-in-from-top-6 sm:text-7xl"
+    >
+      mole
+    </h1>
 
-    <p class="mx-auto mt-6 max-w-2xl animate-in fade-in slide-in-from-top-4 duration-700 delay-200 text-lg text-foreground sm:text-xl">
-      Hit <code class="font-mono text-terminal-cyan">localhost:3000</code> as if it were always running — even when the real service lives on another machine.
+    <p
+      class="mx-auto mt-6 max-w-2xl animate-in text-lg text-foreground delay-200 duration-700 fade-in slide-in-from-top-4 sm:text-xl"
+    >
+      Hit <code class="font-mono text-terminal-cyan">localhost:3000</code> as if it
+      were always running — even when the real service lives on another machine.
     </p>
 
-    <div class="mx-auto mt-14 max-w-4xl animate-in fade-in zoom-in-95 duration-700 delay-300 text-left">
-      <TerminalBlock title="bash — mole" animated={true} showCaret={true} lines={lines} />
+    <div
+      class="mx-auto mt-14 max-w-4xl animate-in text-left delay-300 duration-700 zoom-in-95 fade-in"
+    >
+      <TerminalBlock
+        title="bash — mole"
+        animated={true}
+        showCaret={true}
+        lines={lines}
+      />
     </div>
 
-    <div class="mt-10 flex animate-in fade-in slide-in-from-bottom-6 duration-700 delay-[1200ms] flex-wrap items-center justify-center gap-3">
-      <Button size="lg" asChild>
-        <a href="#quickstart">Install</a>
-      </Button>
-      <Button variant="outline" size="lg" asChild>
-        <a href={REPO} target="_blank" rel="noopener noreferrer">GitHub</a>
-      </Button>
+    <div
+      class="mt-10 flex animate-in flex-wrap items-center justify-center gap-3 delay-[1200ms] duration-700 fade-in slide-in-from-bottom-6"
+    >
+      <Button size="lg" href="#quickstart">Install</Button>
+      <Button
+        variant="outline"
+        size="lg"
+        href={REPO}
+        target="_blank"
+        rel="noopener noreferrer">GitHub</Button
+      >
     </div>
 
-    <p class="mt-6 animate-in fade-in duration-700 delay-[1400ms] font-mono text-xs text-muted-foreground">
+    <p
+      class="mt-6 animate-in font-mono text-xs text-muted-foreground delay-[1400ms] duration-700 fade-in"
+    >
       Linux · macOS · Windows · *BSD
     </p>
   </div>

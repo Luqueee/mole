@@ -1,9 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
 
-/* Dark-only site: class="dark" on <html> activates the dark: variant
-   used by shadcn components. All token values are dark, set in :root. */
+/* Dark-only site: class="dark" on <html> activates the dark: variant.
+   All token values are dark, set in :root. */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -56,25 +55,25 @@
 
 :root {
   /* Terminal dark — GitHub-dark derived palette */
-  --background: hsl(213 27% 7%);        /* #0d1117 — page background */
-  --foreground: hsl(213 22% 78%);       /* #c9d1d9 — base text */
-  --card: hsl(215 25% 10%);             /* #161b22 — cards / code blocks */
+  --background: hsl(213 27% 7%); /* #0d1117 — page background */
+  --foreground: hsl(213 22% 78%); /* #c9d1d9 — base text */
+  --card: hsl(215 25% 10%); /* #161b22 — cards / code blocks */
   --card-foreground: hsl(213 22% 78%);
   --popover: hsl(215 25% 10%);
   --popover-foreground: hsl(213 22% 78%);
-  --primary: hsl(137 47% 47%);          /* #3fb950 — green FORWARD — main CTA */
+  --primary: hsl(137 47% 47%); /* #3fb950 — green FORWARD — main CTA */
   --primary-foreground: hsl(213 27% 7%);
-  --secondary: hsl(222 21% 14%);        /* #1c2230 — elevated surface */
+  --secondary: hsl(222 21% 14%); /* #1c2230 — elevated surface */
   --secondary-foreground: hsl(213 22% 78%);
   --muted: hsl(222 21% 14%);
   --muted-foreground: hsl(212 15% 58%); /* #8b949e — secondary text */
-  --accent: hsl(213 68% 64%);           /* #58a6ff — cyan — links */
+  --accent: hsl(213 68% 64%); /* #58a6ff — cyan — links */
   --accent-foreground: hsl(213 27% 7%);
   --destructive: hsl(0 72% 51%);
   --destructive-foreground: hsl(213 27% 98%);
-  --border: hsl(215 14% 21%);           /* #30363d — borders */
+  --border: hsl(215 14% 21%); /* #30363d — borders */
   --input: hsl(215 14% 21%);
-  --ring: hsl(137 47% 47%);             /* green ring for focus */
+  --ring: hsl(137 47% 47%); /* green ring for focus */
   --radius: 0.5rem;
 
   /* Chart tokens (kept for completeness, dark-appropriate) */
@@ -95,14 +94,16 @@
   --sidebar-ring: hsl(137 47% 47%);
 
   /* Custom terminal tokens */
-  --terminal-green: hsl(137 47% 47%);   /* FORWARD badge */
-  --terminal-orange: hsl(41 76% 54%);   /* UNFWD / warning badge */
-  --terminal-cyan: hsl(213 68% 64%);    /* links / secondary accent */
+  --terminal-green: hsl(137 47% 47%); /* FORWARD badge */
+  --terminal-orange: hsl(41 76% 54%); /* UNFWD / warning badge */
+  --terminal-cyan: hsl(213 68% 64%); /* links / secondary accent */
   /* Brand additive tokens (glow + grid) */
   --glow-primary: hsl(137 47% 47% / 0.35);
-  --glow-accent: hsl(213 68% 64% / 0.30);
+  --glow-accent: hsl(213 68% 64% / 0.3);
   --grid-line: hsl(215 14% 21% / 0.35);
-  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono:
+    "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
 }
 
@@ -204,11 +205,8 @@
 
 @layer utilities {
   .bg-grid {
-    background-image: linear-gradient(
-        to right,
-        var(--grid-line) 1px,
-        transparent 1px
-      ),
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
       linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
     background-size: 48px 48px;
     mask-image: radial-gradient(
@@ -226,16 +224,17 @@
     text-shadow: 0 0 24px var(--glow-primary);
   }
   .terminal-glow {
-    box-shadow: 0 0 0 1px var(--border),
-      0 20px 60px -20px var(--glow-primary), 0 0 80px -30px var(--glow-accent);
+    box-shadow:
+      0 0 0 1px var(--border),
+      0 20px 60px -20px var(--glow-primary),
+      0 0 80px -30px var(--glow-accent);
   }
   .animate-float {
     animation: float 6s ease-in-out infinite;
   }
   .mascot-glow {
-    filter: drop-shadow(0 10px 28px var(--glow-primary)) drop-shadow(
-        0 0 44px var(--glow-accent)
-      );
+    filter: drop-shadow(0 10px 28px var(--glow-primary))
+      drop-shadow(0 0 44px var(--glow-accent));
   }
   .log-badge {
     display: inline-block;

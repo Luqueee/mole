@@ -1,14 +1,6 @@
 ---
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Wrench } from "lucide-react"
+import Badge from "@/components/Badge.astro"
+import Icon from "@/components/Icon.astro"
 
 const commands = [
   {
@@ -44,36 +36,49 @@ const commands = [
 
 <section id="commands" data-reveal class="scroll-mt-nav relative py-24">
   <div class="relative z-10 mx-auto max-w-5xl px-6">
-  <div class="mb-10 flex flex-col items-center gap-3 text-center">
-    <Badge variant="outline" className="gap-1.5">
-      <Wrench className="text-primary" />
-      Commands
-    </Badge>
-    <h2 class="font-mono text-3xl font-bold text-foreground">
-      The full CLI surface
-    </h2>
-    <p class="max-w-2xl text-base text-muted-foreground">
-      Eight commands cover the full lifecycle. <span class="font-mono text-foreground">mole help</span> lists them all.
-    </p>
-  </div>
+    <div class="mb-10 flex flex-col items-center gap-3 text-center">
+      <Badge class="gap-1.5">
+        <Icon name="wrench" class="text-primary" />
+        Commands
+      </Badge>
+      <h2 class="font-mono text-3xl font-bold text-foreground">
+        The full CLI surface
+      </h2>
+      <p class="max-w-2xl text-base text-muted-foreground">
+        Eight commands cover the full lifecycle. <span
+          class="font-mono text-foreground">mole help</span
+        > lists them all.
+      </p>
+    </div>
 
-  <div class="overflow-x-auto rounded-xl border border-border">
-    <Table>
-      <TableHeader>
-        <TableRow className="bg-secondary hover:bg-secondary">
-          <TableHead className="w-[35%] font-mono text-foreground">Command</TableHead>
-          <TableHead className="font-mono text-foreground">What it does</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {commands.map((c) => (
-          <TableRow className="hover:bg-secondary/50 transition-colors">
-            <TableCell className="font-mono text-terminal-cyan">{c.cmd}<span class="ml-2 text-muted-foreground">›</span></TableCell>
-            <TableCell className="text-muted-foreground">{c.desc}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </div>
+    <div class="overflow-x-auto rounded-xl border border-border">
+      <table class="w-full caption-bottom text-sm">
+        <thead class="[&_tr]:border-b">
+          <tr class="border-b bg-secondary">
+            <th
+              class="h-10 w-[35%] px-2 text-left align-middle font-mono font-medium whitespace-nowrap text-foreground"
+              >Command</th
+            >
+            <th
+              class="h-10 px-2 text-left align-middle font-mono font-medium whitespace-nowrap text-foreground"
+              >What it does</th
+            >
+          </tr>
+        </thead>
+        <tbody class="[&_tr:last-child]:border-0">
+          {
+            commands.map((c) => (
+              <tr class="border-b transition-colors hover:bg-secondary/50">
+                {/* prettier-ignore */}
+                <td class="p-2 align-middle font-mono whitespace-nowrap text-terminal-cyan">{c.cmd}<span class="ml-2 text-muted-foreground">›</span></td>
+                <td class="p-2 align-middle whitespace-nowrap text-muted-foreground">
+                  {c.desc}
+                </td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>

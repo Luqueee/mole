@@ -1,21 +1,45 @@
 ---
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Terminal } from "lucide-react"
+import Badge from "@/components/Badge.astro"
+import Card from "@/components/Card.astro"
+import Icon from "@/components/Icon.astro"
 
 const platforms = [
-  { name: "Linux", install: "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh", hint: "glibc & musl", logo: "/logos/linux.svg" },
-  { name: "macOS", install: "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh", hint: "Intel & Apple Silicon", logo: "/logos/apple.svg" },
-  { name: "Windows", install: "irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex", hint: "PowerShell 5+", logo: "/logos/windows.svg" },
-  { name: "FreeBSD", install: "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh", hint: "Unix-like", logo: "/logos/freebsd.svg" },
+  {
+    name: "Linux",
+    install:
+      "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh",
+    hint: "glibc & musl",
+    logo: "/logos/linux.svg",
+  },
+  {
+    name: "macOS",
+    install:
+      "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh",
+    hint: "Intel & Apple Silicon",
+    logo: "/logos/apple.svg",
+  },
+  {
+    name: "Windows",
+    install:
+      "irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex",
+    hint: "PowerShell 5+",
+    logo: "/logos/windows.svg",
+  },
+  {
+    name: "FreeBSD",
+    install:
+      "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh",
+    hint: "Unix-like",
+    logo: "/logos/freebsd.svg",
+  },
 ]
 ---
 
 <section id="platforms" data-reveal class="scroll-mt-nav relative py-24">
   <div class="relative z-10 mx-auto max-w-5xl px-6">
     <div class="mb-10 flex flex-col items-center gap-3 text-center">
-      <Badge variant="outline" className="gap-1.5">
-        <Terminal className="text-primary" />
+      <Badge class="gap-1.5">
+        <Icon name="terminal" class="text-primary" />
         Platforms
       </Badge>
       <h2 class="font-mono text-3xl font-bold text-foreground">
@@ -27,27 +51,32 @@ const platforms = [
     </div>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {platforms.map((p) => (
-        <Card className="bg-card border border-border transition-all duration-200 hover:border-primary/40">
-          <CardContent className="flex flex-col gap-2 p-5">
-            <div class="flex items-center gap-2">
-              <img
-                src={p.logo}
-                alt=""
-                width="24"
-                height="24"
-                loading="lazy"
-                decoding="async"
-                class="size-6 shrink-0 select-none object-contain"
-                draggable="false"
-              />
-              <span class="font-mono text-sm font-semibold text-foreground">{p.name}</span>
+      {
+        platforms.map((p) => (
+          <Card class="transition-all duration-200 hover:border-primary/40">
+            <div class="flex flex-col gap-2 p-5">
+              <div class="flex items-center gap-2">
+                <img
+                  src={p.logo}
+                  alt=""
+                  width="24"
+                  height="24"
+                  loading="lazy"
+                  decoding="async"
+                  class="size-6 shrink-0 object-contain select-none"
+                  draggable="false"
+                />
+                <span class="font-mono text-sm font-semibold text-foreground">
+                  {p.name}
+                </span>
+              </div>
+              <p class="text-xs text-muted-foreground">{p.hint}</p>
+              {/* prettier-ignore */}
+              <pre class="mt-1 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-terminal-cyan">{p.install}</pre>
             </div>
-            <p class="text-xs text-muted-foreground">{p.hint}</p>
-            <pre class="mt-1 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-terminal-cyan">{p.install}</pre>
-          </CardContent>
-        </Card>
-      ))}
+          </Card>
+        ))
+      }
     </div>
   </div>
 </section>
