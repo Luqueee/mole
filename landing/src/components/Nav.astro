@@ -7,24 +7,25 @@ const REPO = "https://github.com/Luqueee/mole"
 
 const navLinks = [
   { href: "#features", label: "Features" },
-  { href: "#quickstart", label: "Quickstart" },
+  { href: "#how-it-works", label: "How it works" },
+  { href: "#install", label: "Install" },
   { href: "#commands", label: "Commands" },
 ]
 ---
 
 <nav
   data-nav
-  class="scroll-mt-nav sticky top-0 z-50 border-b border-border/60 bg-background/60 backdrop-blur-md"
+  class="scroll-mt-nav sticky top-0 z-50 border-b border-border bg-background/85 backdrop-blur-md"
 >
-  <div class="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-    <Logo size={28} withWordmark={true} />
-    <div class="flex items-center gap-1 text-sm">
-      <div class="hidden items-center gap-1 text-sm md:flex">
+  <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+    <Logo size={26} withWordmark={true} />
+    <div class="flex items-center gap-1">
+      <div class="hidden items-center gap-1 md:flex">
         {
           navLinks.map((l) => (
             <a
               href={l.href}
-              class="px-3 py-2 text-foreground/70 transition-colors hover:text-foreground"
+              class="px-3 py-2 font-mono text-xs tracking-[0.06em] text-muted-foreground uppercase transition-colors hover:text-foreground"
             >
               {l.label}
             </a>
@@ -42,7 +43,7 @@ const navLinks = [
         id="nav-toggle"
         aria-expanded="false"
         aria-label="Toggle navigation"
-        class="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+        class="inline-flex size-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-surface hover:text-foreground md:hidden"
       >
         <Icon name="menu" class="size-5" />
       </button>
@@ -55,7 +56,7 @@ const navLinks = [
           <a
             href={l.href}
             data-nav-close
-            class="px-3 py-2 text-sm text-foreground/70 transition-colors hover:text-foreground"
+            class="px-3 py-2 font-mono text-xs tracking-[0.06em] text-muted-foreground uppercase transition-colors hover:text-foreground"
           >
             {l.label}
           </a>
@@ -66,7 +67,7 @@ const navLinks = [
         target="_blank"
         rel="noopener noreferrer"
         data-nav-close
-        class="px-3 py-2 text-sm text-foreground/70 transition-colors hover:text-foreground"
+        class="px-3 py-2 font-mono text-xs tracking-[0.06em] text-muted-foreground uppercase transition-colors hover:text-foreground"
         >GitHub</a
       >
     </div>

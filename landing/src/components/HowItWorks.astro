@@ -1,6 +1,5 @@
 ---
-import Badge from "@/components/Badge.astro"
-import Icon from "@/components/Icon.astro"
+import SectionLabel from "@/components/SectionLabel.astro"
 
 const steps = [
   {
@@ -26,41 +25,50 @@ const steps = [
 ]
 ---
 
-<section id="how-it-works" data-reveal class="scroll-mt-nav relative py-24">
-  <div class="relative z-10 mx-auto max-w-5xl px-6">
-    <div class="mb-10 flex flex-col items-center gap-3 text-center">
-      <Badge class="gap-1.5">
-        <Icon name="microscope" class="text-primary" />
-        How it works
-      </Badge>
-      <h2 class="font-mono text-3xl font-bold text-foreground">
+<section
+  id="how-it-works"
+  data-reveal
+  class="scroll-mt-nav relative border-t border-dashed border-border py-16 sm:py-20"
+>
+  <div
+    class="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-12"
+  >
+    <SectionLabel label="How it works" />
+    <div>
+      <h2
+        class="font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+      >
         Under the hood
       </h2>
-      <p class="max-w-2xl text-base text-muted-foreground">
+      <p class="mt-3 max-w-2xl text-base text-muted-foreground">
         Four goroutines, one SSH client, no port list to maintain.
       </p>
-    </div>
 
-    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-x-12">
-      {
-        steps.map((s) => (
-          <div class="relative flex gap-6 pb-10 last:pb-0">
-            <div class="flex flex-col items-center">
-              <span class="font-mono text-2xl font-bold text-primary">
-                {s.n}
-              </span>
-              <span
-                class="mt-1 w-px flex-1 bg-gradient-to-b from-primary/60 to-transparent"
-                aria-hidden="true"
-              />
-            </div>
-            <div class="flex-1 pt-1">
-              <h3 class="text-base font-semibold text-foreground">{s.title}</h3>
-              <p class="mt-1 text-sm text-muted-foreground">{s.text}</p>
-            </div>
-          </div>
-        ))
-      }
+      <ol class="mt-10 grid grid-cols-1 gap-x-12 gap-y-8 sm:grid-cols-2">
+        {
+          steps.map((s) => (
+            <li class="flex gap-5">
+              <div class="flex flex-col items-center">
+                <span class="font-mono text-xl font-semibold text-forward">
+                  {s.n}
+                </span>
+                <span
+                  class="mt-2 w-px flex-1 border-l border-dashed border-border"
+                  aria-hidden="true"
+                />
+              </div>
+              <div class="pt-1">
+                <h3 class="font-mono text-sm font-semibold tracking-[0.04em] text-foreground uppercase">
+                  {s.title}
+                </h3>
+                <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {s.text}
+                </p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
     </div>
   </div>
 </section>

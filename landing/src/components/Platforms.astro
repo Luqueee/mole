@@ -1,7 +1,5 @@
 ---
-import Badge from "@/components/Badge.astro"
-import Card from "@/components/Card.astro"
-import Icon from "@/components/Icon.astro"
+import SectionLabel from "@/components/SectionLabel.astro"
 
 const platforms = [
   {
@@ -35,48 +33,55 @@ const platforms = [
 ]
 ---
 
-<section id="platforms" data-reveal class="scroll-mt-nav relative py-24">
-  <div class="relative z-10 mx-auto max-w-5xl px-6">
-    <div class="mb-10 flex flex-col items-center gap-3 text-center">
-      <Badge class="gap-1.5">
-        <Icon name="terminal" class="text-primary" />
-        Platforms
-      </Badge>
-      <h2 class="font-mono text-3xl font-bold text-foreground">
+<section
+  id="platforms"
+  data-reveal
+  class="scroll-mt-nav relative border-t border-dashed border-border py-16 sm:py-20"
+>
+  <div
+    class="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-12"
+  >
+    <SectionLabel label="Platforms" />
+    <div>
+      <h2
+        class="font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+      >
         Runs on your machine
       </h2>
-      <p class="max-w-2xl text-base text-muted-foreground">
+      <p class="mt-3 max-w-2xl text-base text-muted-foreground">
         Same source, same commands, every desktop OS.
       </p>
-    </div>
 
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {
-        platforms.map((p) => (
-          <Card class="transition-all duration-200 hover:border-primary/40">
-            <div class="flex flex-col gap-2 p-5">
-              <div class="flex items-center gap-2">
+      <div class="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {
+          platforms.map((p) => (
+            <div class="overflow-hidden rounded-md border border-subsoil/60 bg-subsoil">
+              <div class="flex items-center gap-2.5 border-b border-subsoil-foreground/15 px-4 py-3">
                 <img
                   src={p.logo}
                   alt=""
-                  width="24"
-                  height="24"
+                  width="22"
+                  height="22"
                   loading="lazy"
                   decoding="async"
-                  class="size-6 shrink-0 object-contain select-none"
+                  class="size-5.5 shrink-0 object-contain select-none"
                   draggable="false"
                 />
-                <span class="font-mono text-sm font-semibold text-foreground">
+                <span class="font-mono text-sm font-semibold text-subsoil-foreground">
                   {p.name}
                 </span>
+                <span class="ml-auto font-mono text-[11px] text-subsoil-muted">
+                  {p.hint}
+                </span>
               </div>
-              <p class="text-xs text-muted-foreground">{p.hint}</p>
-              {/* prettier-ignore */}
-              <pre class="mt-1 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-terminal-cyan">{p.install}</pre>
+              <div class="px-4 py-3">
+                {/* prettier-ignore */}
+                <pre class="font-mono text-xs break-all whitespace-pre-wrap text-terminal-green">{p.install}</pre>
+              </div>
             </div>
-          </Card>
-        ))
-      }
+          ))
+        }
+      </div>
     </div>
   </div>
 </section>

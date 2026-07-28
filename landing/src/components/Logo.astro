@@ -2,15 +2,25 @@
 interface Props {
   size?: number
   withWordmark?: boolean
+  tone?: "ink" | "paper"
   class?: string
 }
 
-const { size = 28, withWordmark = true, class: className } = Astro.props
+const {
+  size = 28,
+  withWordmark = true,
+  tone = "ink",
+  class: className,
+} = Astro.props
 ---
 
 <a
   href="/"
-  class:list={["inline-flex items-center gap-2 text-primary", className]}
+  class:list={[
+    "inline-flex items-center gap-2",
+    tone === "paper" ? "text-subsoil-foreground" : "text-foreground",
+    className,
+  ]}
 >
   <img
     src="/mole.webp"

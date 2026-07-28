@@ -1,6 +1,5 @@
 ---
-import Badge from "@/components/Badge.astro"
-import Icon from "@/components/Icon.astro"
+import SectionLabel from "@/components/SectionLabel.astro"
 import TerminalBlock from "@/components/TerminalBlock.astro"
 
 const lines = [
@@ -33,39 +32,39 @@ const lines = [
 ]
 ---
 
-<section id="logs" data-reveal class="scroll-mt-nav relative py-24">
-  <div class="relative z-10 mx-auto max-w-5xl px-6">
-    <div class="mb-10 flex flex-col items-center gap-3 text-center">
-      <Badge class="gap-1.5">
-        <Icon name="terminal" class="text-primary" />
-        Logs
-      </Badge>
-      <h2 class="font-mono text-3xl font-bold text-foreground">
+<section
+  id="logs"
+  data-reveal
+  class="scroll-mt-nav relative border-t border-dashed border-border py-16 sm:py-20"
+>
+  <div
+    class="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-12"
+  >
+    <SectionLabel label="Logs" />
+    <div>
+      <h2
+        class="font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+      >
         Colourised, structured, skimmable
       </h2>
-      <p class="max-w-2xl text-base text-muted-foreground">
-        Every line gets a colour-graded level badge, a dimmed timestamp, and
-        repeated events collapse to a single line with a (×N) counter.
+      <p class="mt-3 max-w-2xl text-base text-muted-foreground">
+        Every line gets a level badge, a timestamp, and repeated events collapse
+        to a single line with a (×N) counter.
+      </p>
+
+      <TerminalBlock
+        title="mole logs"
+        animated={false}
+        showCaret={false}
+        lines={lines}
+        class="mt-8"
+      />
+
+      <p class="mt-4 font-mono text-xs leading-relaxed text-muted-foreground">
+        <span class="text-forward">FORWARD</span> when a port starts forwarding ·
+        <span class="text-unfwd">UNFWD</span> when a dead remote port is pruned ·
+        <span class="text-signal">INFO</span> for the rest
       </p>
     </div>
-
-    <TerminalBlock
-      title="mole logs"
-      animated={false}
-      showCaret={false}
-      lines={lines}
-    />
-
-    <p
-      class="mx-auto mt-6 max-w-3xl text-center text-base text-muted-foreground"
-    >
-      mole logs renders the daemon's structured log with coloured level badges,
-      a distinct green <span class="font-mono text-terminal-green">FORWARD</span
-      >
-      badge when a port starts forwarding and a burnt-orange
-      <span class="font-mono text-terminal-orange">UNFWD</span> badge when a dead
-      remote port is pruned, dimmed timestamps, and
-      <span class="font-mono">(×N)</span> collapsing of repeated lines.
-    </p>
   </div>
 </section>

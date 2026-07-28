@@ -1,95 +1,72 @@
 ---
-import Badge from "@/components/Badge.astro"
 import Button from "@/components/Button.astro"
-import TerminalBlock from "@/components/TerminalBlock.astro"
+import CopyButton from "@/components/CopyButton.astro"
+import Tunnel from "@/components/Tunnel.astro"
 
 const REPO = "https://github.com/Luqueee/mole"
-
-const lines = [
-  {
-    prefix: "prompt" as const,
-    content:
-      "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh",
-  },
-  {
-    prefix: "ok" as const,
-    content: "installed mole v0.1.0 → /usr/local/bin/mole",
-  },
-  { prefix: "prompt" as const, content: "mole init" },
-  { prefix: "ask" as const, content: "SSH remote: dev" },
-  { prefix: "ok" as const, content: "wrote ~/.config/mole/config.yaml" },
-  { prefix: "ask" as const, content: "Start mole in the background? [Y/n] y" },
-  { prefix: "ok" as const, content: "mole running — forwarding 3 ports" },
-  { prefix: "arrow" as const, content: "localhost:3000  workstation:3000" },
-  { prefix: "arrow" as const, content: "localhost:5173  workstation:5173" },
-  { prefix: "arrow" as const, content: "localhost:8080  workstation:8080" },
-]
+const INSTALL =
+  "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh"
 ---
 
-<section id="hero" class="scroll-mt-nav relative pt-32 pb-24 sm:pt-40 sm:pb-28">
-  <div class="relative z-10 mx-auto max-w-5xl px-6 text-center">
-    <div class="mx-auto mb-6 w-fit animate-in duration-700 zoom-in-95 fade-in">
-      <img
-        src="/mole.webp"
-        alt="mole mascot"
-        width="144"
-        height="144"
-        decoding="async"
-        class="mascot-glow animate-float size-28 select-none sm:size-36"
-        draggable="false"
-      />
-    </div>
-    <Badge class="animate-in gap-2 duration-500 fade-in slide-in-from-top-4">
-      <span class="relative flex size-2"
-        ><span class="absolute inset-0 animate-ping rounded-full bg-primary/60"
-        ></span><span
-          class="relative inline-flex size-2 rounded-full bg-primary"
-        ></span></span
-      >
-      single binary · MIT · v0.1.0
-    </Badge>
-
-    <h1
-      class="text-glow mt-6 animate-in font-mono text-5xl font-bold text-primary delay-100 duration-700 fade-in slide-in-from-top-6 sm:text-7xl"
-    >
-      mole
-    </h1>
-
-    <p
-      class="mx-auto mt-6 max-w-2xl animate-in text-lg text-foreground delay-200 duration-700 fade-in slide-in-from-top-4 sm:text-xl"
-    >
-      Hit <code class="font-mono text-terminal-cyan">localhost:3000</code> as if it
-      were always running — even when the real service lives on another machine.
-    </p>
-
+<section id="hero" class="scroll-mt-nav relative pt-16 pb-20 sm:pt-24">
+  <div class="mx-auto max-w-6xl px-6">
     <div
-      class="mx-auto mt-14 max-w-4xl animate-in text-left delay-300 duration-700 zoom-in-95 fade-in"
+      class="grid grid-cols-1 items-center gap-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
     >
-      <TerminalBlock
-        title="bash — mole"
-        animated={true}
-        showCaret={true}
-        lines={lines}
-      />
-    </div>
+      <div>
+        <p
+          class="inline-flex items-center gap-2 border border-border px-2 py-1 font-mono text-[11px] tracking-[0.14em] text-muted-foreground uppercase"
+        >
+          <span class="size-1.5 animate-pulse bg-forward"></span>
+          v0.1.0 — single binary · MIT
+        </p>
 
-    <div
-      class="mt-10 flex animate-in flex-wrap items-center justify-center gap-3 delay-[1200ms] duration-700 fade-in slide-in-from-bottom-6"
-    >
-      <Button size="lg" href="#quickstart">Install</Button>
-      <Button
-        variant="outline"
-        size="lg"
-        href={REPO}
-        target="_blank"
-        rel="noopener noreferrer">GitHub</Button
-      >
-    </div>
+        <h1
+          class="mt-6 font-display text-6xl leading-[0.95] font-bold tracking-tight lowercase sm:text-7xl lg:text-8xl"
+        >
+          mole digs<br />one SSH <span class="text-forward">tunnel</span>.
+        </h1>
 
-    <p
-      class="mt-6 animate-in font-mono text-xs text-muted-foreground delay-[1400ms] duration-700 fade-in"
-    >
-      Linux · macOS · Windows · *BSD
-    </p>
+        <p class="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+          Then it forwards every port it finds on the other side. No port lists
+          to maintain, no
+          <code class="font-mono text-[0.9em] text-foreground">ssh -L</code>
+          gymnastics — point it at a remote and localhost mirrors whatever starts
+          listening there.
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <Button size="lg" href="#install">Install mole</Button>
+          <Button
+            variant="outline"
+            size="lg"
+            href={REPO}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </Button>
+        </div>
+
+        <div
+          class="mt-8 flex max-w-xl items-center justify-between gap-3 rounded-md border border-subsoil/60 bg-subsoil px-4 py-3"
+        >
+          <code
+            class="min-w-0 flex-1 truncate font-mono text-xs text-subsoil-foreground"
+            ><span class="text-terminal-green">$</span>&nbsp;{INSTALL}</code
+          >
+          <CopyButton
+            text={INSTALL}
+            class="text-subsoil-muted hover:bg-subsoil-foreground/10 hover:text-subsoil-foreground"
+          />
+        </div>
+
+        <p class="mt-4 font-mono text-xs text-muted-foreground">
+          Linux · macOS · Windows · *BSD
+        </p>
+      </div>
+
+      <Tunnel />
+    </div>
   </div>
 </section>

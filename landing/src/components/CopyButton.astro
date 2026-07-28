@@ -4,16 +4,17 @@ import Icon from "@/components/Icon.astro"
 
 interface Props {
   text: string
+  class?: string
 }
 
-const { text } = Astro.props
+const { text, class: className } = Astro.props
 ---
 
 <Button
   type="button"
   variant="ghost"
   size="icon-sm"
-  class="group"
+  class:list={["group", className]}
   aria-label="Copy to clipboard"
   data-copy={text}
 >

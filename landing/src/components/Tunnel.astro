@@ -1,0 +1,72 @@
+---
+// The signature piece: a cross-section of the tunnel. Surface = this machine,
+// dark band = the single SSH connection, ports flowing through it.
+const ports = [
+  { local: "localhost:3000", remote: "workstation:3000" },
+  { local: "localhost:5173", remote: "workstation:5173" },
+  { local: "localhost:8080", remote: "workstation:8080" },
+]
+---
+
+<figure class="relative">
+  <!-- surface line: this machine -->
+  <figcaption
+    class="mb-3 flex items-end justify-between gap-4 font-mono text-xs text-muted-foreground"
+  >
+    <span class="flex items-center gap-2">
+      <span class="size-1.5 bg-signal"></span>this machine
+    </span>
+    <span class="hidden sm:block">3 listeners forwarded</span>
+  </figcaption>
+
+  <div class="relative">
+    <img
+      src="/mole.webp"
+      alt=""
+      width="88"
+      height="88"
+      loading="eager"
+      decoding="async"
+      class="absolute -top-11 left-1/2 z-10 size-16 -translate-x-1/2 select-none sm:-top-14 sm:size-22"
+      draggable="false"
+    />
+    <!-- the tunnel itself -->
+    <div
+      class="space-y-4 overflow-hidden rounded-md border border-subsoil/60 bg-subsoil px-5 pt-12 pb-5 shadow-[0_24px_60px_-24px_hsl(36_30%_10%/0.5)] sm:space-y-5 sm:px-6"
+    >
+      <div
+        class="flex items-center gap-2 font-mono text-[11px] tracking-[0.16em] text-subsoil-muted uppercase"
+      >
+        <span class="size-1.5 bg-terminal-green"></span>
+        one SSH connection
+      </div>
+      {
+        ports.map((p, i) => (
+          <div class="flex items-center gap-3 font-mono text-[11px] sm:gap-4 sm:text-xs">
+            <span class="shrink-0 text-terminal-cyan">{p.local}</span>
+            <span class="tunnel-line relative h-px flex-1" aria-hidden="true">
+              <span
+                class="tunnel-dot absolute top-1/2 left-0 -mt-[3px] size-1.5 rounded-full bg-terminal-green"
+                style={`animation-delay: ${i * 0.9}s`}
+              />
+            </span>
+            <span class="shrink-0 text-terminal-green">{p.remote}</span>
+          </div>
+        ))
+      }
+      <div class="tunnel-line--muted h-px w-full" aria-hidden="true"></div>
+      <div
+        class="flex items-center justify-between font-mono text-[11px] text-subsoil-muted"
+      >
+        <span>re-scans every 15 s</span>
+        <span>ssh-agent · ~/.ssh/id_*</span>
+      </div>
+    </div>
+  </div>
+
+  <figcaption
+    class="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground"
+  >
+    <span class="size-1.5 bg-forward"></span>remote host — sshd only, no agent
+  </figcaption>
+</figure>
