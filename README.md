@@ -4,8 +4,8 @@
 
 **Hit `localhost:3000` as if it were always running — even when the real service lives on another machine.**
 
-[![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Platforms](https://img.shields.io/badge/platforms-Linux%20·%20macOS%20·%20Windows-555)](#-platforms)
+[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20·%20macOS%20·%20Windows%20·%20FreeBSD-555)](#-platforms)
 [![Single binary](https://img.shields.io/badge/deploy-single%20static%20binary-2ea043)](#-install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#-license)
 
@@ -78,9 +78,13 @@ appear.
 |---------|--------------|
 | `mole up` | Start the forwarder in the foreground (add `-d` to background it). |
 | `mole down` | Stop a backgrounded mole (started with `up -d`). |
+| `mole restart` | Stop and re-launch a backgrounded mole using the same config. |
 | `mole status` | Query the local admin API for live stats + forwarded ports. |
-| `mole logs` | Show the daemon log, colourised; `-f` to follow. |
+| `mole logs` | Show the daemon log, colourised; `-f` to follow, `clean` to truncate it. |
+| `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
+| `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
+| `mole clip` | Share clipboard images over the tunnel: `clip serve`, `clip pull`. |
 | `mole update` | Update mole in place to the latest release (re-runs the installer). |
 | `mole version` · `mole help` | The obvious. |
 
@@ -125,7 +129,7 @@ MOLE_VERSION=v0.1.0 ./scripts/install.sh   # pin a ref
 .\scripts\install.ps1 -Init                                          # Windows + init
 ```
 
-### Option 2 — `go install` (no clone, needs Go 1.22+)
+### Option 2 — `go install` (no clone, needs Go 1.26+)
 
 ```bash
 go install github.com/Luqueee/mole/cmd/mole@latest
@@ -262,11 +266,44 @@ mole logs -f       # follow, like tail -f
 mole logs -n 50 --no-dedup
 ```
 
+`mole status` needs the admin API to be on. It's **off by default** — set
+`admin_addr: 127.0.0.1:9999` in the config (`mole init` writes it for you) or
+pass `mole up -admin 127.0.0.1:9999`.
+
 `mole logs` parses the daemon's structured log and renders it with coloured
 level badges (a distinct green **FORWARD** badge for forwarded ports), a dimmed
 timestamp, and collapses consecutive identical lines into one with a `(×N)`
 counter. Colour auto-disables when piped or when `NO_COLOR` is set (`--color`
 forces it back on).
+
+### Restart, ports, and editing the config
+
+```bash
+mole restart                 # stop and re-launch the daemon with the same config
+
+mole ports list              # show the auto-discover port list
+mole ports add 4321          # add a port (live: applied to a running daemon too)
+mole ports remove 4321       # or: mole ports rm 4321
+
+mole config edit             # open the active mole.yaml in $VISUAL / $EDITOR
+mole config edit -editor nvim
+
+mole logs clean              # truncate the daemon log
+mole logs clean -keep 200    # …keeping the last N lines
+```
+
+### Clipboard over the tunnel
+
+`mole clip` moves clipboard **images** from the machine running `clip serve` to
+the one running `clip pull` — useful for pasting a screenshot taken on a remote
+desktop. Clipboard watching is macOS-only; other platforms can still serve
+explicit pushes and pull.
+
+```bash
+mole clip serve              # on the source machine (binds clip_listen, default 0.0.0.0:7777)
+mole clip pull               # on the target; uses clip_url from the config, or -url
+```
+
 
 ### Generate the config with `mole init`
 
@@ -317,9 +354,17 @@ mole up [flags]
   -d, -detach     run in the background; stop with 'mole down'
 
 mole down
-mole status [-admin 127.0.0.1:9999]
-mole logs   [-f] [-n N] [-raw] [-color] [-no-color] [-no-dedup]
+mole restart [-config PATH]
+mole status  [-admin 127.0.0.1:9999]
+mole logs    [-f] [-n N] [-raw] [-color] [-no-color] [-no-dedup]
+mole logs clean [-keep N]
+mole ports  add <port> [-config PATH]
+mole ports  remove|rm <port> [-config PATH]
+mole ports  list|ls [-config PATH]
+mole config edit [-config PATH] [-editor CMD]
 mole init   [flags]
+mole clip   serve [-listen 0.0.0.0:7777] [-watch] [-config PATH] [-log-level L]
+mole clip   pull  [-url URL] [-config PATH] [-log-level L]
 mole update [-version REF] [-dry-run] [-no-verify]
 mole version · mole help
 ```
@@ -333,10 +378,13 @@ mole version · mole help
 | `auto_discover`  | bool   | `false`              | Forward the remote's live listeners                |
 | `discover_ports` | int[]  | see below            | Fallback probe list when `ss`/`netstat` are absent |
 | `exclude_ports`  | int[]  | `[22,25,53,111,631]` | Never auto-forwarded; `[]` excludes nothing        |
-| `admin_addr`     | string | `127.0.0.1:9999`     | Admin HTTP address (empty to disable)              |
+| `admin_addr`     | string | `""` (disabled)      | Admin HTTP address; `mole init` writes `127.0.0.1:9999`. Required by `mole status` |
 | `log_level`      | string | `info`               | `debug`, `info`, `warn`, `error`                   |
 | `ssh_port`       | int    | `22`                 | SSH port on the remote                             |
 | `insecure`       | bool   | `false`              | Disable SSH host key verification (UNSAFE; dev only) |
+| `clip_url`       | string | —                    | Clip server URL used by `mole clip pull`           |
+| `clip_listen`    | string | `0.0.0.0:7777`       | Bind address for `mole clip serve`                 |
+| `clip_interval_ms` | int  | —                    | Clipboard poll interval for `clip serve -watch`    |
 
 Fallback `discover_ports`:
 
@@ -362,7 +410,7 @@ State (pidfile + background log) lives in `~/.local/state/mole/` on Unix
 
 ## 💻 Platforms
 
-Single static Go binary — **Linux**, **macOS**, **Windows** (amd64 & arm64).
+Single static Go binary — **Linux**, **macOS**, **Windows**, **FreeBSD** (amd64 & arm64).
 SSH auth is native per platform:
 
 - **Linux / macOS / BSD** — ssh-agent over a Unix socket (`SSH_AUTH_SOCK`).
@@ -375,8 +423,10 @@ SSH auth is native per platform:
   trusted on first use (recorded automatically, like OpenSSH); a later key
   *mismatch* is refused as a possible MITM. Pass `--insecure` (or
   `insecure: true`) to turn verification off for throwaway dev hosts.
-- **Forwarded ports are added, not removed** — when a remote server stops, its
-  local listener stays open until mole restarts.
+- **Dead ports are pruned only under auto-discover** — when `ss`/`netstat` can be
+  enumerated, a remote service that stops has its local listener closed (you'll
+  see an `UNFWD` line). Explicitly configured `ports:` are pinned and never
+  pruned, and when enumeration isn't available mole only adds, never removes.
 - **TCP only** — no UDP forwarding yet.
 - **Pageant** (PuTTY's Windows agent) isn't supported — OpenSSH agent only.
 
@@ -385,8 +435,10 @@ SSH auth is native per platform:
 ```bash
 make build      # → ./dist/mole
 make install    # build + install (PREFIX=/usr/local or INSTALL_DIR=… to override)
+make run        # build, then run `mole up`
 make test       # go test ./...
 make tidy
+make uninstall
 make clean
 ```
 
