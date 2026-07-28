@@ -11,16 +11,32 @@ const commands = [
     desc: "Stop a backgrounded mole (started with up -d).",
   },
   {
+    cmd: "mole restart",
+    desc: "Stop and re-launch a backgrounded mole using the same config.",
+  },
+  {
     cmd: "mole status",
     desc: "Query the local admin API for live stats + forwarded ports.",
   },
   {
     cmd: "mole logs",
-    desc: "Show the daemon log, colourised; -f to follow.",
+    desc: "Show the daemon log, colourised; -f to follow, clean to truncate.",
+  },
+  {
+    cmd: "mole ports",
+    desc: "Manage the auto-discover port list: add, remove, list.",
+  },
+  {
+    cmd: "mole config",
+    desc: "Open the active mole.yaml in $VISUAL / $EDITOR.",
   },
   {
     cmd: "mole init",
     desc: "Generate a mole.yaml interactively (or scripted).",
+  },
+  {
+    cmd: "mole clip",
+    desc: "Share clipboard images over the tunnel: clip serve, clip pull.",
   },
   {
     cmd: "mole update",
@@ -49,8 +65,9 @@ const commands = [
         The full CLI surface
       </h2>
       <p class="mt-3 max-w-2xl text-base text-muted-foreground">
-        Eight commands cover the full lifecycle.
-        <span class="font-mono text-foreground">mole help</span> lists them all.
+        Twelve commands cover the full lifecycle. Run
+        <span class="font-mono text-foreground">mole help</span> for the built-in
+        reference.
       </p>
 
       <div class="mt-8 overflow-x-auto border border-border">

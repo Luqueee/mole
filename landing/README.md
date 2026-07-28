@@ -7,15 +7,18 @@ fully static site in `dist/`.
 ## Develop
 
 ```bash
-npm install
-npm run dev      # http://localhost:4321
+pnpm install     # npm also works; both lockfiles are committed
+pnpm dev         # http://localhost:4321
 ```
 
 ## Build
 
 ```bash
-npm run build    # → dist/
-npm run preview  # serve dist/ locally
+pnpm build       # → dist/
+pnpm preview     # serve dist/ locally
+pnpm typecheck   # astro check
+pnpm lint        # eslint
+pnpm format      # prettier
 ```
 
 ## Deploy
@@ -34,8 +37,19 @@ configured by `vercel.json`.
 
 ## Customize
 
-- **Domain placeholder:** `site` in `astro.config.mjs` is set to
-  `https://mole.dev` — replace with your real domain.
+- **Domain:** `site` in `astro.config.mjs` is `https://mole.luqueee.dev`.
 - **Repo URL:** `https://github.com/Luqueee/mole` is hardcoded in `Nav.astro`,
   `Hero.astro`, and `Footer.astro`.
-- **Theme:** terminal-dark palette lives in `src/styles/global.css`.
+- **Theme:** the "subsurface map" palette and type scale live in
+  `src/styles/global.css`. The surface is pale paper; anything underground —
+  terminal blocks, the tunnel band in `Tunnel.astro`, platform cards, the
+  footer — uses the dark `subsoil` tokens, where the CLI's FORWARD/UNFWD/INFO
+  colours live.
+
+## Gotcha: prettier and whitespace-sensitive markup
+
+Prettier reflows the contents of `<pre>` and `whitespace-pre-wrap` elements,
+which silently corrupts the rendered terminal output, the install commands and
+the command-table chevron. Four spots are pinned with `{/* prettier-ignore */}`
+— in `TerminalBlock.astro`, `Install.astro`, `Platforms.astro` and
+`Commands.astro`. Don't remove them.
