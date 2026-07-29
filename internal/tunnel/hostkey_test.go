@@ -232,3 +232,19 @@ func countHostLines(contents, host string) int {
 	}
 	return n
 }
+
+func TestKnownHostKeyAlgorithms_PrefersRecordedKeyType(t *testing.T) {
+	khPath := newKHPath(t)
+	key := genKey(t)
+	if err := appendKnownHost(khPath, testHost, testRemote(), key); err != nil {
+		t.Fatalf("seed known_hosts: %v", err)
+	}
+
+	algorithms, err := knownHostKeyAlgorithms(khPath, testHost, testRemote())
+	if err != nil {
+		t.Fatalf("knownHostKeyAlgorithms() error: %v", err)
+	}
+	if len(algorithms) != 1 || algorithms[0] != ssh.KeyAlgoED25519 {
+		t.Fatalf("algorithms = %v, want [%s]", algorithms, ssh.KeyAlgoED25519)
+	}
+}

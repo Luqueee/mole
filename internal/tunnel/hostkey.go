@@ -7,12 +7,15 @@
 package tunnel
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -32,6 +35,63 @@ func hostKeyCallback(insecure bool, log *slog.Logger) (ssh.HostKeyCallback, erro
 		return nil, err
 	}
 	return knownHostsCallback(khPath, log)
+}
+
+// knownHostKeyAlgorithms returns the algorithms of keys already trusted for
+// hostname. Restricting negotiation to these keys mirrors OpenSSH: a server
+// that offers several host keys must not cause a mismatch merely because Go
+// selects an unrecorded algorithm before the recorded one.
+func knownHostKeyAlgorithms(khPath, hostname string, remote net.Addr) ([]string, error) {
+	verify, err := knownhosts.New(khPath)
+	if err != nil {
+		return nil, err
+	}
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate host-key probe: %w", err)
+	}
+	probe, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("create host-key probe: %w", err)
+	}
+
+	err = verify(hostname, remote, probe)
+	var keyErr *knownhosts.KeyError
+	if !errors.As(err, &keyErr) || len(keyErr.Want) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{})
+	var algorithms []string
+	for _, known := range keyErr.Want {
+		for _, algorithm := range hostKeyAlgorithms(known.Key.Type()) {
+			if _, ok := seen[algorithm]; ok {
+				continue
+			}
+			seen[algorithm] = struct{}{}
+			algorithms = append(algorithms, algorithm)
+		}
+	}
+	return algorithms, nil
+}
+
+func hostKeyAlgorithms(keyType string) []string {
+	if keyType == ssh.KeyAlgoRSA {
+		return []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+	}
+	return []string{keyType}
+}
+
+func probeRemote(addr string) net.Addr {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return &net.TCPAddr{}
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil {
+		return &net.TCPAddr{}
+	}
+	return &net.TCPAddr{Port: portNumber}
 }
 
 // knownHostsCallback builds a verifying callback backed by the
