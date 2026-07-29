@@ -64,11 +64,7 @@ func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
 	// Default transport opener: a real SSH dial. Tests override m.dial
 	// before triggering reconnects.
 	m.dial = func() (sshConn, error) {
-		c, err := ssh.Dial("tcp", m.addr, m.config)
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
+		return dialRemote(r, cfg, insecure, log)
 	}
 
 	if err := m.connect(); err != nil {
@@ -314,11 +310,94 @@ func authMethods(identityFiles []string) ([]ssh.AuthMethod, error) {
 	return methods, nil
 }
 
+// jumpSSHConn keeps every transport in a ProxyJump chain alive for the
+// lifetime of the target connection.
+type jumpSSHConn struct {
+	client *ssh.Client
+	jumps  []*ssh.Client
+}
+
+func (c *jumpSSHConn) Dial(network, addr string) (net.Conn, error) {
+	return c.client.Dial(network, addr)
+}
+
+func (c *jumpSSHConn) NewSession() (*ssh.Session, error) {
+	return c.client.NewSession()
+}
+
+func (c *jumpSSHConn) Close() error {
+	err := c.client.Close()
+	for i := len(c.jumps) - 1; i >= 0; i-- {
+		if closeErr := c.jumps[i].Close(); err == nil {
+			err = closeErr
+		}
+	}
+	return err
+}
+
+// dialRemote connects directly or opens the configured ProxyJump chain before
+// creating the SSH client for the target.
+func dialRemote(remote Remote, config *ssh.ClientConfig, insecure bool, log *slog.Logger) (sshConn, error) {
+	if len(remote.ProxyJumps) == 0 {
+		return ssh.Dial("tcp", remote.Addr, config)
+	}
+
+	var jumps []*ssh.Client
+	for _, jump := range remote.ProxyJumps {
+		jumpConfig, err := buildSSHConfig(jump.User, jump.IdentityFiles, insecure, log)
+		if err != nil {
+			closeSSHClients(jumps)
+			return nil, err
+		}
+
+		var client *ssh.Client
+		if len(jumps) == 0 {
+			client, err = ssh.Dial("tcp", jump.Addr, jumpConfig)
+		} else {
+			conn, dialErr := jumps[len(jumps)-1].Dial("tcp", jump.Addr)
+			if dialErr != nil {
+				closeSSHClients(jumps)
+				return nil, dialErr
+			}
+			clientConn, channels, requests, handshakeErr := ssh.NewClientConn(conn, jump.Addr, jumpConfig)
+			if handshakeErr != nil {
+				closeSSHClients(jumps)
+				return nil, handshakeErr
+			}
+			client = ssh.NewClient(clientConn, channels, requests)
+		}
+		if err != nil {
+			closeSSHClients(jumps)
+			return nil, err
+		}
+		jumps = append(jumps, client)
+	}
+
+	conn, err := jumps[len(jumps)-1].Dial("tcp", remote.Addr)
+	if err != nil {
+		closeSSHClients(jumps)
+		return nil, err
+	}
+	clientConn, channels, requests, err := ssh.NewClientConn(conn, remote.Addr, config)
+	if err != nil {
+		closeSSHClients(jumps)
+		return nil, err
+	}
+	return &jumpSSHConn{client: ssh.NewClient(clientConn, channels, requests), jumps: jumps}, nil
+}
+
+func closeSSHClients(clients []*ssh.Client) {
+	for i := len(clients) - 1; i >= 0; i-- {
+		_ = clients[i].Close()
+	}
+}
+
 // Remote holds resolved SSH connection parameters.
 type Remote struct {
 	User          string   // login user
 	Addr          string   // host:port to dial
 	IdentityFiles []string // key files from ssh_config, may be empty
+	ProxyJumps    []Remote // SSH hops, in connection order
 }
 
 // ResolveRemote turns a remote spec into concrete connection params.
@@ -358,7 +437,7 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 		return Remote{}, fmt.Errorf("resolve ssh alias %q via 'ssh -G': %w", alias, err)
 	}
 
-	var host, user, port string
+	var host, user, port, proxyJump string
 	var ids []string
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
@@ -375,6 +454,8 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 			port = fields[1]
 		case "identityfile":
 			ids = append(ids, expandHome(strings.Join(fields[1:], " ")))
+		case "proxyjump":
+			proxyJump = strings.Join(fields[1:], " ")
 		}
 	}
 	if host == "" {
@@ -383,10 +464,15 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 	if port == "" {
 		port = strconv.Itoa(defaultPort)
 	}
+	proxyJumps, err := resolveProxyJumps(proxyJump, defaultPort)
+	if err != nil {
+		return Remote{}, fmt.Errorf("resolve ProxyJump for %q: %w", alias, err)
+	}
 	return Remote{
 		User:          user,
 		Addr:          net.JoinHostPort(host, port),
 		IdentityFiles: ids,
+		ProxyJumps:    proxyJumps,
 	}, nil
 }
 
@@ -401,6 +487,28 @@ func expandHome(p string) string {
 	return p
 }
 
+func resolveProxyJumps(spec string, defaultPort int) ([]Remote, error) {
+	if spec == "" || strings.EqualFold(spec, "none") {
+		return nil, nil
+	}
+
+	var jumps []Remote
+	for _, jumpSpec := range strings.Split(spec, ",") {
+		jumpSpec = strings.TrimSpace(jumpSpec)
+		if jumpSpec == "" {
+			continue
+		}
+		jump, err := ResolveRemote(jumpSpec, defaultPort)
+		if err != nil {
+			return nil, err
+		}
+		jumps = append(jumps, jump.ProxyJumps...)
+		jump.ProxyJumps = nil
+		jumps = append(jumps, jump)
+	}
+	return jumps, nil
+}
+
 // ParseRemote splits "user@host[:port]" into (user, host:port). If the
 // port is missing, defaultPort is appended.
 func ParseRemote(remote string, defaultPort int) (user, addr string, err error) {
@@ -413,8 +521,9 @@ func ParseRemote(remote string, defaultPort int) (user, addr string, err error) 
 	if user == "" || host == "" {
 		return "", "", errors.New("remote must be in the form user@host[:port]")
 	}
-	if !strings.Contains(host, ":") {
-		host = net.JoinHostPort(host, strconv.Itoa(defaultPort))
+	if _, _, splitErr := net.SplitHostPort(host); splitErr == nil {
+		return user, host, nil
 	}
-	return user, host, nil
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	return user, net.JoinHostPort(host, strconv.Itoa(defaultPort)), nil
 }
