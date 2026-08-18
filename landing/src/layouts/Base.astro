@@ -30,6 +30,14 @@ const umami = umamiScript && umamiWebsiteId
     <title>{title}</title>
     <meta name="description" content={description} />
 
+    {/* Search Console verifies an URL-prefix property by fetching its root, and
+        this layout renders the only page there is. The token belongs to the
+        property, not to the host serving it, so it is a literal. */}
+    <meta
+      name="google-site-verification"
+      content="6Fs8IePpUHnOCsQg8mlX_ADhWLEmTI8MRm41hPztRvI"
+    />
+
     <!-- Open Graph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
