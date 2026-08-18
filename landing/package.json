@@ -16,6 +16,7 @@
     "typecheck": "astro check"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
     "@tailwindcss/vite": "^4",
     "astro": "^7.1.4",
     "tailwindcss": "^4"

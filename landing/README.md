@@ -66,6 +66,19 @@ pm2 restart mole-landing
   terminal blocks, the tunnel band in `Tunnel.astro`, platform cards, the
   footer — uses the dark `subsoil` tokens, where the CLI's FORWARD/UNFWD/INFO
   colours live.
+- **Preview card:** `public/og.png`, 1200×630, a committed asset rather than a
+  build step. It is the logs screenshot scaled onto the paper background:
+
+  ```bash
+  sips --resampleWidth 1200 public/mole-logs.png --out /tmp/og-scaled.png
+  sips -p 630 1200 --padColor ECE7DB /tmp/og-scaled.png --out public/og.png
+  ```
+
+- **SEO:** `robots.txt` is a route, not a file in `public/`, so its `Sitemap:`
+  line and every absolute URL in the head — canonical, `og:*`, the JSON-LD
+  graph — come from `site` and cannot name the wrong host. `@astrojs/sitemap`
+  emits `sitemap-index.xml`. A relative `og:image` is the defect this replaced:
+  most crawlers do not resolve one.
 
 ## Gotcha: prettier and whitespace-sensitive markup
 

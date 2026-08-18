@@ -1,5 +1,6 @@
 // @ts-check
 import { existsSync } from "node:fs"
+import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 import tailwindcss from "@tailwindcss/vite"
 
@@ -17,6 +18,9 @@ export default defineConfig({
   site: process.env.MOLE_LANDING_URL ?? "https://mole.luqueee.dev",
   output: "static",
   compressHTML: true,
+  // Every URL it prints comes from `site`, so a wrong MOLE_LANDING_URL would
+  // publish a sitemap for a host that is not this one.
+  integrations: [sitemap()],
   vite: {
     plugins: [tailwindcss()],
   },

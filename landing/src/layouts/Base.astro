@@ -18,6 +18,45 @@ const {
 const umamiScript = import.meta.env.MOLE_UMAMI_SCRIPT_URL
 const umamiWebsiteId = import.meta.env.MOLE_UMAMI_WEBSITE_ID
 const umami = umamiScript && umamiWebsiteId
+
+// Absolute and derived from `site`: a relative `og:image` is not resolved by
+// most crawlers, and a canonical has to be one spelling of one URL.
+const canonical = new URL(Astro.url.pathname, Astro.site).href
+const preview = new URL("/og.png", Astro.site).href
+const repository = "https://github.com/Luqueee/mole"
+
+// One graph rather than three scripts: `SoftwareApplication` is what an answer
+// engine reads to say what mole is, and `WebSite` ties the pages together and
+// points at the software by `@id` instead of repeating it.
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": new URL("/#software", Astro.site).href,
+      name: "mole",
+      description,
+      applicationCategory: "DeveloperApplication",
+      applicationSubCategory: "SSH port forwarding",
+      operatingSystem: "Linux, macOS, Windows, FreeBSD",
+      url: new URL("/", Astro.site).href,
+      codeRepository: repository,
+      license: "https://spdx.org/licenses/MIT.html",
+      programmingLanguage: "Go",
+      isAccessibleForFree: true,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    },
+    {
+      "@type": "WebSite",
+      "@id": new URL("/#website", Astro.site).href,
+      name: "mole",
+      description,
+      url: new URL("/", Astro.site).href,
+      inLanguage: "en",
+      about: { "@id": new URL("/#software", Astro.site).href },
+    },
+  ],
+}
 ---
 
 <html lang="en">
@@ -38,13 +77,28 @@ const umami = umamiScript && umamiWebsiteId
       content="6Fs8IePpUHnOCsQg8mlX_ADhWLEmTI8MRm41hPztRvI"
     />
 
-    <!-- Open Graph -->
+    <link rel="canonical" href={canonical} />
+
+    <!-- Open Graph. The card is public/og.png, 1200x630, generated from the
+         logs screenshot with sips; see README. -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <!-- TODO: regenerate a 1200×630 OG card and replace /mole-logs.png with /og.png -->
-    <meta property="og:image" content="/mole-logs.png" />
+    <meta property="og:image" content={preview} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:site_name" content="mole" />
+    <meta property="og:locale" content="en" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={preview} />
+
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1"
+    />
 
     <!-- Fonts: IBM Plex Sans Condensed + IBM Plex Sans + IBM Plex Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -66,6 +120,12 @@ const umami = umamiScript && umamiWebsiteId
         />
       )
     }
+
+    <script
+      type="application/ld+json"
+      is:inline
+      set:html={JSON.stringify(structuredData)}
+    />
   </head>
   <body>
     <slot />
