@@ -23,6 +23,7 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "@eslint/js": "^10",
+    "@types/node": "^24.13.3",
     "eslint": "^10",
     "globals": "^17",
     "prettier": "^3.8.3",

@@ -10,6 +10,14 @@ const {
   title = "mole — SSH port forwarding, auto-discovered",
   description = "SSH port forwarding that auto-discovers your remote's listeners. One binary, one connection, zero port lists.",
 } = Astro.props
+
+// Self-hosted analytics. Both halves of the pair have to be set or nothing is
+// emitted, so `astro dev` and a local build never report a page view into the
+// production dataset. The website id is a UUID the instance mints at runtime,
+// which is why it is environment and not a constant in here.
+const umamiScript = import.meta.env.MOLE_UMAMI_SCRIPT_URL
+const umamiWebsiteId = import.meta.env.MOLE_UMAMI_WEBSITE_ID
+const umami = umamiScript && umamiWebsiteId
 ---
 
 <html lang="en">
@@ -37,6 +45,19 @@ const {
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+
+    {/* The tracker of the self-hosted Umami instance. `is:inline` because the
+        file is served by that instance and is not bundled here. */}
+    {
+      umami && (
+        <script
+          is:inline
+          defer
+          src={umamiScript}
+          data-website-id={umamiWebsiteId}
+        />
+      )
+    }
   </head>
   <body>
     <slot />
