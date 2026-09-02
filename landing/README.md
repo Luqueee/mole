@@ -45,14 +45,17 @@ the box needs nothing exported. The analytics tracker needs **both** umami
 variables or it is not emitted at all, which is what keeps `astro dev` and a
 local build out of the production dataset.
 
-Redeploy is a pull, a build and a restart:
+GitHub Actions is the canonical deployment path. A push to `main` runs the Go
+and landing checks, then publishes the generated static files through Tailscale
+to `/home/web/mole/landing/dist` and reloads the `mole-landing` pm2 process as
+the `web` user. The destination directory and process are intentionally owned
+by `web`; the workflow does not need root access.
+
+For an emergency manual copy of an already-built `dist/` directory:
 
 ```bash
-ssh web@192.168.1.60
-cd /srv/mole && git pull --ff-only
-pnpm --dir landing install --frozen-lockfile
-pnpm --dir landing build
-pm2 restart mole-landing
+rsync -az --delete dist/ web@websites:/home/web/mole/landing/dist/
+ssh web@websites 'pm2 reload mole-landing --update-env'
 ```
 
 ## Customize
