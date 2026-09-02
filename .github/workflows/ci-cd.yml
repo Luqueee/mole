@@ -1,0 +1,140 @@
+name: CI and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: mole-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    name: Go checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  landing:
+    name: Landing checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      MOLE_LANDING_URL: ${{ vars.MOLE_LANDING_URL || 'https://mole.luqueee.dev' }}
+      MOLE_UMAMI_SCRIPT_URL: ${{ vars.MOLE_UMAMI_SCRIPT_URL || '' }}
+      MOLE_UMAMI_WEBSITE_ID: ${{ vars.MOLE_UMAMI_WEBSITE_ID || '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.5.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: landing/pnpm-lock.yaml
+
+      - name: Install landing dependencies
+        run: pnpm --dir landing install --frozen-lockfile
+
+      - name: Typecheck landing
+        run: pnpm --dir landing typecheck
+
+      - name: Lint landing
+        run: pnpm --dir landing lint
+
+      - name: Build landing
+        run: pnpm --dir landing build
+
+      - name: Upload landing artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mole-landing-dist
+          path: landing/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Deploy landing
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [go, landing]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://mole.luqueee.dev
+    concurrency:
+      group: mole-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Download landing artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mole-landing-dist
+          path: landing/dist
+
+      - name: Connect runner to luque tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:github-deploy
+          ping: websites.tail70e4f3.ts.net
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_SSH_PRIVATE_KEY" || {
+            echo "Missing production secret DEPLOY_SSH_PRIVATE_KEY" >&2
+            exit 1
+          }
+          test -n "$DEPLOY_SSH_KNOWN_HOSTS" || {
+            echo "Missing production secret DEPLOY_SSH_KNOWN_HOSTS" >&2
+            exit 1
+          }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Publish static files
+        run: |
+          rsync -az --delete --delay-updates \
+            -e "ssh -i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes" \
+            landing/dist/ \
+            web@websites.tail70e4f3.ts.net:/srv/mole/landing/dist/
+
+      - name: Reload PM2 and smoke test
+        run: |
+          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes \
+            web@websites.tail70e4f3.ts.net \
+            'pm2 reload mole-landing --update-env && curl --fail --silent --show-error --max-time 10 http://127.0.0.1:6768/ >/dev/null'
