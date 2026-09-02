@@ -126,15 +126,21 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
 
+      - name: Prepare landing directory
+        run: |
+          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes \
+            web@websites.tail70e4f3.ts.net \
+            'install -d -m 755 /home/web/mole/landing'
+
       - name: Publish static files
         run: |
           rsync -az --delete --delay-updates \
             -e "ssh -i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes" \
             landing/dist/ \
-            web@websites.tail70e4f3.ts.net:/srv/mole/landing/dist/
+            web@websites.tail70e4f3.ts.net:/home/web/mole/landing/dist/
 
       - name: Reload PM2 and smoke test
         run: |
           ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes \
             web@websites.tail70e4f3.ts.net \
-            'pm2 reload mole-landing --update-env && curl --fail --silent --show-error --max-time 10 http://127.0.0.1:6768/ >/dev/null'
+            'if pm2 describe mole-landing >/dev/null 2>&1; then pm2 reload mole-landing --update-env; else pm2 serve /home/web/mole/landing/dist 6768 --name mole-landing; fi && pm2 save && curl --fail --silent --show-error --max-time 10 http://127.0.0.1:6768/ >/dev/null'
