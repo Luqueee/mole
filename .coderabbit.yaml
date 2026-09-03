@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+tone_instructions: >-
+  Be concise and evidence-driven. Prioritize correctness, security, reliability,
+  compatibility, and user impact. Report only actionable findings and avoid
+  unrelated refactors or cosmetic suggestions.
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  review_details: false
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  related_issues: false
+  related_prs: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  enable_prompt_for_ai_agents: false
+  abort_on_close: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 2
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "[skip review]"
+
+  path_filters:
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+    - "!**/.astro/**"
+    - "!**/coverage/**"
+    - "!**/vendor/**"
+    - "!**/tmp/**"
+    - "!**/package-lock.json"
+    - "!**/pnpm-lock.yaml"
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Review this as a Go 1.26 CLI/daemon that forwards TCP ports over one SSH connection.
+        Prioritize context cancellation, goroutine/socket/file-descriptor leaks, reconnect and
+        backoff behavior, race conditions, cross-platform builds, error wrapping, and user-facing
+        CLI compatibility. For tests, look for meaningful error-path and platform coverage;
+        avoid demanding tests for purely mechanical changes. Do not suggest unrelated refactors
+        or style changes already enforced by gofmt or go vet.
+
+    - path: "landing/**/*.{astro,ts,js,mjs,cjs,css}"
+      instructions: |
+        Review this as a static Astro + Tailwind v4 site with no client-side framework runtime.
+        Prioritize accessibility, keyboard and focus behavior, labels, contrast, responsive
+        layout, SEO metadata/canonical/JSON-LD/sitemap, safe handling of public environment
+        values, and avoiding unnecessary client JavaScript. Preserve whitespace-sensitive
+        terminal/install markup and the existing Tailwind/Prettier conventions. Do not propose
+        server adapters or runtime state for this static output.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Treat workflows as production infrastructure. Check least-privilege permissions,
+        immutable action pins, pull_request trust boundaries, secret exposure, artifact
+        integrity, concurrency safety, Tailscale/SSH deployment safety, and failure atomicity.
+        Keep production deployments gated on successful Go and landing checks. Never recommend
+        putting private keys or tokens in logs or repository files.
+
+    - path: "scripts/**/*.{sh,ps1}"
+      instructions: |
+        Check strict-mode and error propagation, quoting, platform portability, temporary-file
+        cleanup, download integrity, and that install/uninstall operations stay within explicit
+        targets. Preserve documented CLI flags and idempotency.
+
+    - path: "**/*.md"
+      instructions: |
+        Keep documentation concise, technically accurate, and consistent with the current CLI
+        and deployment behavior. Flag stale commands, paths, versions, or claims. Preserve
+        English public documentation unless the changed file is explicitly localized.
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "warning"
+      requirements: >-
+        Use a concise imperative Conventional Commit title such as feat:, fix:, docs:, chore:,
+        refactor:, test:, or ci:.
+    description:
+      mode: "warning"
+
+  tools:
+    eslint:
+      enabled: true
+    golangci-lint:
+      enabled: true
+    yamllint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    github-checks:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+chat:
+  art: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CODE_REVIEW.md"
