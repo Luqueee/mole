@@ -17,6 +17,21 @@ Review priorities:
 - The landing site must continue to produce static output and preserve its accessibility, SEO, and
   responsive behavior.
 
+Subsystem contracts:
+
+- `internal/tunnel` owns one SSH connection shared by the forwarded ports. Reconnects must be
+  cancellable, bounded, and free of leaked channels, listeners, and goroutines. Host-key checking
+  and both Unix and Windows authentication paths are security-sensitive.
+- `internal/discover` must distinguish a failed remote probe from a successful probe with no
+  matching listeners. Discovery should be based on actual remote TCP listeners and retain the
+  documented reserved-port behavior.
+- `internal/config` and `cmd/mole` define the public configuration, command, flag, help, exit-code,
+  and daemon-lifecycle contracts. Preserve the documented precedence and compatibility when adding
+  options.
+- `.github/workflows` is production infrastructure: the landing artifact is built and checked
+  before publication, and deployment reaches the private server through Tailscale and SSH without
+  exposing credentials.
+
 When a concern is uncertain, explain the evidence and its assumptions instead of presenting it as
 a definite defect. Avoid repeating a finding already covered by the repository's formatters or
 linters unless the configuration makes it a real correctness or security issue.

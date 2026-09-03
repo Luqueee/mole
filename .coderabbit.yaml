@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 
 language: "en-US"
+early_access: false
 tone_instructions: >-
   Be concise and evidence-driven. Prioritize correctness, security, reliability,
   compatibility, and user impact. Report only actionable findings and avoid
@@ -17,6 +18,8 @@ reviews:
   estimate_code_review_effort: false
   related_issues: false
   related_prs: false
+  assess_linked_issues: false
+  suggested_labels: false
   suggested_reviewers: false
   auto_assign_reviewers: false
   in_progress_fortune: false
@@ -24,11 +27,17 @@ reviews:
   enable_prompt_for_ai_agents: false
   abort_on_close: true
 
+  finishing_touches:
+    resolve_merge_conflict:
+      enabled: false
+
   auto_review:
     enabled: true
     drafts: false
     auto_incremental_review: true
     auto_pause_after_reviewed_commits: 2
+    base_branches:
+      - "main"
     ignore_title_keywords:
       - "WIP"
       - "DO NOT MERGE"
@@ -43,8 +52,38 @@ reviews:
     - "!**/tmp/**"
     - "!**/package-lock.json"
     - "!**/pnpm-lock.yaml"
+    - "!**/go.sum"
 
   path_instructions:
+    - path: "internal/tunnel/**"
+      instructions: |
+        This package owns the SSH connection, its host-key verification, reconnect loop, and
+        the multiplexed TCP forwards. Flag changes that open one SSH client per port, retry
+        without bounded backoff or cancellation, leak channels/listeners/goroutines, bypass
+        host-key verification, or make reconnect lose or duplicate active forwards. Preserve
+        the Unix and Windows authentication paths.
+
+    - path: "internal/discover/**"
+      instructions: |
+        Auto-discovery must reflect the remote machine's actual TCP listeners. Check defensive
+        parsing of remote command output, reserved-port filtering, deterministic results, and
+        the distinction between an unavailable probe and a remote machine with no matching
+        listeners. Do not silently turn discovery errors into an empty port set.
+
+    - path: "internal/config/**"
+      instructions: |
+        Preserve the documented precedence and compatibility of CLI flags, YAML configuration,
+        environment values, and defaults. Malformed or unknown configuration should fail with
+        a useful error, and credentials or other sensitive values must not enter logs or user
+        facing status output.
+
+    - path: "cmd/mole/**"
+      instructions: |
+        The command and flag definitions are user-facing API. Check help text, exit codes,
+        foreground and daemon lifecycle, status/log output, and platform-specific behavior.
+        Preserve existing command names, documented flags, and the distinction between human
+        output and machine-readable output where one is documented.
+
     - path: "**/*.go"
       instructions: |
         Review this as a Go 1.26 CLI/daemon that forwards TCP ports over one SSH connection.
@@ -108,6 +147,12 @@ reviews:
     github-checks:
       enabled: true
     gitleaks:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    osvScanner:
       enabled: true
 
 chat:
