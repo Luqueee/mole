@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -121,4 +122,76 @@ func TestForwarderRetain_KeepAllIsNoOp(t *testing.T) {
 	if !contains(got, pa) || !contains(got, pb) {
 		t.Errorf("retain pruned a kept port: ports=%v, want both %d and %d", got, pa, pb)
 	}
+}
+
+func TestForwarderEnsure_RegistersListener(t *testing.T) {
+	f := newRetainForwarder()
+	port := freeLoopbackPort(t)
+	t.Cleanup(f.closeAll)
+
+	f.ensure(port)
+
+	if _, ok := f.active[port]; !ok {
+		t.Fatalf("ensure(%d) did not register the listener in active", port)
+	}
+}
+
+func TestForwarderCloseAll_ClearsActiveListeners(t *testing.T) {
+	f := newRetainForwarder()
+	port := freeLoopbackPort(t)
+
+	f.ensure(port)
+	f.closeAll()
+
+	if _, ok := f.active[port]; ok {
+		t.Fatalf("closeAll left listener %d in active", port)
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("port %d was not released by closeAll: %v", port, err)
+	}
+	_ = ln.Close()
+}
+
+func TestForwarderAddDiscover_ReturnsBindError(t *testing.T) {
+	f := newRetainForwarder()
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy port: %v", err)
+	}
+	defer blocker.Close()
+	port := blocker.Addr().(*net.TCPAddr).Port
+
+	if err := f.AddDiscover(port); err == nil {
+		t.Fatalf("AddDiscover(%d) returned nil while the local port was occupied", port)
+	}
+	if _, ok := f.active[port]; ok {
+		t.Fatalf("AddDiscover(%d) registered a listener after bind failure", port)
+	}
+}
+
+func TestForwarderAddDiscover_RejectsDuplicate(t *testing.T) {
+	f := newRetainForwarder()
+	port := freeLoopbackPort(t)
+	t.Cleanup(f.closeAll)
+
+	if err := f.AddDiscover(port); err != nil {
+		t.Fatalf("first AddDiscover(%d): %v", port, err)
+	}
+	if err := f.AddDiscover(port); err == nil {
+		t.Fatalf("second AddDiscover(%d) returned nil", port)
+	}
+}
+
+func freeLoopbackPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("release reserved port: %v", err)
+	}
+	return port
 }
