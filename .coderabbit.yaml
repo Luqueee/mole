@@ -35,6 +35,9 @@ reviews:
     enabled: true
     drafts: false
     auto_incremental_review: true
+    # Deliberately pause after two reviewed commits: active PRs often receive
+    # small fixup pushes, and reviewing every one duplicates findings and uses
+    # review allowance. A fresh review can still be requested manually.
     auto_pause_after_reviewed_commits: 2
     base_branches:
       - "main"
