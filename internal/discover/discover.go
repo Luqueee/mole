@@ -218,6 +218,7 @@ send:
 	}
 	close(jobs)
 	wg.Wait()
+	sort.Ints(out)
 	return out
 }
 

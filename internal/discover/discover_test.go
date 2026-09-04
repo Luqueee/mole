@@ -94,6 +94,32 @@ func (d *sweepDialer) Close() error {
 	return nil
 }
 
+type reverseCompletionDialer struct{}
+
+func (reverseCompletionDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	var port int
+	if _, err := scanInt(portStr, &port); err != nil {
+		return nil, err
+	}
+	delay := time.Duration(3004-port) * 50 * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+	}
+	c1, c2 := net.Pipe()
+	_ = c2.Close()
+	return c1, nil
+}
+
+func (reverseCompletionDialer) Close() error { return nil }
+
 func updateMax(max *atomic.Int64, value int64) {
 	for {
 		current := max.Load()
@@ -194,6 +220,20 @@ func TestProbeWithFactory_ReusesOneTransportAndBoundsConcurrency(t *testing.T) {
 	}
 	if got := d.closed.Load(); got != 1 {
 		t.Errorf("transport closes = %d, want 1", got)
+	}
+}
+
+func TestProbeWithFactory_SortsDiscoveredPorts(t *testing.T) {
+	candidates := []int{3000, 3001, 3002, 3003}
+
+	got, err := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+		return reverseCompletionDialer{}, nil
+	}, candidates, quietLogger())
+	if err != nil {
+		t.Fatalf("ProbeWithFactory() error = %v, want nil", err)
+	}
+	if !equalInts(got, candidates) {
+		t.Fatalf("ProbeWithFactory = %v, want sorted %v", got, candidates)
 	}
 }
 
