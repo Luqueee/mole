@@ -126,6 +126,7 @@ func TestClipBindScope(t *testing.T) {
 		"0.0.0.0:7777":     true,
 		":7777":            true,
 		"[::]:7777":        true,
+		"":                 true,
 	}
 	for addr, wantBroad := range cases {
 		if got := isBroadClipBind(addr); got != wantBroad {

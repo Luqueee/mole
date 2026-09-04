@@ -123,16 +123,16 @@ Flags:
 		*logLevel = cfg.LogLevel
 	}
 	log := newLogger(*logLevel)
-	if isBroadClipBind(*listen) {
-		log.Warn("clip server has no authentication and is listening on all interfaces", "addr", *listen, "hint", "use loopback or a private Tailscale/WireGuard address")
-	}
-
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		log.Error("clip serve: listen failed", "addr", *listen, "err", err)
 		return 1
 	}
 	defer ln.Close()
+	effectiveAddr := ln.Addr().String()
+	if isBroadClipBind(effectiveAddr) {
+		log.Warn("clip server has no authentication and is listening on all interfaces", "addr", effectiveAddr, "hint", "use loopback or a private Tailscale/WireGuard address")
+	}
 
 	srv := &http.Server{
 		Handler:           clip.New(log).Handler(),
@@ -175,6 +175,9 @@ Flags:
 }
 
 func isBroadClipBind(addr string) bool {
+	if addr == "" {
+		return true
+	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false

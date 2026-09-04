@@ -81,11 +81,16 @@ Flags:
   -test              after writing, test the SSH connection
   -force             overwrite the config file if it already exists
   -up                start mole (mole up) immediately after writing
+  -clip              configure clipboard sharing options
+  -clip-url <url>    URL the remote LXC pulls clipboard images from
+  -clip-listen <addr> address the local clipboard server binds on
+  -clip-interval-ms <n> clipboard polling interval in milliseconds
   -h, --help         show this help
 
 Environment (read when the corresponding flag is empty):
   MOLE_REMOTE, MOLE_PORTS, MOLE_AUTO_DISCOVER,
-  MOLE_CONFIG_PATH, MOLE_GLOBAL`)
+  MOLE_CONFIG_PATH, MOLE_GLOBAL, MOLE_CLIP,
+  MOLE_CLIP_URL, MOLE_CLIP_LISTEN`)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -265,7 +270,11 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 	}
 	ans.Ports = config.ParsePorts(in.PortsCSV)
 	if ans.ClipEnabled && ans.ClipURL != "" && !clipListenProvided {
-		ans.ClipListen = clipListenForURL(ans.ClipURL)
+		listen, err := clipListenForURL(ans.ClipURL)
+		if err != nil {
+			return nil, err
+		}
+		ans.ClipListen = listen
 	}
 
 	// In non-interactive mode, all required values must already be set.
@@ -368,7 +377,10 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 				urlRaw = "http://" + urlRaw
 			}
 			ans.ClipURL = urlRaw
-			listenDefault := clipListenForURL(ans.ClipURL)
+			listenDefault, err := clipListenForURL(ans.ClipURL)
+			if err != nil {
+				return nil, err
+			}
 			if clipListenProvided {
 				listenDefault = ans.ClipListen
 			}
@@ -469,23 +481,26 @@ func renderYAML(ans *initAnswers) string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func clipListenForURL(raw string) string {
+func clipListenForURL(raw string) (string, error) {
 	endpoint := strings.TrimSpace(raw)
 	if endpoint == "" {
-		return config.DefaultClipListen
+		return config.DefaultClipListen, nil
 	}
 	if !strings.Contains(endpoint, "://") {
 		endpoint = "http://" + endpoint
 	}
 	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Hostname() == "" {
-		return config.DefaultClipListen
+	if err != nil {
+		return "", fmt.Errorf("invalid clip URL %q: %w", raw, err)
+	}
+	if parsed.Hostname() == "" {
+		return "", fmt.Errorf("invalid clip URL %q: missing host", raw)
 	}
 	port := parsed.Port()
 	if port == "" {
 		port = "7777"
 	}
-	return net.JoinHostPort(parsed.Hostname(), port)
+	return net.JoinHostPort(parsed.Hostname(), port), nil
 }
 
 func validateRemote(r string) error {

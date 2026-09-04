@@ -196,32 +196,40 @@ func Load(path string) (*Config, error) {
 		ClipURL    string  `yaml:"clip_url"`
 		ClipListen *string `yaml:"clip_listen"`
 	}
-	if err := yaml.Unmarshal(data, &clipConfig); err == nil && clipConfig.ClipListen == nil && strings.TrimSpace(clipConfig.ClipURL) != "" {
-		if listen := clipListenForURL(clipConfig.ClipURL); listen != "" {
-			cfg.ClipListen = listen
+	if err := yaml.Unmarshal(data, &clipConfig); err != nil {
+		return nil, fmt.Errorf("parse config %q: %w", path, err)
+	}
+	if clipConfig.ClipListen == nil && strings.TrimSpace(clipConfig.ClipURL) != "" {
+		listen, err := clipListenForURL(clipConfig.ClipURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse config %q: %w", path, err)
 		}
+		cfg.ClipListen = listen
 	}
 
 	return cfg, nil
 }
 
-func clipListenForURL(raw string) string {
+func clipListenForURL(raw string) (string, error) {
 	endpoint := strings.TrimSpace(raw)
 	if endpoint == "" {
-		return ""
+		return "", nil
 	}
 	if !strings.Contains(endpoint, "://") {
 		endpoint = "http://" + endpoint
 	}
 	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Hostname() == "" {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("invalid clip URL %q: %w", raw, err)
+	}
+	if parsed.Hostname() == "" {
+		return "", fmt.Errorf("invalid clip URL %q: missing host", raw)
 	}
 	port := parsed.Port()
 	if port == "" {
 		port = "7777"
 	}
-	return net.JoinHostPort(parsed.Hostname(), port)
+	return net.JoinHostPort(parsed.Hostname(), port), nil
 }
 
 // Save writes cfg back to path as YAML, preserving any comments and

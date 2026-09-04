@@ -15,12 +15,34 @@ func TestClipListenForURL(t *testing.T) {
 		"https://[fd00::10]:9000": "[fd00::10]:9000",
 		"http://100.64.0.10":      "100.64.0.10:7777",
 		"":                        config.DefaultClipListen,
-		"not a URL":               config.DefaultClipListen,
 	}
 	for raw, want := range cases {
-		if got := clipListenForURL(raw); got != want {
+		got, err := clipListenForURL(raw)
+		if err != nil {
+			t.Errorf("clipListenForURL(%q) error = %v", raw, err)
+		}
+		if got != want {
 			t.Errorf("clipListenForURL(%q) = %q, want %q", raw, got, want)
 		}
+	}
+	if _, err := clipListenForURL("not a URL"); err == nil {
+		t.Fatal("clipListenForURL() accepted a malformed URL")
+	}
+	if _, err := clipListenForURL("http://100.64.0.10:abc"); err == nil {
+		t.Fatal("clipListenForURL() accepted a nonnumeric port")
+	}
+}
+
+func TestGatherAnswers_RejectsMalformedClipURL(t *testing.T) {
+	_, err := gatherAnswers(initInputs{
+		Remote:         "dev",
+		PortsCSV:       "3000",
+		ClipEnabled:    true,
+		ClipURL:        "http://100.64.0.10:abc",
+		ClipIntervalMs: 500,
+	}, initOptions{})
+	if err == nil || !strings.Contains(err.Error(), "invalid clip URL") {
+		t.Fatalf("gatherAnswers() error = %v, want invalid clip URL", err)
 	}
 }
 

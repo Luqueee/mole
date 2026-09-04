@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -104,6 +105,20 @@ func TestLoad_ExplicitClipListen(t *testing.T) {
 	}
 	if cfg.ClipListen != "127.0.0.1:7777" {
 		t.Errorf("ClipListen = %q, want explicit loopback interface", cfg.ClipListen)
+	}
+}
+
+func TestLoad_RejectsMalformedClipURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cfg.yaml")
+	content := "clip_url: http://100.64.0.10:abc\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "invalid clip URL") {
+		t.Fatalf("Load() error = %v, want invalid clip URL", err)
 	}
 }
 
