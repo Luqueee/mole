@@ -124,12 +124,61 @@ func (c *blockingContextConn) NewSession() (*ssh.Session, error) {
 
 func (c *blockingContextConn) Close() error { return nil }
 
+type trackedLiveConn struct {
+	liveConn
+	closed atomic.Int64
+}
+
+func (c *trackedLiveConn) Close() error {
+	c.closed.Add(1)
+	return nil
+}
+
+type blockingSSHTransport struct {
+	opened    chan struct{}
+	closed    chan struct{}
+	openOnce  sync.Once
+	closeOnce sync.Once
+}
+
+func (c *blockingSSHTransport) User() string          { return "test" }
+func (c *blockingSSHTransport) SessionID() []byte     { return nil }
+func (c *blockingSSHTransport) ClientVersion() []byte { return nil }
+func (c *blockingSSHTransport) ServerVersion() []byte { return nil }
+func (c *blockingSSHTransport) RemoteAddr() net.Addr  { return fakeAddr("remote") }
+func (c *blockingSSHTransport) LocalAddr() net.Addr   { return fakeAddr("local") }
+func (c *blockingSSHTransport) SendRequest(string, bool, []byte) (bool, []byte, error) {
+	return false, nil, errors.New("transport closed")
+}
+func (c *blockingSSHTransport) OpenChannel(string, []byte) (ssh.Channel, <-chan *ssh.Request, error) {
+	c.openOnce.Do(func() { close(c.opened) })
+	<-c.closed
+	return nil, nil, errors.New("transport closed")
+}
+func (c *blockingSSHTransport) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+func (c *blockingSSHTransport) Wait() error {
+	<-c.closed
+	return io.EOF
+}
+
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "test" }
+func (a fakeAddr) String() string  { return string(a) }
+
 func TestManager_DialContextCancellation(t *testing.T) {
 	client := &blockingContextConn{started: make(chan struct{})}
+	persistent := &trackedLiveConn{}
 	m := &Manager{
 		addr:   "x:22",
 		log:    discardLogger(),
-		client: client,
+		client: persistent,
+		dialContext: func(context.Context) (sshConn, error) {
+			return client, nil
+		},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -155,6 +204,92 @@ func TestManager_DialContextCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("DialContext() did not return after cancellation")
 	}
+	if got := persistent.closed.Load(); got != 0 {
+		t.Fatalf("persistent SSH client closed %d times, want 0", got)
+	}
+}
+
+func TestDialSSHChannelContextClosesTemporaryTransport(t *testing.T) {
+	transport := &blockingSSHTransport{
+		opened: make(chan struct{}),
+		closed: make(chan struct{}),
+	}
+	incoming := make(chan ssh.NewChannel)
+	requests := make(chan *ssh.Request)
+	close(incoming)
+	close(requests)
+	client := ssh.NewClient(transport, incoming, requests)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := dialSSHChannelContext(ctx, client, "tcp", "127.0.0.1:3000")
+		errCh <- err
+	}()
+
+	select {
+	case <-transport.opened:
+	case <-time.After(time.Second):
+		t.Fatal("temporary SSH channel open did not start")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("dialSSHChannelContext() error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("dialSSHChannelContext() did not return after cancellation")
+	}
+	select {
+	case <-transport.closed:
+	case <-time.After(time.Second):
+		t.Fatal("temporary SSH transport remained open after cancellation")
+	}
+}
+
+func TestManagerReconnectContextCancellationWhileWaiting(t *testing.T) {
+	started := make(chan struct{})
+	firstDone := make(chan error, 1)
+	m := &Manager{
+		addr:   "x:22",
+		log:    discardLogger(),
+		client: &liveConn{},
+		dialContext: func(ctx context.Context) (sshConn, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+	dead := m.client
+	firstCtx, firstCancel := context.WithCancel(context.Background())
+	go func() {
+		_, err := m.reconnectContext(firstCtx, dead)
+		firstDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first reconnect did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := m.reconnectContext(ctx, dead)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting reconnect error = %v, want context deadline", err)
+	}
+
+	firstCancel()
+	select {
+	case reconnectErr := <-firstDone:
+		if !errors.Is(reconnectErr, context.Canceled) {
+			t.Fatalf("first reconnect error = %v, want context cancellation", reconnectErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first reconnect did not release after cancellation")
+	}
 }
 
 // TestManager_ReconnectCollapsesConcurrentDials is the teeth: N goroutines
@@ -176,6 +311,10 @@ func TestManager_ReconnectCollapsesConcurrentDials(t *testing.T) {
 		addr: "x:22",
 		log:  discardLogger(),
 		dial: func() (sshConn, error) {
+			atomic.AddInt64(&redials, 1)
+			return live, nil
+		},
+		dialContext: func(context.Context) (sshConn, error) {
 			atomic.AddInt64(&redials, 1)
 			return live, nil
 		},
@@ -223,6 +362,10 @@ func TestManager_DialReusesLiveClientNoRedial(t *testing.T) {
 		addr: "x:22",
 		log:  discardLogger(),
 		dial: func() (sshConn, error) {
+			atomic.AddInt64(&redials, 1)
+			return &liveConn{}, nil
+		},
+		dialContext: func(context.Context) (sshConn, error) {
 			atomic.AddInt64(&redials, 1)
 			return &liveConn{}, nil
 		},
