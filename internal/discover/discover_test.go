@@ -171,10 +171,13 @@ func TestProbeWithFactory_ReusesOneTransportAndBoundsConcurrency(t *testing.T) {
 	}
 	var factories atomic.Int64
 
-	got := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+	got, err := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
 		factories.Add(1)
 		return d, nil
 	}, candidates, quietLogger())
+	if err != nil {
+		t.Fatalf("ProbeWithFactory() error = %v, want nil", err)
+	}
 	sort.Ints(got)
 
 	if !equalInts(got, candidates) {
@@ -191,6 +194,19 @@ func TestProbeWithFactory_ReusesOneTransportAndBoundsConcurrency(t *testing.T) {
 	}
 	if got := d.closed.Load(); got != 1 {
 		t.Errorf("transport closes = %d, want 1", got)
+	}
+}
+
+func TestProbeWithFactory_ReturnsTransportSetupError(t *testing.T) {
+	wantErr := errors.New("temporary SSH transport unavailable")
+	got, err := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+		return nil, wantErr
+	}, []int{3000}, quietLogger())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ProbeWithFactory() error = %v, want %v", err, wantErr)
+	}
+	if got != nil {
+		t.Fatalf("ProbeWithFactory() ports = %v, want nil on setup error", got)
 	}
 }
 

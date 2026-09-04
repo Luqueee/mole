@@ -488,9 +488,14 @@ func discoverInto(ctx context.Context, fwd *forwarder, mgr *tunnel.Manager, cand
 	if !authoritative {
 		// Couldn't enumerate (tool missing or transport down). Probe the
 		// candidate list and only add — never prune on a guess.
-		for _, p := range discover.ProbeWithFactory(ctx, func(probeCtx context.Context) (discover.SweepDialer, error) {
+		probed, err := discover.ProbeWithFactory(ctx, func(probeCtx context.Context) (discover.SweepDialer, error) {
 			return mgr.NewProbeDialer(probeCtx)
-		}, candidates, log) {
+		}, candidates, log)
+		if err != nil {
+			log.Debug("candidate probing failed", "err", err)
+			return
+		}
+		for _, p := range probed {
 			if !exclude[p] {
 				fwd.ensure(p)
 			}

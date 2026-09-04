@@ -7,6 +7,7 @@ package discover
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -142,7 +143,7 @@ func Probe(ctx context.Context, d Dialer, candidates []int, log *slog.Logger) []
 // The sweep timeout also bounds all in-flight channel opens; closing the
 // dialer after the workers finish guarantees that a cancelled SSH channel
 // cannot outlive the transport that owns it.
-func ProbeWithFactory(ctx context.Context, factory func(context.Context) (SweepDialer, error), candidates []int, log *slog.Logger) []int {
+func ProbeWithFactory(ctx context.Context, factory func(context.Context) (SweepDialer, error), candidates []int, log *slog.Logger) ([]int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -151,10 +152,15 @@ func ProbeWithFactory(ctx context.Context, factory func(context.Context) (SweepD
 	d, err := factory(sweepCtx)
 	if err != nil {
 		log.Debug("probe transport setup failed", "err", err)
-		return nil
+		return nil, fmt.Errorf("probe transport setup: %w", err)
+	}
+	if d == nil {
+		err := errors.New("probe factory returned a nil dialer")
+		log.Debug("probe transport setup failed", "err", err)
+		return nil, err
 	}
 	defer d.Close()
-	return probeWithSweep(sweepCtx, d, candidates, log)
+	return probeWithSweep(sweepCtx, d, candidates, log), nil
 }
 
 func probeWithSweep(ctx context.Context, d Dialer, candidates []int, log *slog.Logger) []int {
