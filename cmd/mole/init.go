@@ -269,12 +269,14 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 		ClipIntervalMs: in.ClipIntervalMs,
 	}
 	ans.Ports = config.ParsePorts(in.PortsCSV)
-	if ans.ClipEnabled && ans.ClipURL != "" && !clipListenProvided {
+	if ans.ClipEnabled && ans.ClipURL != "" {
 		listen, err := clipListenForURL(ans.ClipURL)
 		if err != nil {
 			return nil, err
 		}
-		ans.ClipListen = listen
+		if !clipListenProvided {
+			ans.ClipListen = listen
+		}
 	}
 
 	// In non-interactive mode, all required values must already be set.
@@ -491,10 +493,10 @@ func clipListenForURL(raw string) (string, error) {
 	}
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("invalid clip URL %q: %w", raw, err)
+		return "", errors.New("invalid clip URL: malformed syntax or port")
 	}
 	if parsed.Hostname() == "" {
-		return "", fmt.Errorf("invalid clip URL %q: missing host", raw)
+		return "", errors.New("invalid clip URL: missing host")
 	}
 	port := parsed.Port()
 	if port == "" {

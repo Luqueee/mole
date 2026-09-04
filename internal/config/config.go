@@ -4,6 +4,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -199,12 +200,14 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &clipConfig); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
-	if clipConfig.ClipListen == nil && strings.TrimSpace(clipConfig.ClipURL) != "" {
+	if strings.TrimSpace(clipConfig.ClipURL) != "" {
 		listen, err := clipListenForURL(clipConfig.ClipURL)
 		if err != nil {
 			return nil, fmt.Errorf("parse config %q: %w", path, err)
 		}
-		cfg.ClipListen = listen
+		if clipConfig.ClipListen == nil {
+			cfg.ClipListen = listen
+		}
 	}
 
 	return cfg, nil
@@ -220,10 +223,10 @@ func clipListenForURL(raw string) (string, error) {
 	}
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("invalid clip URL %q: %w", raw, err)
+		return "", errors.New("invalid clip URL: malformed syntax or port")
 	}
 	if parsed.Hostname() == "" {
-		return "", fmt.Errorf("invalid clip URL %q: missing host", raw)
+		return "", errors.New("invalid clip URL: missing host")
 	}
 	port := parsed.Port()
 	if port == "" {

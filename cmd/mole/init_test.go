@@ -30,6 +30,13 @@ func TestClipListenForURL(t *testing.T) {
 	}
 	if _, err := clipListenForURL("http://100.64.0.10:abc"); err == nil {
 		t.Fatal("clipListenForURL() accepted a nonnumeric port")
+	} else if strings.Contains(err.Error(), "abc") {
+		t.Fatalf("clipListenForURL() exposed malformed port in error: %v", err)
+	}
+	if _, err := clipListenForURL("http://user:sensitive-value@host:abc"); err == nil {
+		t.Fatal("clipListenForURL() accepted credentials with a malformed port")
+	} else if strings.Contains(err.Error(), "sensitive-value") {
+		t.Fatalf("clipListenForURL() exposed URL credentials in error: %v", err)
 	}
 }
 
@@ -39,10 +46,14 @@ func TestGatherAnswers_RejectsMalformedClipURL(t *testing.T) {
 		PortsCSV:       "3000",
 		ClipEnabled:    true,
 		ClipURL:        "http://100.64.0.10:abc",
+		ClipListen:     "127.0.0.1:7777",
 		ClipIntervalMs: 500,
 	}, initOptions{})
 	if err == nil || !strings.Contains(err.Error(), "invalid clip URL") {
 		t.Fatalf("gatherAnswers() error = %v, want invalid clip URL", err)
+	}
+	if strings.Contains(err.Error(), "100.64.0.10") {
+		t.Fatalf("gatherAnswers() exposed URL in error: %v", err)
 	}
 }
 

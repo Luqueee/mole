@@ -111,7 +111,7 @@ func TestLoad_ExplicitClipListen(t *testing.T) {
 func TestLoad_RejectsMalformedClipURL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.yaml")
-	content := "clip_url: http://100.64.0.10:abc\n"
+	content := "clip_url: http://user:sensitive-value@100.64.0.10:abc\nclip_listen: 127.0.0.1:7777\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -119,6 +119,9 @@ func TestLoad_RejectsMalformedClipURL(t *testing.T) {
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "invalid clip URL") {
 		t.Fatalf("Load() error = %v, want invalid clip URL", err)
+	}
+	if strings.Contains(err.Error(), "sensitive-value") || strings.Contains(err.Error(), "100.64.0.10") {
+		t.Fatalf("Load() exposed URL details in error: %v", err)
 	}
 }
 
