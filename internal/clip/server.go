@@ -108,25 +108,42 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmpName := tmp.Name()
+	closed := false
+	closeTemp := func() error {
+		if closed {
+			return nil
+		}
+		closed = true
+		return tmp.Close()
+	}
 	defer func() {
 		// On any failure path, make sure we don't leave a half-written
 		// tmp behind. A successful rename already moved it away.
 		_ = os.Remove(tmpName)
 	}()
+	defer func() {
+		_ = closeTemp()
+	}()
 
 	n, err := io.Copy(tmp, r.Body)
 	if err != nil {
 		var maxErr *http.MaxBytesError
+		closeErr := closeTemp()
 		if errors.As(err, &maxErr) {
+			if closeErr != nil {
+				s.log.Warn("clip server: tmp close failed", "err", closeErr)
+			}
 			http.Error(w, "image too large", http.StatusRequestEntityTooLarge)
 			return
 		}
-		_ = tmp.Close()
+		if closeErr != nil {
+			s.log.Warn("clip server: tmp close failed", "err", closeErr)
+		}
 		s.log.Warn("clip server: read body failed", "err", err)
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}
-	if err := tmp.Close(); err != nil {
+	if err := closeTemp(); err != nil {
 		s.log.Warn("clip server: tmp close failed", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
