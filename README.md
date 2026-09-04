@@ -300,9 +300,23 @@ desktop. Clipboard watching is macOS-only; other platforms can still serve
 explicit pushes and pull.
 
 ```bash
-mole clip serve              # on the source machine (binds clip_listen, default 0.0.0.0:7777)
+mole clip serve              # on the source machine (default: loopback 127.0.0.1:7777)
 mole clip pull               # on the target; uses clip_url from the config, or -url
 ```
+
+The clip endpoint has no authentication. The default loopback bind keeps it
+off the network; for a remote pull, bind to the source machine's private
+WireGuard or Tailscale address explicitly and use the same address in
+`clip_url`:
+
+```yaml
+clip_url: http://100.64.0.10:7777
+clip_listen: 100.64.0.10:7777
+```
+
+Binding to `0.0.0.0:7777`, `:7777`, or `[::]:7777` is supported for controlled
+networks, but `mole clip serve` emits a warning because every interface can
+reach the unauthenticated endpoint.
 
 
 ### Generate the config with `mole init`
@@ -363,7 +377,7 @@ mole ports  remove|rm <port> [-config PATH]
 mole ports  list|ls [-config PATH]
 mole config edit [-config PATH] [-editor CMD]
 mole init   [flags]
-mole clip   serve [-listen 0.0.0.0:7777] [-watch] [-config PATH] [-log-level L]
+mole clip   serve [-listen 127.0.0.1:7777] [-watch] [-config PATH] [-log-level L]
 mole clip   pull  [-url URL] [-config PATH] [-log-level L]
 mole update [-version REF] [-dry-run] [-no-verify]
 mole version · mole help
@@ -383,7 +397,7 @@ mole version · mole help
 | `ssh_port`       | int    | `22`                 | SSH port on the remote                             |
 | `insecure`       | bool   | `false`              | Disable SSH host key verification (UNSAFE; dev only) |
 | `clip_url`       | string | —                    | Clip server URL used by `mole clip pull`           |
-| `clip_listen`    | string | `0.0.0.0:7777`       | Bind address for `mole clip serve`                 |
+| `clip_listen`    | string | `127.0.0.1:7777`     | Bind address; use a private Tailscale/WireGuard IP for remote access |
 | `clip_interval_ms` | int  | —                    | Clipboard poll interval for `clip serve -watch`    |
 
 Fallback `discover_ports`:

@@ -117,6 +117,24 @@ func TestClipPull_NoImage_ExitCodeMapping(t *testing.T) {
 	}
 }
 
+func TestClipBindScope(t *testing.T) {
+	cases := map[string]bool{
+		"127.0.0.1:7777":   false,
+		"100.64.0.10:7777": false,
+		"10.0.0.10:7777":   false,
+		"[::1]:7777":       false,
+		"0.0.0.0:7777":     true,
+		":7777":            true,
+		"[::]:7777":        true,
+		"":                 true,
+	}
+	for addr, wantBroad := range cases {
+		if got := isBroadClipBind(addr); got != wantBroad {
+			t.Errorf("isBroadClipBind(%q) = %v, want %v", addr, got, wantBroad)
+		}
+	}
+}
+
 // silentLogger returns a logger that throws away every record. Keeps
 // the test output clean.
 func silentLogger() *slog.Logger {

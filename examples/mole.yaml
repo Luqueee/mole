@@ -34,3 +34,9 @@ ssh_port: 22
 # Disable SSH host key verification. UNSAFE — leaves the tunnel open to
 # man-in-the-middle. Off by default; only for throwaway dev hosts.
 # insecure: false
+
+# Optional clipboard sharing. The endpoint has no authentication and defaults
+# to loopback. For remote access, use the same private Tailscale or WireGuard
+# address in both fields (replace 100.64.0.10 with the source machine's IP).
+# clip_url: http://100.64.0.10:7777
+# clip_listen: 100.64.0.10:7777

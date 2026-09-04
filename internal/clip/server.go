@@ -2,7 +2,8 @@
 // Package clip shares a single clipboard image between two mole
 // processes over HTTP. The Mac runs Server; the LXC runs Client.
 //
-// The transport is a plain HTTP endpoint reachable over a WireGuard
+// The transport is a plain HTTP endpoint reachable over a private WireGuard
+// or Tailscale
 // link, not over mole's SSH tunnel: an earlier version of this code
 // tried to wire a reverse forward through tunnel.Manager, but
 // golang.org/x/crypto/ssh does not expose the ListenOn primitive needed
