@@ -1,6 +1,7 @@
 package discover
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeDialer simulates a remote that has certain ports open. All
@@ -54,6 +56,79 @@ func (f *fakeDialer) Dial(network, addr string) (net.Conn, error) {
 	return c1, nil
 }
 
+func (f *fakeDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.Dial(network, addr)
+}
+
+type sweepDialer struct {
+	inner     *fakeDialer
+	delay     time.Duration
+	dials     atomic.Int64
+	active    atomic.Int64
+	maxActive atomic.Int64
+	closed    atomic.Int64
+}
+
+func (d *sweepDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	active := d.active.Add(1)
+	defer d.active.Add(-1)
+	updateMax(&d.maxActive, active)
+	d.dials.Add(1)
+	if d.delay > 0 {
+		timer := time.NewTimer(d.delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return d.inner.DialContext(ctx, network, addr)
+}
+
+func (d *sweepDialer) Close() error {
+	d.closed.Add(1)
+	return nil
+}
+
+type reverseCompletionDialer struct{}
+
+func (reverseCompletionDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	var port int
+	if _, err := scanInt(portStr, &port); err != nil {
+		return nil, err
+	}
+	delay := time.Duration(3004-port) * 50 * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+	}
+	c1, c2 := net.Pipe()
+	_ = c2.Close()
+	return c1, nil
+}
+
+func (reverseCompletionDialer) Close() error { return nil }
+
+func updateMax(max *atomic.Int64, value int64) {
+	for {
+		current := max.Load()
+		if value <= current || max.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
 // scanInt is a tiny helper to avoid importing strconv in the fake.
 func scanInt(s string, out *int) (int, error) {
 	n := 0
@@ -74,7 +149,7 @@ func quietLogger() *slog.Logger {
 
 func TestProbe_AllClosed(t *testing.T) {
 	d := newFakeDialer(nil)
-	got := Probe(d, []int{3000, 5173, 8080}, quietLogger())
+	got := Probe(context.Background(), d, []int{3000, 5173, 8080}, quietLogger())
 	if len(got) != 0 {
 		t.Errorf("Probe with no open ports = %v, want empty", got)
 	}
@@ -85,7 +160,7 @@ func TestProbe_AllClosed(t *testing.T) {
 
 func TestProbe_AllOpen(t *testing.T) {
 	d := newFakeDialer([]int{3000, 5173, 8080})
-	got := Probe(d, []int{3000, 5173, 8080}, quietLogger())
+	got := Probe(context.Background(), d, []int{3000, 5173, 8080}, quietLogger())
 	sort.Ints(got)
 	want := []int{3000, 5173, 8080}
 	if !equalInts(got, want) {
@@ -95,7 +170,7 @@ func TestProbe_AllOpen(t *testing.T) {
 
 func TestProbe_Mixed(t *testing.T) {
 	d := newFakeDialer([]int{3000, 8080})
-	got := Probe(d, []int{3000, 5173, 8080, 9000}, quietLogger())
+	got := Probe(context.Background(), d, []int{3000, 5173, 8080, 9000}, quietLogger())
 	sort.Ints(got)
 	want := []int{3000, 8080}
 	if !equalInts(got, want) {
@@ -105,12 +180,121 @@ func TestProbe_Mixed(t *testing.T) {
 
 func TestProbe_EmptyCandidates(t *testing.T) {
 	d := newFakeDialer([]int{3000})
-	got := Probe(d, nil, quietLogger())
+	got := Probe(context.Background(), d, nil, quietLogger())
 	if len(got) != 0 {
 		t.Errorf("Probe(nil) = %v, want empty", got)
 	}
 	if d.dials.Load() != 0 {
 		t.Errorf("dials = %d, want 0", d.dials.Load())
+	}
+}
+
+func TestProbeWithFactory_ReusesOneTransportAndBoundsConcurrency(t *testing.T) {
+	candidates := []int{3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011}
+	d := &sweepDialer{
+		inner: newFakeDialer(candidates),
+		delay: time.Millisecond,
+	}
+	var factories atomic.Int64
+
+	got, err := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+		factories.Add(1)
+		return d, nil
+	}, candidates, quietLogger())
+	if err != nil {
+		t.Fatalf("ProbeWithFactory() error = %v, want nil", err)
+	}
+	sort.Ints(got)
+
+	if !equalInts(got, candidates) {
+		t.Fatalf("ProbeWithFactory = %v, want %v", got, candidates)
+	}
+	if got := factories.Load(); got != 1 {
+		t.Errorf("factory calls = %d, want 1", got)
+	}
+	if got := d.dials.Load(); got != int64(len(candidates)) {
+		t.Errorf("dials = %d, want %d", got, len(candidates))
+	}
+	if got := d.maxActive.Load(); got > maxProbeConcurrency {
+		t.Errorf("max concurrent probes = %d, want at most %d", got, maxProbeConcurrency)
+	}
+	if got := d.closed.Load(); got != 1 {
+		t.Errorf("transport closes = %d, want 1", got)
+	}
+}
+
+func TestProbeWithFactory_SortsDiscoveredPorts(t *testing.T) {
+	candidates := []int{3000, 3001, 3002, 3003}
+
+	got, err := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+		return reverseCompletionDialer{}, nil
+	}, candidates, quietLogger())
+	if err != nil {
+		t.Fatalf("ProbeWithFactory() error = %v, want nil", err)
+	}
+	if !equalInts(got, candidates) {
+		t.Fatalf("ProbeWithFactory = %v, want sorted %v", got, candidates)
+	}
+}
+
+func TestProbeWithFactory_ReturnsTransportSetupError(t *testing.T) {
+	wantErr := errors.New("temporary SSH transport unavailable")
+	got, err := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+		return nil, wantErr
+	}, []int{3000}, quietLogger())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ProbeWithFactory() error = %v, want %v", err, wantErr)
+	}
+	if got != nil {
+		t.Fatalf("ProbeWithFactory() ports = %v, want nil on setup error", got)
+	}
+}
+
+type blockingDialer struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (d *blockingDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	d.once.Do(func() { close(d.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestProbe_CancelsStalledDial(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &blockingDialer{started: make(chan struct{})}
+	done := make(chan []int, 1)
+	go func() {
+		done <- Probe(ctx, d, []int{3000}, quietLogger())
+	}()
+
+	select {
+	case <-d.started:
+	case <-time.After(time.Second):
+		t.Fatal("probe did not start")
+	}
+	cancel()
+
+	select {
+	case got := <-done:
+		if len(got) != 0 {
+			t.Errorf("Probe after cancellation = %v, want empty", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Probe did not return after cancellation")
+	}
+}
+
+func TestProbe_TimeoutsStalledDial(t *testing.T) {
+	d := &blockingDialer{started: make(chan struct{})}
+	start := time.Now()
+	got := probeWithTimeout(context.Background(), d, []int{3000}, quietLogger(), 10*time.Millisecond)
+	if len(got) != 0 {
+		t.Errorf("Probe after timeout = %v, want empty", got)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("Probe timeout took %s, want it bounded", elapsed)
 	}
 }
 
@@ -155,7 +339,7 @@ func TestProbe_RealLoopbackServer(t *testing.T) {
 		return nil, errors.New("fake: closed")
 	})
 
-	got := Probe(dialer, []int{openPort, closedPort, 65530}, quietLogger())
+	got := Probe(context.Background(), dialer, []int{openPort, closedPort, 65530}, quietLogger())
 	sort.Ints(got)
 	want := []int{openPort}
 	if !equalInts(got, want) {
@@ -166,6 +350,13 @@ func TestProbe_RealLoopbackServer(t *testing.T) {
 type dialerFunc func(network, addr string) (net.Conn, error)
 
 func (f dialerFunc) Dial(network, addr string) (net.Conn, error) {
+	return f(network, addr)
+}
+
+func (f dialerFunc) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return f(network, addr)
 }
 
@@ -181,7 +372,7 @@ func TestProbe_ParallelSafety(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i] = Probe(d, []int{3000, 5173, 8080, 9000, 9090}, quietLogger())
+			results[i] = Probe(context.Background(), d, []int{3000, 5173, 8080, 9000, 9090}, quietLogger())
 		}(i)
 	}
 	wg.Wait()

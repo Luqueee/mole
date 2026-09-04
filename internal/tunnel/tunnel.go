@@ -29,6 +29,7 @@ import (
 // coordination can be exercised without standing up a real SSH server.
 type sshConn interface {
 	Dial(network, addr string) (net.Conn, error)
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 	NewSession() (*ssh.Session, error)
 	Close() error
 }
@@ -39,6 +40,10 @@ type Manager struct {
 	config *ssh.ClientConfig
 	log    *slog.Logger
 	dial   func() (sshConn, error) // opens a fresh transport; swappable in tests
+	// dialContext opens a fresh transport whose network operations observe
+	// ctx. Context-aware dials use a temporary transport so a cancelled
+	// channel open never has to close the manager's live client.
+	dialContext func(context.Context) (sshConn, error)
 
 	// agentConn is retained by agent-backed signers in config and must stay
 	// open until the manager is closed.
@@ -49,7 +54,10 @@ type Manager struct {
 
 	// reconnectMu serialises reconnects so a herd of concurrent dials
 	// failing on a dead transport triggers ONE redial, not one per port.
-	reconnectMu sync.Mutex
+	// A channel, rather than sync.Mutex, lets context-aware callers stop
+	// waiting when their request is cancelled.
+	reconnectMu   chan struct{}
+	reconnectOnce sync.Once
 }
 
 // dialAgentFunc is swappable in tests so agent connection ownership can be
@@ -75,6 +83,9 @@ func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
 	m.dial = func() (sshConn, error) {
 		return dialRemote(r, cfg, insecure, log)
 	}
+	m.dialContext = func(ctx context.Context) (sshConn, error) {
+		return dialRemoteContext(ctx, r, cfg, insecure, log)
+	}
 
 	if err := m.connect(); err != nil {
 		if agentConn != nil {
@@ -98,6 +109,37 @@ func (m *Manager) connect() error {
 	if err != nil {
 		return fmt.Errorf("ssh dial %s: %w", m.addr, err)
 	}
+	return m.installClient(client)
+}
+
+// connectContext establishes a new client using the context-aware transport
+// opener. It does not replace the current client until the new transport is
+// fully ready.
+func (m *Manager) connectContext(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("tunnel: nil reconnect context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.dialContext == nil {
+		return errors.New("tunnel: context-aware SSH dial is not configured")
+	}
+	client, err := m.dialContext(ctx)
+	if err != nil {
+		return fmt.Errorf("ssh dial %s: %w", m.addr, err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = client.Close()
+		return err
+	}
+	return m.installClient(client)
+}
+
+func (m *Manager) installClient(client sshConn) error {
+	if client == nil {
+		return errors.New("tunnel: SSH dial returned a nil client")
+	}
 	m.mu.Lock()
 	if m.client != nil {
 		_ = m.client.Close()
@@ -114,8 +156,29 @@ func (m *Manager) connect() error {
 // it returns that instead of dialing again — so N ports failing on a
 // dropped transport produce ONE redial and ONE warn, not N.
 func (m *Manager) reconnect(dead sshConn) (sshConn, error) {
-	m.reconnectMu.Lock()
-	defer m.reconnectMu.Unlock()
+	return m.reconnectContext(context.Background(), dead)
+}
+
+// reconnectContext is the context-aware form of reconnect. The lock
+// acquisition and the replacement transport both observe ctx, so a caller
+// cannot remain stuck behind another reconnect after its request expires.
+func (m *Manager) reconnectContext(ctx context.Context, dead sshConn) (sshConn, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil reconnect context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.reconnectOnce.Do(func() {
+		m.reconnectMu = make(chan struct{}, 1)
+		m.reconnectMu <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-m.reconnectMu:
+	}
+	defer func() { m.reconnectMu <- struct{}{} }()
 
 	m.mu.RLock()
 	cur := m.client
@@ -128,7 +191,7 @@ func (m *Manager) reconnect(dead sshConn) (sshConn, error) {
 	if dead != nil {
 		m.log.Warn("ssh transport down, reconnecting", "addr", m.addr)
 	}
-	if err := m.connect(); err != nil {
+	if err := m.connectContext(ctx); err != nil {
 		return nil, err
 	}
 	m.log.Info("reconnected to remote")
@@ -145,7 +208,6 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 	m.mu.RLock()
 	client := m.client
 	m.mu.RUnlock()
-
 	if client == nil {
 		c, err := m.reconnect(nil)
 		if err != nil {
@@ -159,26 +221,92 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 		return conn, nil
 	}
 
-	// A rejected channel open (e.g. "connect failed (Connection
-	// refused)") means the remote refused the forwarded connection —
-	// nothing is listening on that port, or an ACL blocked it. The SSH
-	// transport itself is fine, so surface the error without tearing
-	// down and reconnecting. This is the common case during auto-
-	// discovery, where most probed ports are closed.
+	// A rejected channel open means the remote refused the forwarded
+	// connection. The SSH transport itself is still healthy.
 	var openErr *ssh.OpenChannelError
 	if errors.As(err, &openErr) {
 		return nil, err
 	}
 
-	// Otherwise the transport itself likely died. Route through reconnect
-	// so a herd of ports failing at once shares ONE redial: the per-addr
-	// detail is debug; reconnect emits the single transport-level warn.
 	m.log.Debug("ssh dial failed, reconnecting", "err", err, "addr", addr)
 	client, rerr := m.reconnect(client)
 	if rerr != nil {
 		return nil, fmt.Errorf("reconnect: %w (original: %v)", rerr, err)
 	}
 	return client.Dial(network, addr)
+}
+
+// DialContext opens a TCP connection through a temporary SSH transport while
+// respecting ctx. The temporary transport is intentional: x/crypto/ssh
+// cannot cancel one in-flight direct-tcpip channel without closing the whole
+// client, which would tear down unrelated active forwards on m.client.
+func (m *Manager) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil dial context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.dialContext == nil {
+		return nil, errors.New("tunnel: context-aware SSH dial is not configured")
+	}
+	client, err := m.dialContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := client.DialContext(ctx, network, addr)
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = conn.Close()
+		_ = client.Close()
+		return nil, err
+	}
+	return &ownedConn{Conn: conn, owner: client}, nil
+}
+
+// ProbeDialer is a temporary, context-aware SSH transport used for one
+// discovery sweep. It is separate from the manager's persistent client so a
+// cancelled sweep cannot interrupt active forwards.
+type ProbeDialer interface {
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+	Close() error
+}
+
+// NewProbeDialer opens one temporary SSH transport for a discovery sweep.
+// The caller owns it and must close it after all probe connections finish.
+func (m *Manager) NewProbeDialer(ctx context.Context) (ProbeDialer, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil probe dial context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.dialContext == nil {
+		return nil, errors.New("tunnel: context-aware SSH dial is not configured")
+	}
+	client, err := m.dialContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &probeDialer{client: client}, nil
+}
+
+type probeDialer struct {
+	client sshConn
+	once   sync.Once
+	err    error
+}
+
+func (d *probeDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return d.client.DialContext(ctx, network, addr)
+}
+
+func (d *probeDialer) Close() error {
+	d.once.Do(func() { d.err = d.client.Close() })
+	return d.err
 }
 
 // Run executes a command on the remote over a fresh SSH session and
@@ -367,6 +495,10 @@ func (c *jumpSSHConn) Dial(network, addr string) (net.Conn, error) {
 	return c.client.Dial(network, addr)
 }
 
+func (c *jumpSSHConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return dialSSHChannelContext(ctx, c.client, network, addr)
+}
+
 func (c *jumpSSHConn) NewSession() (*ssh.Session, error) {
 	return c.client.NewSession()
 }
@@ -386,69 +518,225 @@ func (c *jumpSSHConn) Close() error {
 	return err
 }
 
+// contextSSHConn wraps a direct SSH client so context-aware channel opens
+// can close the temporary client if the open is cancelled.
+type contextSSHConn struct {
+	client *ssh.Client
+}
+
+func (c *contextSSHConn) Dial(network, addr string) (net.Conn, error) {
+	return c.client.Dial(network, addr)
+}
+
+func (c *contextSSHConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return dialSSHChannelContext(ctx, c.client, network, addr)
+}
+
+func (c *contextSSHConn) NewSession() (*ssh.Session, error) {
+	return c.client.NewSession()
+}
+
+func (c *contextSSHConn) Close() error {
+	return c.client.Close()
+}
+
+// ownedConn keeps the temporary SSH transport alive for the lifetime of the
+// forwarded connection. Closing the returned connection closes both the SSH
+// channel and its dedicated transport.
+type ownedConn struct {
+	net.Conn
+	owner sshConn
+	once  sync.Once
+	err   error
+}
+
+func (c *ownedConn) Close() error {
+	c.once.Do(func() {
+		if err := c.Conn.Close(); err != nil {
+			c.err = err
+		}
+		if err := c.owner.Close(); c.err == nil {
+			c.err = err
+		}
+	})
+	return c.err
+}
+
+// dialSSHChannelContext opens one direct-tcpip channel on a temporary SSH
+// client. x/crypto/ssh's Client.DialContext returns as soon as ctx expires,
+// but its internal Client.Dial goroutine can remain blocked waiting for the
+// remote channel response. Closing this temporary client and waiting for that
+// goroutine to finish avoids the leak without disrupting active forwards on
+// the manager's persistent client.
+func dialSSHChannelContext(ctx context.Context, client *ssh.Client, network, addr string) (net.Conn, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil SSH channel context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		conn, err := client.Dial(network, addr)
+		done <- result{conn: conn, err: err}
+	}()
+	select {
+	case res := <-done:
+		return res.conn, res.err
+	case <-ctx.Done():
+		_ = client.Close()
+		res := <-done
+		if res.conn != nil {
+			_ = res.conn.Close()
+		}
+		return nil, ctx.Err()
+	}
+}
+
+// dialSSHClientContext establishes an SSH client with a context-aware TCP
+// connect and a cancellable handshake. Closing the raw connection interrupts
+// an in-flight handshake, and waiting for the result prevents a leaked
+// handshake goroutine.
+func dialSSHClientContext(ctx context.Context, network, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil SSH dial context")
+	}
+	if config == nil {
+		return nil, errors.New("tunnel: nil SSH client config")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	raw, err := (&net.Dialer{Timeout: config.Timeout}).DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return newSSHClientContext(ctx, raw, addr, config)
+}
+
+func newSSHClientContext(ctx context.Context, raw net.Conn, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	if ctx == nil {
+		_ = raw.Close()
+		return nil, errors.New("tunnel: nil SSH handshake context")
+	}
+	if config == nil {
+		_ = raw.Close()
+		return nil, errors.New("tunnel: nil SSH client config")
+	}
+	handshakeCtx := ctx
+	cancel := func() {}
+	if config.Timeout > 0 {
+		handshakeCtx, cancel = context.WithTimeout(ctx, config.Timeout)
+	}
+	defer cancel()
+	type result struct {
+		conn     ssh.Conn
+		channels <-chan ssh.NewChannel
+		requests <-chan *ssh.Request
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		conn, channels, requests, err := ssh.NewClientConn(raw, addr, config)
+		done <- result{conn: conn, channels: channels, requests: requests, err: err}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil {
+			return nil, res.err
+		}
+		return ssh.NewClient(res.conn, res.channels, res.requests), nil
+	case <-handshakeCtx.Done():
+		_ = raw.Close()
+		res := <-done
+		if res.conn != nil {
+			_ = res.conn.Close()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, handshakeCtx.Err()
+	}
+}
+
 // dialRemote connects directly or opens the configured ProxyJump chain before
 // creating the SSH client for the target.
 func dialRemote(remote Remote, config *ssh.ClientConfig, insecure bool, log *slog.Logger) (sshConn, error) {
+	return dialRemoteContext(context.Background(), remote, config, insecure, log)
+}
+
+// dialRemoteContext is the context-aware counterpart of dialRemote. Every
+// TCP connect, ProxyJump channel open, and SSH handshake can be interrupted
+// by ctx. Partially-created jumps and their agent connections are closed on
+// every failure path.
+func dialRemoteContext(ctx context.Context, remote Remote, config *ssh.ClientConfig, insecure bool, log *slog.Logger) (sshConn, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil remote dial context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(remote.ProxyJumps) == 0 {
-		return ssh.Dial("tcp", remote.Addr, config)
+		client, err := dialSSHClientContext(ctx, "tcp", remote.Addr, config)
+		if err != nil {
+			return nil, err
+		}
+		return &contextSSHConn{client: client}, nil
 	}
 
 	var jumps []*ssh.Client
 	var agentConns []net.Conn
-	for _, jump := range remote.ProxyJumps {
-		jumpConfig, agentConn, err := buildSSHConfig(jump.User, jump.IdentityFiles, jump.Addr, insecure, log)
-		if err != nil {
+	keep := false
+	defer func() {
+		if !keep {
 			closeSSHClients(jumps)
 			closeSSHAgentConns(agentConns)
+		}
+	}()
+
+	for _, jump := range remote.ProxyJumps {
+		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		jumpConfig, agentConn, err := buildSSHConfig(jump.User, jump.IdentityFiles, jump.Addr, insecure, log)
+		if err != nil {
+			return nil, err
+		}
+		if agentConn != nil {
+			agentConns = append(agentConns, agentConn)
 		}
 
 		var client *ssh.Client
 		if len(jumps) == 0 {
-			client, err = ssh.Dial("tcp", jump.Addr, jumpConfig)
+			client, err = dialSSHClientContext(ctx, "tcp", jump.Addr, jumpConfig)
 		} else {
-			conn, dialErr := jumps[len(jumps)-1].Dial("tcp", jump.Addr)
+			conn, dialErr := dialSSHChannelContext(ctx, jumps[len(jumps)-1], "tcp", jump.Addr)
 			if dialErr != nil {
-				closeSSHAgentConn(agentConn)
-				closeSSHClients(jumps)
-				closeSSHAgentConns(agentConns)
 				return nil, dialErr
 			}
-			clientConn, channels, requests, handshakeErr := ssh.NewClientConn(conn, jump.Addr, jumpConfig)
-			if handshakeErr != nil {
-				closeSSHAgentConn(agentConn)
-				closeSSHClients(jumps)
-				closeSSHAgentConns(agentConns)
-				return nil, handshakeErr
-			}
-			client = ssh.NewClient(clientConn, channels, requests)
+			client, err = newSSHClientContext(ctx, conn, jump.Addr, jumpConfig)
 		}
 		if err != nil {
-			closeSSHAgentConn(agentConn)
-			closeSSHClients(jumps)
-			closeSSHAgentConns(agentConns)
 			return nil, err
 		}
 		jumps = append(jumps, client)
-		if agentConn != nil {
-			agentConns = append(agentConns, agentConn)
-		}
 	}
 
-	conn, err := jumps[len(jumps)-1].Dial("tcp", remote.Addr)
+	conn, err := dialSSHChannelContext(ctx, jumps[len(jumps)-1], "tcp", remote.Addr)
 	if err != nil {
-		closeSSHClients(jumps)
-		closeSSHAgentConns(agentConns)
 		return nil, err
 	}
-	clientConn, channels, requests, err := ssh.NewClientConn(conn, remote.Addr, config)
+	client, err := newSSHClientContext(ctx, conn, remote.Addr, config)
 	if err != nil {
-		closeSSHClients(jumps)
-		closeSSHAgentConns(agentConns)
 		return nil, err
 	}
+	keep = true
 	return &jumpSSHConn{
-		client:     ssh.NewClient(clientConn, channels, requests),
+		client:     client,
 		jumps:      jumps,
 		agentConns: agentConns,
 	}, nil
