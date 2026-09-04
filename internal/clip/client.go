@@ -47,17 +47,25 @@ func NewClient(endpoint string, log *slog.Logger) *Client {
 // suffix means repeated pulls don't clobber each other. Returns the
 // absolute path of the written file.
 func (c *Client) Pull(ctx context.Context) (string, error) {
+	path, _, err := c.pull(ctx)
+	return path, err
+}
+
+// pull is Pull plus the Last-Modified value from the exact GET response.
+// Watch uses that value as its watermark so a publication that races with
+// the request cannot be skipped by a follow-up HEAD.
+func (c *Client) pull(ctx context.Context) (string, time.Time, error) {
 	if c.endpoint == "" {
-		return "", errors.New("clip: empty endpoint")
+		return "", time.Time{}, errors.New("clip: empty endpoint")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+"/clip/latest", nil)
 	if err != nil {
-		return "", fmt.Errorf("clip: build request: %w", err)
+		return "", time.Time{}, fmt.Errorf("clip: build request: %w", err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("clip: get latest: %w", err)
+		return "", time.Time{}, fmt.Errorf("clip: get latest: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -65,20 +73,24 @@ func (c *Client) Pull(ctx context.Context) (string, error) {
 	case http.StatusOK:
 		// fall through
 	case http.StatusNotFound:
-		return "", ErrNoImage
+		return "", time.Time{}, ErrNoImage
 	default:
-		return "", fmt.Errorf("clip: server returned %s", resp.Status)
+		return "", time.Time{}, fmt.Errorf("clip: server returned %s", resp.Status)
+	}
+	var pulledAt time.Time
+	if value := resp.Header.Get("Last-Modified"); value != "" {
+		pulledAt, _ = http.ParseTime(value)
 	}
 
 	dir := filepath.Join(os.TempDir(), "mole-clip")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("clip: mkdir %s: %w", dir, err)
+		return "", time.Time{}, fmt.Errorf("clip: mkdir %s: %w", dir, err)
 	}
 	out := filepath.Join(dir, fmt.Sprintf("mole-clip-%d.png", time.Now().UnixNano()))
 
 	tmp, err := os.CreateTemp(dir, "mole-clip-pull-*.png")
 	if err != nil {
-		return "", fmt.Errorf("clip: create tmp: %w", err)
+		return "", time.Time{}, fmt.Errorf("clip: create tmp: %w", err)
 	}
 	tmpName := tmp.Name()
 	// On any error before rename, clean up the tmp so we don't leave
@@ -92,18 +104,18 @@ func (c *Client) Pull(ctx context.Context) (string, error) {
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		_ = tmp.Close()
-		return "", fmt.Errorf("clip: read body: %w", err)
+		return "", time.Time{}, fmt.Errorf("clip: read body: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("clip: close tmp: %w", err)
+		return "", time.Time{}, fmt.Errorf("clip: close tmp: %w", err)
 	}
 	if err := os.Rename(tmpName, out); err != nil {
-		return "", fmt.Errorf("clip: rename: %w", err)
+		return "", time.Time{}, fmt.Errorf("clip: rename: %w", err)
 	}
 	committed = true
 
 	c.log.Info("clipped image pulled", "path", out, "server", c.endpoint)
-	return out, nil
+	return out, pulledAt, nil
 }
 
 // LastModified issues a HEAD against the server and returns the
@@ -160,7 +172,7 @@ func (c *Client) Watch(ctx context.Context, interval time.Duration, onNew func(s
 		// has advanced. A zero mtime (header missing) is treated as
 		// "indeterminate" — we do nothing until we have a baseline.
 		if !lm.IsZero() && lm.After(lastSeen) {
-			path, err := c.Pull(ctx)
+			path, pulledAt, err := c.pull(ctx)
 			if errors.Is(err, ErrNoImage) {
 				// Server says there's nothing yet; just keep polling.
 			} else if err != nil {
@@ -169,14 +181,13 @@ func (c *Client) Watch(ctx context.Context, interval time.Duration, onNew func(s
 				if err := onNew(path); err != nil {
 					return err
 				}
-				// Advance the watermark so we don't re-pull the same
-				// image on the next tick. The server's mtime is the
-				// canonical "image N" boundary.
-				if lm2, lerr := c.LastModified(ctx); lerr == nil && !lm2.IsZero() {
-					lastSeen = lm2
-				} else {
-					lastSeen = lm
+				// Advance the watermark to the image returned by this
+				// GET. A later publication may race with Pull; using a
+				// follow-up HEAD here would skip that image.
+				if pulledAt.IsZero() {
+					pulledAt = lm
 				}
+				lastSeen = pulledAt
 			}
 		}
 		select {
