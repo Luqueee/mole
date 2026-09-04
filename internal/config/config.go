@@ -192,6 +192,14 @@ func Load(path string) (*Config, error) {
 	if err := decoder.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); err != nil {
+		if !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("parse config %q: %w", path, err)
+		}
+	} else {
+		return nil, fmt.Errorf("parse config %q: multiple YAML documents are not supported", path)
+	}
 
 	// Keep existing clip_url-only configurations usable after the safer
 	// loopback default was introduced. An explicit clip_listen, including

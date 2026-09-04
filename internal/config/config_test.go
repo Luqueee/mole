@@ -275,6 +275,43 @@ func TestLoad_EmptyYAMLKeepsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsTrailingYAMLDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi.yaml")
+	content := "remote: dev@workstation\n---\nauto_discoverd: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() accepted multiple YAML documents")
+	}
+	if !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("Load() error = %v, want multiple-document error", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("Load() error = %v, want config path", err)
+	}
+}
+
+func TestLoad_RejectsMalformedTrailingYAMLDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi-invalid.yaml")
+	content := "remote: dev@workstation\n---\nnot: [valid\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() accepted a malformed trailing YAML document")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("Load() error = %v, want config path", err)
+	}
+}
+
 func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.yaml")
