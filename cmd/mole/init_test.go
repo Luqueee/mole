@@ -38,6 +38,14 @@ func TestClipListenForURL(t *testing.T) {
 	} else if strings.Contains(err.Error(), "sensitive-value") {
 		t.Fatalf("clipListenForURL() exposed URL credentials in error: %v", err)
 	}
+	for _, raw := range []string{
+		"http://100.64.0.10:0",
+		"http://100.64.0.10:65536",
+	} {
+		if _, err := clipListenForURL(raw); err == nil {
+			t.Errorf("clipListenForURL(%q) accepted an out-of-range port", raw)
+		}
+	}
 }
 
 func TestGatherAnswers_RejectsMalformedClipURL(t *testing.T) {
@@ -54,6 +62,25 @@ func TestGatherAnswers_RejectsMalformedClipURL(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "100.64.0.10") {
 		t.Fatalf("gatherAnswers() exposed URL in error: %v", err)
+	}
+}
+
+func TestGatherAnswers_RejectsOutOfRangeClipPort(t *testing.T) {
+	for _, raw := range []string{
+		"http://100.64.0.10:0",
+		"http://100.64.0.10:65536",
+	} {
+		_, err := gatherAnswers(initInputs{
+			Remote:         "dev",
+			PortsCSV:       "3000",
+			ClipEnabled:    true,
+			ClipURL:        raw,
+			ClipListen:     "127.0.0.1:7777",
+			ClipIntervalMs: 500,
+		}, initOptions{})
+		if err == nil || !strings.Contains(err.Error(), "port must be between 1 and 65535") {
+			t.Errorf("gatherAnswers(%q) error = %v, want port range validation", raw, err)
+		}
 	}
 }
 
@@ -87,6 +114,21 @@ func TestGatherAnswers_ClipListenEnvironmentOverridesDefault(t *testing.T) {
 	}
 	if ans.ClipListen != "100.64.0.10:8888" {
 		t.Fatalf("ClipListen = %q, want address derived from URL", ans.ClipListen)
+	}
+
+	t.Setenv("MOLE_CLIP_LISTEN", "   ")
+	ans, err = gatherAnswers(initInputs{
+		Remote:         "dev",
+		PortsCSV:       "3000",
+		ClipEnabled:    true,
+		ClipURL:        "http://100.64.0.10:9999",
+		ClipIntervalMs: 500,
+	}, initOptions{})
+	if err != nil {
+		t.Fatalf("gatherAnswers() with whitespace environment value error = %v", err)
+	}
+	if ans.ClipListen != "100.64.0.10:9999" {
+		t.Fatalf("ClipListen = %q, want address derived from URL after whitespace environment value", ans.ClipListen)
 	}
 }
 

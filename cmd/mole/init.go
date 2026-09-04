@@ -252,8 +252,9 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 	if in.ClipListen == "" {
 		in.ClipListen = envDefault("MOLE_CLIP_LISTEN", "")
 	}
-	clipListenProvided := strings.TrimSpace(in.ClipListen) != ""
-	if in.ClipListen == "" {
+	in.ClipListen = strings.TrimSpace(in.ClipListen)
+	clipListenProvided := in.ClipListen != ""
+	if !clipListenProvided {
 		in.ClipListen = config.DefaultClipListen
 	}
 
@@ -501,6 +502,10 @@ func clipListenForURL(raw string) (string, error) {
 	port := parsed.Port()
 	if port == "" {
 		port = "7777"
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", errors.New("invalid clip URL: port must be between 1 and 65535")
 	}
 	return net.JoinHostPort(parsed.Hostname(), port), nil
 }

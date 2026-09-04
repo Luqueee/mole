@@ -125,6 +125,27 @@ func TestLoad_RejectsMalformedClipURL(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsClipURLPortRange(t *testing.T) {
+	for name, port := range map[string]string{
+		"zero":          "0",
+		"above maximum": "65536",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "cfg.yaml")
+			content := "clip_url: http://100.64.0.10:" + port + "\n"
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), "port must be between 1 and 65535") {
+				t.Fatalf("Load() error = %v, want port range validation", err)
+			}
+		})
+	}
+}
+
 func TestLoad_EmptyPath(t *testing.T) {
 	cfg, err := Load("")
 	if err != nil {

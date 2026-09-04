@@ -232,6 +232,10 @@ func clipListenForURL(raw string) (string, error) {
 	if port == "" {
 		port = "7777"
 	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", errors.New("invalid clip URL: port must be between 1 and 65535")
+	}
 	return net.JoinHostPort(parsed.Hostname(), port), nil
 }
 
