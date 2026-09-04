@@ -258,7 +258,7 @@ if cfg.AutoDiscover {
 	// Initial sweep, then keep re-discovering so dev servers that
 	// come up after launch are forwarded automatically — no need to
 	// restart mole when you start your dev server.
-	discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
+		discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
 	go func() {
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
@@ -267,7 +267,7 @@ if cfg.AutoDiscover {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				discoverInto(fwd, mgr, cfg.DiscoverPorts, exclude, log)
+				discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
 			}
 		}
 	}()
@@ -483,12 +483,12 @@ func (f *forwarder) RemoveDiscover(port int) error {
 // prunes ports that have since died (see forwarder.retain). It falls back
 // to probing the fixed candidate list — add-only, no pruning — when
 // ss/netstat aren't available, since a probe can't prove a port is gone.
-func discoverInto(fwd *forwarder, mgr *tunnel.Manager, candidates []int, exclude map[int]bool, log *slog.Logger) {
+func discoverInto(ctx context.Context, fwd *forwarder, mgr *tunnel.Manager, candidates []int, exclude map[int]bool, log *slog.Logger) {
 	found, authoritative := discover.RemoteListeners(mgr, log)
 	if !authoritative {
 		// Couldn't enumerate (tool missing or transport down). Probe the
 		// candidate list and only add — never prune on a guess.
-		for _, p := range discover.Probe(mgr, candidates, log) {
+		for _, p := range discover.Probe(ctx, mgr, candidates, log) {
 			if !exclude[p] {
 				fwd.ensure(p)
 			}

@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -64,6 +65,13 @@ func (d *deadConn) Dial(network, addr string) (net.Conn, error) {
 	return nil, io.EOF // a real transport error, NOT *ssh.OpenChannelError
 }
 
+func (d *deadConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return d.Dial(network, addr)
+}
+
 func (d *deadConn) NewSession() (*ssh.Session, error) {
 	return nil, errors.New("dead transport")
 }
@@ -82,11 +90,72 @@ func (l *liveConn) Dial(network, addr string) (net.Conn, error) {
 	return fakeNetConn{}, nil
 }
 
+func (l *liveConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return l.Dial(network, addr)
+}
+
 func (l *liveConn) NewSession() (*ssh.Session, error) {
 	return nil, errors.New("unused")
 }
 
 func (l *liveConn) Close() error { return nil }
+
+type blockingContextConn struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingContextConn) Dial(network, addr string) (net.Conn, error) {
+	return nil, errors.New("unexpected context-free dial")
+}
+
+func (c *blockingContextConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	c.once.Do(func() { close(c.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (c *blockingContextConn) NewSession() (*ssh.Session, error) {
+	return nil, errors.New("unused")
+}
+
+func (c *blockingContextConn) Close() error { return nil }
+
+func TestManager_DialContextCancellation(t *testing.T) {
+	client := &blockingContextConn{started: make(chan struct{})}
+	m := &Manager{
+		addr:   "x:22",
+		log:    discardLogger(),
+		client: client,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := m.DialContext(ctx, "tcp", "127.0.0.1:3000")
+		errCh <- err
+	}()
+
+	select {
+	case <-client.started:
+	case <-time.After(time.Second):
+		t.Fatal("context-aware dial did not start")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("DialContext() error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DialContext() did not return after cancellation")
+	}
+}
 
 // TestManager_ReconnectCollapsesConcurrentDials is the teeth: N goroutines
 // all fail their first dial on the SAME dead transport at the SAME instant

@@ -29,6 +29,7 @@ import (
 // coordination can be exercised without standing up a real SSH server.
 type sshConn interface {
 	Dial(network, addr string) (net.Conn, error)
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 	NewSession() (*ssh.Session, error)
 	Close() error
 }
@@ -142,6 +143,19 @@ func (m *Manager) reconnect(dead sshConn) (sshConn, error) {
 // "127.0.0.1:PORT"). If the SSH client is dead, Dial attempts to
 // reconnect once before failing.
 func (m *Manager) Dial(network, addr string) (net.Conn, error) {
+	return m.DialContext(context.Background(), network, addr)
+}
+
+// DialContext opens a TCP connection through the SSH tunnel to addr while
+// respecting ctx. If the SSH client is dead, it attempts to reconnect once
+// before failing.
+func (m *Manager) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil dial context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m.mu.RLock()
 	client := m.client
 	m.mu.RUnlock()
@@ -154,9 +168,12 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 		client = c
 	}
 
-	conn, err := client.Dial(network, addr)
+	conn, err := client.DialContext(ctx, network, addr)
 	if err == nil {
 		return conn, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil, err
 	}
 
 	// A rejected channel open (e.g. "connect failed (Connection
@@ -169,6 +186,9 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 	if errors.As(err, &openErr) {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// Otherwise the transport itself likely died. Route through reconnect
 	// so a herd of ports failing at once shares ONE redial: the per-addr
@@ -178,7 +198,10 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 	if rerr != nil {
 		return nil, fmt.Errorf("reconnect: %w (original: %v)", rerr, err)
 	}
-	return client.Dial(network, addr)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return client.DialContext(ctx, network, addr)
 }
 
 // Run executes a command on the remote over a fresh SSH session and
@@ -365,6 +388,10 @@ type jumpSSHConn struct {
 
 func (c *jumpSSHConn) Dial(network, addr string) (net.Conn, error) {
 	return c.client.Dial(network, addr)
+}
+
+func (c *jumpSSHConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return c.client.DialContext(ctx, network, addr)
 }
 
 func (c *jumpSSHConn) NewSession() (*ssh.Session, error) {

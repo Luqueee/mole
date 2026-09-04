@@ -6,6 +6,7 @@ package discover
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,12 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Dialer is the minimal interface needed for discovery: dial a TCP
-// address. The tunnel manager satisfies this implicitly.
+// address with cancellation. The tunnel manager satisfies this implicitly.
 type Dialer interface {
-	Dial(network, addr string) (net.Conn, error)
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // Runner runs a command on the remote and returns its combined output.
@@ -115,10 +117,20 @@ func loopbackReachable(host string) bool {
 	return strings.HasPrefix(host, "127.")
 }
 
+const defaultProbeTimeout = 5 * time.Second
+
 // Probe returns the subset of candidates that respond to a TCP dial.
-// Probes run in parallel; the function blocks until all complete.
-// The returned slice is unsorted.
-func Probe(d Dialer, candidates []int, log *slog.Logger) []int {
+// Probes run in parallel; the function blocks until all complete or ctx is
+// cancelled. Each probe has its own bounded deadline. The returned slice is
+// unsorted.
+func Probe(ctx context.Context, d Dialer, candidates []int, log *slog.Logger) []int {
+	return probeWithTimeout(ctx, d, candidates, log, defaultProbeTimeout)
+}
+
+func probeWithTimeout(ctx context.Context, d Dialer, candidates []int, log *slog.Logger, timeout time.Duration) []int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var (
 		mu  sync.Mutex
 		out []int
@@ -126,12 +138,21 @@ func Probe(d Dialer, candidates []int, log *slog.Logger) []int {
 	)
 
 	for _, port := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		go func(p int) {
 			defer wg.Done()
+			probeCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
 			addr := fmt.Sprintf("127.0.0.1:%d", p)
-			conn, err := d.Dial("tcp", addr)
+			conn, err := d.DialContext(probeCtx, "tcp", addr)
 			if err != nil {
+				return
+			}
+			if probeCtx.Err() != nil {
+				_ = conn.Close()
 				return
 			}
 			_ = conn.Close()
