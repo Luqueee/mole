@@ -48,6 +48,10 @@ type Manager struct {
 	reconnectMu sync.Mutex
 }
 
+// dialAgentFunc is swappable in tests so agent connection ownership can be
+// checked without relying on a user's local SSH agent.
+var dialAgentFunc = dialAgent
+
 // New constructs a Manager and opens the first SSH connection using the
 // resolved remote (see ResolveRemote).
 func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
@@ -290,12 +294,14 @@ func authMethods(identityFiles []string) ([]ssh.AuthMethod, error) {
 	// it dials a Unix socket on Linux/macOS and a Windows named pipe
 	// on Windows. It fails silently (returns an error) when no agent
 	// is configured, which lets us fall through to direct key files.
-	if conn, err := dialAgent(os.Getenv("SSH_AUTH_SOCK")); err == nil {
+	if conn, err := dialAgentFunc(os.Getenv("SSH_AUTH_SOCK")); err == nil {
 		if signers, err := agent.NewClient(conn).Signers(); err == nil && len(signers) > 0 {
 			methods = append(methods, ssh.PublicKeys(signers...))
 			// conn stays open for the lifetime of the SSH session —
 			// the ssh.PublicKeys wrapper above retains a reference
 			// and uses it for signing operations.
+		} else {
+			_ = conn.Close()
 		}
 	}
 
