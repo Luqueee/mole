@@ -19,8 +19,8 @@ import (
 var ErrNoImage = errors.New("clip: no image on server")
 
 // Client talks to a clip.Server over HTTP. The URL is whatever the
-// server is reachable at on the WireGuard link — typically
-// http://<mac-wireguard-ip>:7777.
+// server is reachable on the private WireGuard or Tailscale link — typically
+// http://<mac-private-ip>:7777.
 type Client struct {
 	endpoint string
 	log      *slog.Logger

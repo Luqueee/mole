@@ -5,6 +5,8 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +15,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// DefaultClipListen is the least-exposure bind address for the unauthenticated
+// clipboard endpoint. Use an explicit private interface address for remote
+// access over Tailscale or WireGuard.
+const DefaultClipListen = "127.0.0.1:7777"
 
 // Config holds the runtime configuration for mole.
 type Config struct {
@@ -54,13 +61,14 @@ type Config struct {
 	Insecure bool `yaml:"insecure"`
 
 	// ClipURL is the HTTP endpoint of the clip server on the Mac
-	// (e.g. http://10.0.0.1:7777), as reachable from the LXC over
-	// WireGuard. Read by `mole clip pull`.
+	// (e.g. http://100.64.0.10:7777), as reachable from the LXC over
+	// Tailscale or WireGuard. Read by `mole clip pull`.
 	ClipURL string `yaml:"clip_url"`
 
 	// ClipListen is the address the clip server binds on the Mac.
-	// Default 0.0.0.0:7777; the WireGuard perimeter is the security
-	// boundary, so no auth is enforced. Read by `mole clip serve`.
+	// It defaults to loopback because the endpoint has no authentication.
+	// Set it to an explicit private Tailscale or WireGuard address for
+	// remote access. Read by `mole clip serve`.
 	ClipListen string `yaml:"clip_listen"`
 
 	// ClipIntervalMs controls the clipboard poll cadence on the Mac.
@@ -88,7 +96,7 @@ func Default() *Config {
 		},
 		LogLevel:   "info",
 		SSHPort:    22,
-		ClipListen: "0.0.0.0:7777",
+		ClipListen: DefaultClipListen,
 	}
 }
 
@@ -181,7 +189,39 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
 
+	// Keep existing clip_url-only configurations usable after the safer
+	// loopback default was introduced. An explicit clip_listen, including
+	// loopback, always wins over this compatibility fallback.
+	var clipConfig struct {
+		ClipURL    string  `yaml:"clip_url"`
+		ClipListen *string `yaml:"clip_listen"`
+	}
+	if err := yaml.Unmarshal(data, &clipConfig); err == nil && clipConfig.ClipListen == nil && strings.TrimSpace(clipConfig.ClipURL) != "" {
+		if listen := clipListenForURL(clipConfig.ClipURL); listen != "" {
+			cfg.ClipListen = listen
+		}
+	}
+
 	return cfg, nil
+}
+
+func clipListenForURL(raw string) string {
+	endpoint := strings.TrimSpace(raw)
+	if endpoint == "" {
+		return ""
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "http://" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "7777"
+	}
+	return net.JoinHostPort(parsed.Hostname(), port)
 }
 
 // Save writes cfg back to path as YAML, preserving any comments and

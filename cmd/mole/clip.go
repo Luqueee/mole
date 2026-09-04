@@ -1,5 +1,5 @@
 // mole clip — share clipboard images between a Mac and a remote
-// host (typically an LXC) over a WireGuard link.
+// host (typically an LXC) over a private WireGuard or Tailscale link.
 //
 // Two sub-modes:
 //
@@ -58,7 +58,7 @@ func runClip(args []string) int {
 
 func printClipUsage(w *os.File) {
 	color := cliColor(w)
-	fmt.Fprintf(w, "%s\n\n", cBold("mole clip — share clipboard images over a WireGuard link", color))
+	fmt.Fprintf(w, "%s\n\n", cBold("mole clip — share clipboard images over a private WireGuard or Tailscale link", color))
 	fmt.Fprintf(w, "  %s\n", cBold("USAGE", color))
 	fmt.Fprintf(w, "    mole clip %s\n", cDim("<serve|pull> [flags]", color))
 	fmt.Println()
@@ -67,8 +67,8 @@ func printClipUsage(w *os.File) {
 	fmt.Fprintf(w, "    %s  %s\n", cGreen("pull", color), "Run on the remote; fetch the latest image and print its path.")
 	fmt.Println()
 	fmt.Fprintf(w, "  %s\n", cBold("NOTES", color))
-	fmt.Fprintf(w, "    %s\n", cDim("  serve binds -listen (default 0.0.0.0:7777). On a WireGuard-only host,", color))
-	fmt.Fprintf(w, "    %s\n", cDim("  the link's perimeter is the security boundary. There is no auth.", color))
+	fmt.Fprintf(w, "    %s\n", cDim("  serve binds -listen (default "+config.DefaultClipListen+"). The endpoint has no auth;", color))
+	fmt.Fprintf(w, "    %s\n", cDim("  use a private Tailscale/WireGuard address when remote access is required.", color))
 	fmt.Fprintf(w, "    %s\n", cDim("  pull prints the image path on stdout and exits. Exit code 3 means", color))
 	fmt.Fprintf(w, "    %s\n", cDim("  'no image on the server yet'.", color))
 }
@@ -80,7 +80,7 @@ func runClipServe(args []string) int {
 	fs := flag.NewFlagSet("clip serve", flag.ExitOnError)
 	var (
 		configPath = fs.String("config", "", "path to YAML config (default: ./mole.yaml, then user-global)")
-		listen     = fs.String("listen", "0.0.0.0:7777", "address to bind the clip HTTP server")
+		listen     = fs.String("listen", config.DefaultClipListen, "address to bind the clip HTTP server")
 		watch      = fs.Bool("watch", true, "poll the macOS clipboard and auto-push new images")
 		interval   = fs.Duration("interval", 500*time.Millisecond, "clipboard poll cadence (only used with -watch)")
 		logLevel   = fs.String("log-level", "", "debug|info|warn|error")
@@ -93,7 +93,7 @@ polls the macOS pasteboard to keep the latest image cached.
 
 Flags:
   -config       path to YAML config (default: ./mole.yaml, then user-global)
-  -listen       bind address (default 0.0.0.0:7777)
+  -listen       bind address (default 127.0.0.1:7777)
   -watch        poll the macOS clipboard and push new images (default true)
   -interval     clipboard poll cadence (default 500ms)
   -log-level    debug|info|warn|error`)
@@ -123,6 +123,9 @@ Flags:
 		*logLevel = cfg.LogLevel
 	}
 	log := newLogger(*logLevel)
+	if isBroadClipBind(*listen) {
+		log.Warn("clip server has no authentication and is listening on all interfaces", "addr", *listen, "hint", "use loopback or a private Tailscale/WireGuard address")
+	}
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -169,6 +172,18 @@ Flags:
 	defer c()
 	_ = srv.Shutdown(shutdownCtx)
 	return 0
+}
+
+func isBroadClipBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 // runClipPull fetches the latest image from the clip server and

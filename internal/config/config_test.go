@@ -54,8 +54,8 @@ func TestDefault_DiscoverPortsContainsExpected(t *testing.T) {
 
 func TestClipDefaults(t *testing.T) {
 	cfg := Default()
-	if cfg.ClipListen != "0.0.0.0:7777" {
-		t.Errorf("ClipListen = %q, want 0.0.0.0:7777", cfg.ClipListen)
+	if cfg.ClipListen != "127.0.0.1:7777" {
+		t.Errorf("ClipListen = %q, want 127.0.0.1:7777", cfg.ClipListen)
 	}
 	if cfg.ClipURL != "" {
 		t.Errorf("ClipURL = %q, want empty (no default URL — user must set it)", cfg.ClipURL)
@@ -68,9 +68,9 @@ func TestClipDefaults(t *testing.T) {
 func TestLoad_ClipPartialYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.yaml")
-	// Only override clip_url — listen and interval should fall back
-	// to defaults. This is the realistic migration path: an existing
-	// mole.yaml gains a single clip_url key and the rest just works.
+	// Only override clip_url — listen should be derived from the endpoint
+	// so an existing mole.yaml remains reachable after the safer loopback
+	// default was introduced.
 	content := "clip_url: http://10.0.0.1:7777\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -82,11 +82,28 @@ func TestLoad_ClipPartialYAML(t *testing.T) {
 	if cfg.ClipURL != "http://10.0.0.1:7777" {
 		t.Errorf("ClipURL = %q, want http://10.0.0.1:7777", cfg.ClipURL)
 	}
-	if cfg.ClipListen != "0.0.0.0:7777" {
-		t.Errorf("ClipListen = %q, want default 0.0.0.0:7777", cfg.ClipListen)
+	if cfg.ClipListen != "10.0.0.1:7777" {
+		t.Errorf("ClipListen = %q, want address derived from ClipURL", cfg.ClipListen)
 	}
 	if cfg.ClipIntervalMs != 0 {
 		t.Errorf("ClipIntervalMs = %d, want default 0", cfg.ClipIntervalMs)
+	}
+}
+
+func TestLoad_ExplicitClipListen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cfg.yaml")
+	content := "clip_url: http://100.64.0.10:7777\nclip_listen: 127.0.0.1:7777\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ClipListen != "127.0.0.1:7777" {
+		t.Errorf("ClipListen = %q, want explicit loopback interface", cfg.ClipListen)
 	}
 }
 
