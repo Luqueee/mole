@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,57 @@ func TestServer_PutOversized_Returns413(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+func TestServer_PutOversized_DoesNotLeakTempFiles(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("open descriptor inspection requires /proc/self/fd")
+	}
+
+	s := &Server{
+		cachePath: filepath.Join(t.TempDir(), "mole-clip-latest.png"),
+		log:       discardLogger(),
+	}
+	for range 3 {
+		req := httptest.NewRequest(http.MethodPut, "http://example.test/clip", io.LimitReader(zeroReader{}, MaxImageBytes+1))
+		req.Header.Set("Content-Type", "image/png")
+		rr := httptest.NewRecorder()
+		s.handlePut(rr, req)
+		if rr.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("oversized PUT status = %d, want 413", rr.Code)
+		}
+	}
+
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("read open descriptors: %v", err)
+	}
+	var leaked int
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if err == nil && strings.Contains(target, "mole-clip-put-") {
+			leaked++
+		}
+	}
+	if leaked != 0 {
+		t.Fatalf("found %d open temporary upload files after 413 responses, want 0", leaked)
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(s.cachePath), "mole-clip-put-*.png"))
+	if err != nil {
+		t.Fatalf("find temporary upload files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("found %d stale temporary upload files after 413 responses, want 0", len(matches))
 	}
 }
 
