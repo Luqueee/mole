@@ -69,7 +69,7 @@ func TestBuildSSHConfig_ClosesAgentAfterSignersFailure(t *testing.T) {
 	})
 	configureTestAgent(t, conn)
 
-	_, err := buildSSHConfig("root", nil, "unused:22", true, discardLogger())
+	_, _, err := buildSSHConfig("root", nil, "unused:22", true, discardLogger())
 	if err == nil {
 		t.Fatal("buildSSHConfig returned nil error, want no auth methods")
 	}
@@ -82,7 +82,7 @@ func TestBuildSSHConfig_ClosesAgentAfterEmptySigners(t *testing.T) {
 	conn := newAgentConnection(t, &testAgent{Agent: agent.NewKeyring()})
 	configureTestAgent(t, conn)
 
-	_, err := buildSSHConfig("root", nil, "unused:22", true, discardLogger())
+	_, _, err := buildSSHConfig("root", nil, "unused:22", true, discardLogger())
 	if err == nil {
 		t.Fatal("buildSSHConfig returned nil error, want no auth methods")
 	}
@@ -103,7 +103,7 @@ func TestBuildSSHConfig_RetainsAgentForSuccessfulSigner(t *testing.T) {
 	conn := newAgentConnection(t, keyring)
 	configureTestAgent(t, conn)
 
-	cfg, err := buildSSHConfig("root", nil, "unused:22", true, discardLogger())
+	cfg, _, err := buildSSHConfig("root", nil, "unused:22", true, discardLogger())
 	if err != nil {
 		t.Fatalf("buildSSHConfig returned error: %v", err)
 	}
@@ -112,5 +112,20 @@ func TestBuildSSHConfig_RetainsAgentForSuccessfulSigner(t *testing.T) {
 	}
 	if conn.closed.Load() {
 		t.Fatal("agent connection closed despite successful signer")
+	}
+}
+
+func TestManagerClose_ClosesRetainedAgentConnection(t *testing.T) {
+	conn := newAgentConnection(t, &testAgent{Agent: agent.NewKeyring()})
+	m := &Manager{
+		client:    &liveConn{},
+		agentConn: conn,
+	}
+
+	if err := m.Close(); err != nil {
+		t.Fatalf("Manager.Close returned error: %v", err)
+	}
+	if !conn.closed.Load() {
+		t.Fatal("Manager.Close left the retained agent connection open")
 	}
 }
