@@ -605,10 +605,13 @@ func dialSSHClientContext(ctx context.Context, network, addr string, config *ssh
 	if ctx == nil {
 		return nil, errors.New("tunnel: nil SSH dial context")
 	}
+	if config == nil {
+		return nil, errors.New("tunnel: nil SSH client config")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	raw, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+	raw, err := (&net.Dialer{Timeout: config.Timeout}).DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -620,6 +623,16 @@ func newSSHClientContext(ctx context.Context, raw net.Conn, addr string, config 
 		_ = raw.Close()
 		return nil, errors.New("tunnel: nil SSH handshake context")
 	}
+	if config == nil {
+		_ = raw.Close()
+		return nil, errors.New("tunnel: nil SSH client config")
+	}
+	handshakeCtx := ctx
+	cancel := func() {}
+	if config.Timeout > 0 {
+		handshakeCtx, cancel = context.WithTimeout(ctx, config.Timeout)
+	}
+	defer cancel()
 	type result struct {
 		conn     ssh.Conn
 		channels <-chan ssh.NewChannel
@@ -637,13 +650,16 @@ func newSSHClientContext(ctx context.Context, raw net.Conn, addr string, config 
 			return nil, res.err
 		}
 		return ssh.NewClient(res.conn, res.channels, res.requests), nil
-	case <-ctx.Done():
+	case <-handshakeCtx.Done():
 		_ = raw.Close()
 		res := <-done
 		if res.conn != nil {
 			_ = res.conn.Close()
 		}
-		return nil, ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, handshakeCtx.Err()
 	}
 }
 

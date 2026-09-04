@@ -249,6 +249,25 @@ func TestDialSSHChannelContextClosesTemporaryTransport(t *testing.T) {
 	}
 }
 
+func TestNewSSHClientContextHonorsConfigTimeout(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer serverConn.Close()
+	config := &ssh.ClientConfig{
+		User:            "test",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Millisecond,
+	}
+
+	start := time.Now()
+	_, err := newSSHClientContext(context.Background(), clientConn, "test", config)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("newSSHClientContext() error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("SSH handshake timeout took %s, want it bounded", elapsed)
+	}
+}
+
 func TestManagerReconnectContextCancellationWhileWaiting(t *testing.T) {
 	started := make(chan struct{})
 	firstDone := make(chan error, 1)
