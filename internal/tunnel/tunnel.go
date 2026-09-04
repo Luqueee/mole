@@ -40,6 +40,10 @@ type Manager struct {
 	log    *slog.Logger
 	dial   func() (sshConn, error) // opens a fresh transport; swappable in tests
 
+	// agentConn is retained by agent-backed signers in config and must stay
+	// open until the manager is closed.
+	agentConn net.Conn
+
 	mu     sync.RWMutex
 	client sshConn
 
@@ -48,18 +52,23 @@ type Manager struct {
 	reconnectMu sync.Mutex
 }
 
+// dialAgentFunc is swappable in tests so agent connection ownership can be
+// checked without relying on a user's local SSH agent.
+var dialAgentFunc = dialAgent
+
 // New constructs a Manager and opens the first SSH connection using the
 // resolved remote (see ResolveRemote).
 func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
-	cfg, err := buildSSHConfig(r.User, r.IdentityFiles, r.Addr, insecure, log)
+	cfg, agentConn, err := buildSSHConfig(r.User, r.IdentityFiles, r.Addr, insecure, log)
 	if err != nil {
 		return nil, err
 	}
 
 	m := &Manager{
-		addr:   r.Addr,
-		config: cfg,
-		log:    log,
+		addr:      r.Addr,
+		config:    cfg,
+		log:       log,
+		agentConn: agentConn,
 	}
 	// Default transport opener: a real SSH dial. Tests override m.dial
 	// before triggering reconnects.
@@ -68,6 +77,9 @@ func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
 	}
 
 	if err := m.connect(); err != nil {
+		if agentConn != nil {
+			_ = agentConn.Close()
+		}
 		return nil, err
 	}
 	return m, nil
@@ -230,44 +242,62 @@ func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
 // Close shuts down the SSH client.
 func (m *Manager) Close() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.client != nil {
-		return m.client.Close()
+	client := m.client
+	m.client = nil
+	agentConn := m.agentConn
+	m.agentConn = nil
+	m.mu.Unlock()
+
+	var closeErrs []error
+	if client != nil {
+		closeErrs = append(closeErrs, client.Close())
 	}
-	return nil
+	if agentConn != nil {
+		closeErrs = append(closeErrs, agentConn.Close())
+	}
+	return errors.Join(closeErrs...)
 }
 
-func buildSSHConfig(user string, identityFiles []string, addr string, insecure bool, log *slog.Logger) (*ssh.ClientConfig, error) {
-	methods, err := authMethods(identityFiles)
+func buildSSHConfig(user string, identityFiles []string, addr string, insecure bool, log *slog.Logger) (*ssh.ClientConfig, net.Conn, error) {
+	methods, agentConn, err := authMethods(identityFiles)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	keepAgentConn := false
+	defer func() {
+		if !keepAgentConn && agentConn != nil {
+			_ = agentConn.Close()
+		}
+	}()
 	hostKey, err := hostKeyCallback(insecure, log)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var hostKeyAlgorithms []string
 	if !insecure {
 		khPath, err := knownHostsPath()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		hostKeyAlgorithms, err = knownHostKeyAlgorithms(khPath, addr, probeRemote(addr))
 		if err != nil {
-			return nil, fmt.Errorf("select host-key algorithms for %s: %w", addr, err)
+			return nil, nil, fmt.Errorf("select host-key algorithms for %s: %w", addr, err)
 		}
 	}
-	return &ssh.ClientConfig{
+	config := &ssh.ClientConfig{
 		User:              user,
 		Auth:              methods,
 		HostKeyCallback:   hostKey,
 		HostKeyAlgorithms: hostKeyAlgorithms,
 		Timeout:           10 * time.Second,
-	}, nil
+	}
+	keepAgentConn = agentConn != nil
+	return config, agentConn, nil
 }
 
-func authMethods(identityFiles []string) ([]ssh.AuthMethod, error) {
+func authMethods(identityFiles []string) ([]ssh.AuthMethod, net.Conn, error) {
 	var methods []ssh.AuthMethod
+	var agentConn net.Conn
 
 	// 0. Explicit identity files from ssh_config (resolved via
 	//    `ssh -G` when the remote is a Host alias). These reflect the
@@ -290,12 +320,15 @@ func authMethods(identityFiles []string) ([]ssh.AuthMethod, error) {
 	// it dials a Unix socket on Linux/macOS and a Windows named pipe
 	// on Windows. It fails silently (returns an error) when no agent
 	// is configured, which lets us fall through to direct key files.
-	if conn, err := dialAgent(os.Getenv("SSH_AUTH_SOCK")); err == nil {
+	if conn, err := dialAgentFunc(os.Getenv("SSH_AUTH_SOCK")); err == nil {
 		if signers, err := agent.NewClient(conn).Signers(); err == nil && len(signers) > 0 {
 			methods = append(methods, ssh.PublicKeys(signers...))
+			agentConn = conn
 			// conn stays open for the lifetime of the SSH session —
 			// the ssh.PublicKeys wrapper above retains a reference
 			// and uses it for signing operations.
+		} else {
+			_ = conn.Close()
 		}
 	}
 
@@ -317,16 +350,17 @@ func authMethods(identityFiles []string) ([]ssh.AuthMethod, error) {
 	}
 
 	if len(methods) == 0 {
-		return nil, errors.New("no SSH auth methods: set up ssh-agent or ~/.ssh/id_*")
+		return nil, nil, errors.New("no SSH auth methods: set up ssh-agent or ~/.ssh/id_*")
 	}
-	return methods, nil
+	return methods, agentConn, nil
 }
 
 // jumpSSHConn keeps every transport in a ProxyJump chain alive for the
 // lifetime of the target connection.
 type jumpSSHConn struct {
-	client *ssh.Client
-	jumps  []*ssh.Client
+	client     *ssh.Client
+	jumps      []*ssh.Client
+	agentConns []net.Conn
 }
 
 func (c *jumpSSHConn) Dial(network, addr string) (net.Conn, error) {
@@ -344,6 +378,11 @@ func (c *jumpSSHConn) Close() error {
 			err = closeErr
 		}
 	}
+	for i := len(c.agentConns) - 1; i >= 0; i-- {
+		if closeErr := c.agentConns[i].Close(); err == nil {
+			err = closeErr
+		}
+	}
 	return err
 }
 
@@ -355,10 +394,12 @@ func dialRemote(remote Remote, config *ssh.ClientConfig, insecure bool, log *slo
 	}
 
 	var jumps []*ssh.Client
+	var agentConns []net.Conn
 	for _, jump := range remote.ProxyJumps {
-		jumpConfig, err := buildSSHConfig(jump.User, jump.IdentityFiles, jump.Addr, insecure, log)
+		jumpConfig, agentConn, err := buildSSHConfig(jump.User, jump.IdentityFiles, jump.Addr, insecure, log)
 		if err != nil {
 			closeSSHClients(jumps)
+			closeSSHAgentConns(agentConns)
 			return nil, err
 		}
 
@@ -368,39 +409,66 @@ func dialRemote(remote Remote, config *ssh.ClientConfig, insecure bool, log *slo
 		} else {
 			conn, dialErr := jumps[len(jumps)-1].Dial("tcp", jump.Addr)
 			if dialErr != nil {
+				closeSSHAgentConn(agentConn)
 				closeSSHClients(jumps)
+				closeSSHAgentConns(agentConns)
 				return nil, dialErr
 			}
 			clientConn, channels, requests, handshakeErr := ssh.NewClientConn(conn, jump.Addr, jumpConfig)
 			if handshakeErr != nil {
+				closeSSHAgentConn(agentConn)
 				closeSSHClients(jumps)
+				closeSSHAgentConns(agentConns)
 				return nil, handshakeErr
 			}
 			client = ssh.NewClient(clientConn, channels, requests)
 		}
 		if err != nil {
+			closeSSHAgentConn(agentConn)
 			closeSSHClients(jumps)
+			closeSSHAgentConns(agentConns)
 			return nil, err
 		}
 		jumps = append(jumps, client)
+		if agentConn != nil {
+			agentConns = append(agentConns, agentConn)
+		}
 	}
 
 	conn, err := jumps[len(jumps)-1].Dial("tcp", remote.Addr)
 	if err != nil {
 		closeSSHClients(jumps)
+		closeSSHAgentConns(agentConns)
 		return nil, err
 	}
 	clientConn, channels, requests, err := ssh.NewClientConn(conn, remote.Addr, config)
 	if err != nil {
 		closeSSHClients(jumps)
+		closeSSHAgentConns(agentConns)
 		return nil, err
 	}
-	return &jumpSSHConn{client: ssh.NewClient(clientConn, channels, requests), jumps: jumps}, nil
+	return &jumpSSHConn{
+		client:     ssh.NewClient(clientConn, channels, requests),
+		jumps:      jumps,
+		agentConns: agentConns,
+	}, nil
 }
 
 func closeSSHClients(clients []*ssh.Client) {
 	for i := len(clients) - 1; i >= 0; i-- {
 		_ = clients[i].Close()
+	}
+}
+
+func closeSSHAgentConns(conns []net.Conn) {
+	for i := len(conns) - 1; i >= 0; i-- {
+		_ = conns[i].Close()
+	}
+}
+
+func closeSSHAgentConn(conn net.Conn) {
+	if conn != nil {
+		_ = conn.Close()
 	}
 }
 
