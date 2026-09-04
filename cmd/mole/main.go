@@ -347,12 +347,19 @@ type forwarder struct {
 // (e.g. the local port is taken by another process) are logged once and
 // then retried silently — auto-discovery calls this every 15s, so
 // without the dedupe a permanently-taken port would spam the log
-// forever. A later success clears the warned state.
-func (f *forwarder) ensure(p int) {
+// forever. A later success clears the warned state. The error is returned
+// so live callers can distinguish a successful add from a failed bind.
+func (f *forwarder) ensure(p int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.ensureLocked(p)
+}
+
+// ensureLocked is the lock-held implementation of ensure. It lets live
+// mutation check and create a listener as one atomic operation.
+func (f *forwarder) ensureLocked(p int) error {
 	if _, ok := f.active[p]; ok {
-		return
+		return nil
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
 	if err != nil {
@@ -360,16 +367,23 @@ func (f *forwarder) ensure(p int) {
 			f.log.Warn("could not bind local port, skipping", "port", p, "err", err)
 			f.failed[p] = true
 		}
-		return
+		return fmt.Errorf("bind local port %d: %w", p, err)
 	}
 	delete(f.failed, p)
 	remoteAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(p))
+	f.active[p] = ln
 	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(p)))
-	go func() {
-		if err := proxy.Serve(ln, f.mgr, remoteAddr, f.hooks, f.log); err != nil {
+	go func(p int, listener net.Listener) {
+		if err := proxy.Serve(listener, f.mgr, remoteAddr, f.hooks, f.log); err != nil {
 			f.log.Warn("proxy terminated", "port", p, "err", err)
 		}
-	}()
+		f.mu.Lock()
+		if current, ok := f.active[p]; ok && current == listener {
+			delete(f.active, p)
+		}
+		f.mu.Unlock()
+	}(p, ln)
+	return nil
 }
 
 // ports returns the sorted list of currently forwarded ports.
@@ -408,8 +422,9 @@ func (f *forwarder) retain(keep map[int]bool) {
 func (f *forwarder) closeAll() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, ln := range f.active {
+	for p, ln := range f.active {
 		_ = ln.Close()
+		delete(f.active, p)
 	}
 }
 
@@ -432,20 +447,14 @@ func (f *forwarder) AddDiscover(port int) error {
 		return fmt.Errorf("port out of range: %d", port)
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.exclude[port] {
-		f.mu.Unlock()
-		return fmt.Errorf("port %d is in exclude_ports", port)
+		return fmt.Errorf("%w: port %d is in exclude_ports", admin.ErrConflict, port)
 	}
 	if _, ok := f.active[port]; ok {
-		f.mu.Unlock()
-		return fmt.Errorf("port %d is already forwarded", port)
+		return fmt.Errorf("%w: port %d is already forwarded", admin.ErrConflict, port)
 	}
-	f.mu.Unlock()
-	// ensure() takes the lock again; that's safe (sync.Mutex is
-	// not re-entrant, but Lock+Unlock here guarantees no
-	// deadlock because ensure() goes Lock→Unlock atomically).
-	f.ensure(port)
-	return nil
+	return f.ensureLocked(port)
 }
 
 // RemoveDiscover stops forwarding port if it was started via

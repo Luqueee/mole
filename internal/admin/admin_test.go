@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -301,10 +302,10 @@ func (f *fakePortCtl) AddDiscover(p int) error {
 		return err
 	}
 	if f.excluded[p] {
-		return fmt.Errorf("port %d is in exclude_ports", p)
+		return fmt.Errorf("%w: port %d is in exclude_ports", ErrConflict, p)
 	}
 	if f.active[p] {
-		return fmt.Errorf("port %d is already forwarded", p)
+		return fmt.Errorf("%w: port %d is already forwarded", ErrConflict, p)
 	}
 	f.active[p] = true
 	return nil
@@ -379,6 +380,23 @@ func TestServer_PortAdd_RejectsDuplicate(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("status = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestServer_PortAdd_ControllerErrorReturnsInternal(t *testing.T) {
+	ctl := newFakePortCtl()
+	ctl.failNext = errors.New("backend unavailable")
+	srv := New(NewStats(), nil).WithPortController(ctl)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/ports/discover", "application/json", strings.NewReader(`{"port":3330}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
 }
 

@@ -5,12 +5,19 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// ErrConflict marks a controller error caused by a client-side port
+// conflict, such as an excluded or already-forwarded port. Other
+// controller errors are operational failures and map to HTTP 500.
+var ErrConflict = errors.New("admin: port conflict")
+
 // Stats tracks runtime counters for the admin endpoint. Safe for
 // concurrent use.
 type Stats struct {
@@ -158,10 +165,11 @@ func (s *Server) handlePortAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.portsCtl.AddDiscover(req.Port); err != nil {
-		// The forwarder uses sentinel-ish error strings; we map
-		// 409 for excluded/duplicate and 500 for anything else.
-		// Refining this with a typed error is future work.
-		http.Error(w, err.Error(), http.StatusConflict)
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrConflict) {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
