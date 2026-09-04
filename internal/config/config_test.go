@@ -239,6 +239,79 @@ func TestLoad_PartialYAML_MergesWithDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsUnknownTopLevelKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cfg.yaml")
+	content := "remote: dev@workstation\nauto_discoverd: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() accepted an unknown top-level key")
+	}
+	if !strings.Contains(err.Error(), "auto_discoverd") {
+		t.Fatalf("Load() error = %v, want unknown key name", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("Load() error = %v, want config path", err)
+	}
+}
+
+func TestLoad_EmptyYAMLKeepsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.yaml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want empty YAML to keep defaults", err)
+	}
+	if cfg.LogLevel != Default().LogLevel || cfg.SSHPort != Default().SSHPort {
+		t.Fatalf("Load() defaults = log level %q, SSH port %d; want %q, %d", cfg.LogLevel, cfg.SSHPort, Default().LogLevel, Default().SSHPort)
+	}
+}
+
+func TestLoad_RejectsTrailingYAMLDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi.yaml")
+	content := "remote: dev@workstation\n---\nauto_discoverd: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() accepted multiple YAML documents")
+	}
+	if !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("Load() error = %v, want multiple-document error", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("Load() error = %v, want config path", err)
+	}
+}
+
+func TestLoad_RejectsMalformedTrailingYAMLDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi-invalid.yaml")
+	content := "remote: dev@workstation\n---\nnot: [valid\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() accepted a malformed trailing YAML document")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("Load() error = %v, want config path", err)
+	}
+}
+
 func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.yaml")
