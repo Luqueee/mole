@@ -23,6 +23,13 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
+// SweepDialer is a Dialer whose lifetime can be scoped to one discovery
+// sweep. Implementations should close any transport that backs the dialer.
+type SweepDialer interface {
+	Dialer
+	Close() error
+}
+
 // Runner runs a command on the remote and returns its combined output.
 // The tunnel manager satisfies this implicitly.
 type Runner interface {
@@ -119,12 +126,93 @@ func loopbackReachable(host string) bool {
 
 const defaultProbeTimeout = 5 * time.Second
 
+const maxProbeConcurrency = 4
+
 // Probe returns the subset of candidates that respond to a TCP dial.
 // Probes run in parallel; the function blocks until all complete or ctx is
 // cancelled. Each probe has its own bounded deadline. The returned slice is
 // unsorted.
 func Probe(ctx context.Context, d Dialer, candidates []int, log *slog.Logger) []int {
 	return probeWithTimeout(ctx, d, candidates, log, defaultProbeTimeout)
+}
+
+// ProbeWithFactory runs one bounded discovery sweep using a single temporary
+// dialer. The factory is called once, so SSH-backed implementations perform
+// one transport handshake per sweep rather than one handshake per candidate.
+// The sweep timeout also bounds all in-flight channel opens; closing the
+// dialer after the workers finish guarantees that a cancelled SSH channel
+// cannot outlive the transport that owns it.
+func ProbeWithFactory(ctx context.Context, factory func(context.Context) (SweepDialer, error), candidates []int, log *slog.Logger) []int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sweepCtx, cancel := context.WithTimeout(ctx, defaultProbeTimeout)
+	defer cancel()
+	d, err := factory(sweepCtx)
+	if err != nil {
+		log.Debug("probe transport setup failed", "err", err)
+		return nil
+	}
+	defer d.Close()
+	return probeWithSweep(sweepCtx, d, candidates, log)
+}
+
+func probeWithSweep(ctx context.Context, d Dialer, candidates []int, log *slog.Logger) []int {
+	workerCount := min(maxProbeConcurrency, len(candidates))
+	if workerCount == 0 {
+		return nil
+	}
+
+	var (
+		mu   sync.Mutex
+		out  []int
+		wg   sync.WaitGroup
+		jobs = make(chan int)
+	)
+	worker := func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case port, ok := <-jobs:
+				if !ok {
+					return
+				}
+				addr := fmt.Sprintf("127.0.0.1:%d", port)
+				conn, err := d.DialContext(ctx, "tcp", addr)
+				if err != nil {
+					continue
+				}
+				if ctx.Err() != nil {
+					_ = conn.Close()
+					return
+				}
+				_ = conn.Close()
+				mu.Lock()
+				out = append(out, port)
+				mu.Unlock()
+				log.Debug("discovered open port", "port", port)
+			}
+		}
+	}
+
+	wg.Add(workerCount)
+	for range workerCount {
+		go worker()
+	}
+
+send:
+	for _, port := range candidates {
+		select {
+		case <-ctx.Done():
+			break send
+		case jobs <- port:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return out
 }
 
 func probeWithTimeout(ctx context.Context, d Dialer, candidates []int, log *slog.Logger, timeout time.Duration) []int {

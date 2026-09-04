@@ -267,6 +267,48 @@ func (m *Manager) DialContext(ctx context.Context, network, addr string) (net.Co
 	return &ownedConn{Conn: conn, owner: client}, nil
 }
 
+// ProbeDialer is a temporary, context-aware SSH transport used for one
+// discovery sweep. It is separate from the manager's persistent client so a
+// cancelled sweep cannot interrupt active forwards.
+type ProbeDialer interface {
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+	Close() error
+}
+
+// NewProbeDialer opens one temporary SSH transport for a discovery sweep.
+// The caller owns it and must close it after all probe connections finish.
+func (m *Manager) NewProbeDialer(ctx context.Context) (ProbeDialer, error) {
+	if ctx == nil {
+		return nil, errors.New("tunnel: nil probe dial context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.dialContext == nil {
+		return nil, errors.New("tunnel: context-aware SSH dial is not configured")
+	}
+	client, err := m.dialContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &probeDialer{client: client}, nil
+}
+
+type probeDialer struct {
+	client sshConn
+	once   sync.Once
+	err    error
+}
+
+func (d *probeDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return d.client.DialContext(ctx, network, addr)
+}
+
+func (d *probeDialer) Close() error {
+	d.once.Do(func() { d.err = d.client.Close() })
+	return d.err
+}
+
 // Run executes a command on the remote over a fresh SSH session and
 // returns its combined stdout+stderr. Used by listener-based discovery
 // to enumerate what's actually listening on the remote.

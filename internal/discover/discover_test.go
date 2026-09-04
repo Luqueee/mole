@@ -63,6 +63,46 @@ func (f *fakeDialer) DialContext(ctx context.Context, network, addr string) (net
 	return f.Dial(network, addr)
 }
 
+type sweepDialer struct {
+	inner     *fakeDialer
+	delay     time.Duration
+	dials     atomic.Int64
+	active    atomic.Int64
+	maxActive atomic.Int64
+	closed    atomic.Int64
+}
+
+func (d *sweepDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	active := d.active.Add(1)
+	defer d.active.Add(-1)
+	updateMax(&d.maxActive, active)
+	d.dials.Add(1)
+	if d.delay > 0 {
+		timer := time.NewTimer(d.delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return d.inner.DialContext(ctx, network, addr)
+}
+
+func (d *sweepDialer) Close() error {
+	d.closed.Add(1)
+	return nil
+}
+
+func updateMax(max *atomic.Int64, value int64) {
+	for {
+		current := max.Load()
+		if value <= current || max.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
 // scanInt is a tiny helper to avoid importing strconv in the fake.
 func scanInt(s string, out *int) (int, error) {
 	n := 0
@@ -120,6 +160,37 @@ func TestProbe_EmptyCandidates(t *testing.T) {
 	}
 	if d.dials.Load() != 0 {
 		t.Errorf("dials = %d, want 0", d.dials.Load())
+	}
+}
+
+func TestProbeWithFactory_ReusesOneTransportAndBoundsConcurrency(t *testing.T) {
+	candidates := []int{3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011}
+	d := &sweepDialer{
+		inner: newFakeDialer(candidates),
+		delay: time.Millisecond,
+	}
+	var factories atomic.Int64
+
+	got := ProbeWithFactory(context.Background(), func(context.Context) (SweepDialer, error) {
+		factories.Add(1)
+		return d, nil
+	}, candidates, quietLogger())
+	sort.Ints(got)
+
+	if !equalInts(got, candidates) {
+		t.Fatalf("ProbeWithFactory = %v, want %v", got, candidates)
+	}
+	if got := factories.Load(); got != 1 {
+		t.Errorf("factory calls = %d, want 1", got)
+	}
+	if got := d.dials.Load(); got != int64(len(candidates)) {
+		t.Errorf("dials = %d, want %d", got, len(candidates))
+	}
+	if got := d.maxActive.Load(); got > maxProbeConcurrency {
+		t.Errorf("max concurrent probes = %d, want at most %d", got, maxProbeConcurrency)
+	}
+	if got := d.closed.Load(); got != 1 {
+		t.Errorf("transport closes = %d, want 1", got)
 	}
 }
 
