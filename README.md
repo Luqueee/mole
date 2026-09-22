@@ -192,7 +192,7 @@ installer against the running binary's own location:
 
 ```bash
 mole update                  # update to the latest main
-mole update -version v0.2.0  # pin a specific git ref (branch, tag, or commit)
+mole update -version v0.1.0  # pin a specific git ref (branch, tag, or commit)
 mole update -dry-run         # print what it would run, change nothing
 ```
 
