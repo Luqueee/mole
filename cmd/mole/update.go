@@ -1,16 +1,15 @@
 // `mole update` — self-update by re-running the official installer.
 //
-// mole is distributed as a source install: scripts/install.sh (Unix) and
-// scripts/install.ps1 (Windows) clone the latest source, `go build` it,
-// and copy the binary into place. Rather than reinvent that logic, update
+// The Unix installer builds from source; the Windows installer downloads a
+// verified release archive unless run from a local clone. Update
 // re-runs the very same installer, but pins the destination to *this*
 // binary's own path via INSTALL_DIR so the running copy is replaced in
 // place — wherever it happens to live.
 //
 // Usage:
 //
-//	mole update                 # update to the latest main
-//	mole update -version v0.1.0  # pin a specific git ref
+//	mole update                 # update to latest main (Unix) / release (Windows)
+//	mole update -version v0.1.0  # pin a specific version
 //	mole update -dry-run         # print the command without running it
 package main
 
@@ -31,7 +30,7 @@ const (
 func runUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	var (
-		ref      = fs.String("version", "", "git ref to install (branch, tag, or commit; default: latest main)")
+		ref      = fs.String("version", "", "version to install (default: latest)")
 		dryRun   = fs.Bool("dry-run", false, "print the installer command without running it")
 		noVerify = fs.Bool("no-verify", false, "skip the post-install version check")
 	)
@@ -43,14 +42,12 @@ func runUpdate(args []string) int {
 		fmt.Fprintf(os.Stderr, "    %s\n", commandLine("update [flags]", c))
 		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("DESCRIPTION", c))
 		fmt.Fprintln(os.Stderr, "    Updates mole in place by re-running the official installer")
-		fmt.Fprintln(os.Stderr, "    against this binary's own location. The installer clones the")
-		fmt.Fprintln(os.Stderr, "    latest source, builds it with Go, and replaces the current")
-		fmt.Fprintln(os.Stderr, "    executable.")
+		fmt.Fprintln(os.Stderr, "    against this binary's own location.")
 		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("FLAGS", c))
-		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -version <ref>", c), "git ref to install (branch, tag, or commit; default: main)")
+		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -version <ref>", c), "version to install (Windows: release tag; Unix: git ref)")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -dry-run", c), "print the installer command instead of running it")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -no-verify", c), "skip the installer's post-install version check")
-		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'go' and either 'curl'/'wget' (Unix) or PowerShell (Windows),", c))
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'go' and 'curl'/'wget' on Unix, or PowerShell on Windows,", c))
 		fmt.Fprintf(os.Stderr, "  %s\n", cDim("plus network access to github.com.", c))
 		fmt.Fprintln(os.Stderr)
 	}
@@ -71,12 +68,14 @@ func runUpdate(args []string) int {
 		exe = resolved
 	}
 
-	// The installer needs 'go' to build from source; fail early with a
-	// clear message rather than deep inside the shell/PowerShell pipeline.
-	if _, err := exec.LookPath("go"); err != nil {
-		fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "'go' is not installed or not on PATH.")
-		fmt.Fprintln(os.Stderr, "        Install Go 1.26.4+ from https://go.dev/dl/ and re-run.")
-		return 1
+	// The Unix installer builds from source. The Windows installer uses a
+	// release archive and does not require Go unless MOLE_SRC is set.
+	if runtime.GOOS != "windows" || os.Getenv("MOLE_SRC") != "" {
+		if _, err := exec.LookPath("go"); err != nil {
+			fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "'go' is not installed or not on PATH.")
+			fmt.Fprintln(os.Stderr, "        Install Go 1.26.4+ from https://go.dev/dl/ and re-run.")
+			return 1
+		}
 	}
 
 	cmd, err := buildUpdateCommand(exe, *ref, *noVerify)
@@ -155,6 +154,9 @@ func buildUpdateCommand(dest, ref string, noVerify bool) (*exec.Cmd, error) {
 
 	env := os.Environ()
 	env = append(env, "INSTALL_DIR="+dest)
+	if runtime.GOOS == "windows" {
+		env = append(env, "MOLE_RELEASE_ONLY=1")
+	}
 	if ref != "" {
 		env = append(env, "MOLE_VERSION="+ref)
 	}
@@ -185,6 +187,9 @@ func powershellPath() (string, error) {
 
 func sourceRef(ref string) string {
 	if ref == "" {
+		if runtime.GOOS == "windows" {
+			return "latest release"
+		}
 		return "latest (main)"
 	}
 	return ref

@@ -55,6 +55,35 @@ jobs:
       - name: Test clipboard watcher
         run: go test -race ./internal/clip
 
+  windows:
+    name: Windows checks
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test and vet
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Install from source
+        shell: pwsh
+        run: |
+          $env:INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'mole.exe'
+          ./scripts/install.ps1
+          & $env:INSTALL_DIR version
+
   landing:
     name: Landing checks
     runs-on: ubuntu-latest

@@ -9,14 +9,15 @@ import (
 
 // Windows process creation flags (from <winbase.h>).
 const (
-	detachedProcess       = 0x00000008
-	createNewProcessGroup = 0x00000200
+	detachedProcess        = 0x00000008
+	createNewProcessGroup  = 0x00000200
+	createBreakawayFromJob = 0x01000000
 )
 
-// detachSysProcAttr starts the child detached from the console and in a
-// new process group so it keeps running after the parent exits.
+// detachSysProcAttr starts the child outside the console and process group.
+// Breaking away from the SSH server's job also lets it survive logout.
 func detachSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{CreationFlags: detachedProcess | createNewProcessGroup}
+	return &syscall.SysProcAttr{CreationFlags: detachedProcess | createNewProcessGroup | createBreakawayFromJob}
 }
 
 // processAlive reports whether a process with the given PID exists.
