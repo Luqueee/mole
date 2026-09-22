@@ -90,11 +90,13 @@ appear.
 
 ## 📦 Install
 
-Five ways — pick whichever fits. All produce the same single static binary.
+Five ways — pick whichever fits. All install a single static binary.
 
 ### Option 1 — one-liner (no clone, no setup)
 
-The installer detects the platform, builds the binary, and copies it onto your `PATH`.
+The Unix installer builds from source. The Windows installer downloads the
+latest release archive, verifies its SHA-256, and adds the install directory to
+your user `PATH`.
 
 **Linux / macOS / FreeBSD**
 
@@ -116,7 +118,9 @@ Default install locations:
 | non-root (Unix) | `~/.local/bin/mole`             |
 | Windows         | `%LOCALAPPDATA%\Programs\mole\` |
 
-If the destination isn't on your `PATH`, the script prints the exact line to add to your shell profile.
+On Unix, if the destination isn't on your `PATH`, the script prints the exact
+line to add to your shell profile. Open a new PowerShell session after installing
+on Windows to pick up the updated user `PATH`.
 
 Useful flags:
 
@@ -125,7 +129,7 @@ Useful flags:
 ./scripts/install.sh --prefix /opt   # custom prefix
 MOLE_VERSION=v0.1.0 ./scripts/install.sh   # pin a ref
 
-.\scripts\install.ps1 -InstallDir $env:LOCALAPPDATA\Programs\mole   # Windows custom dir
+.\scripts\install.ps1 -InstallDir 'C:\Tools\mole'                  # Windows custom dir
 .\scripts\install.ps1 -Init                                          # Windows + init
 ```
 
@@ -175,8 +179,9 @@ curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.s
 ```
 
 Add `MOLE_GLOBAL=true` to write `~/.config/mole/config.yaml` (per-user) instead
-of `./mole.yaml` (per-project). Pin a ref with `MOLE_VERSION=v0.1.0`. On Windows,
-set `$env:MOLE_*` and run `iwr … | iex -Init`.
+of `./mole.yaml` (per-project). On Unix, pin a Git ref with
+`MOLE_VERSION=v0.1.0`; on Windows, pin a release tag with
+`$env:MOLE_VERSION = 'v0.1.0'`. Set `$env:MOLE_*` and run the installer with `-Init`.
 
 ### Build without installing
 
@@ -191,12 +196,12 @@ Update an installed mole in place — no manual re-clone. It re-runs the officia
 installer against the running binary's own location:
 
 ```bash
-mole update                  # update to the latest main
-mole update -version v0.1.0  # pin a specific git ref (branch, tag, or commit)
+mole update                  # latest main on Unix; latest release on Windows
+mole update -version v0.1.0  # Unix: git ref; Windows: release tag
 mole update -dry-run         # print what it would run, change nothing
 ```
 
-Needs `go` plus `curl`/`wget` (Unix) or PowerShell (Windows). For a `go install`
+Needs `go` plus `curl`/`wget` on Unix, or PowerShell on Windows. For a `go install`
 setup, re-run `go install github.com/Luqueee/mole/cmd/mole@latest` instead.
 
 ### Uninstall

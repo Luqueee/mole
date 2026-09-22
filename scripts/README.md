@@ -6,7 +6,7 @@ not in these scripts — this directory is intentionally small and dumb on purpo
 | Script             | OS                        | What it does                                                  |
 | ------------------ | ------------------------- | ------------------------------------------------------------- |
 | `install.sh`       | Linux, macOS, FreeBSD     | Build or clone, install, verify, print `mole init` hint.      |
-| `install.ps1`      | Windows                   | Same as `install.sh`, PowerShell-flavoured.                   |
+| `install.ps1`      | Windows                   | Builds from a clone or installs a verified release archive.  |
 | `uninstall.sh`     | Linux, macOS, FreeBSD     | Remove the binary; leave the config (`mole.yaml`) alone.     |
 | `uninstall.ps1`    | Windows                   | Same as `uninstall.sh`, PowerShell-flavoured.                 |
 
@@ -22,7 +22,7 @@ to write the config. We removed it because:
 - The binary is the only thing that knows what the config schema looks like,
   so the prompts belong next to the loader.
 
-Now `install.sh` and `install.ps1` only build, copy, verify, and tell the user
+Now `install.sh` and `install.ps1` only acquire, copy, verify, and tell the user
 to run `mole init`. The interactive prompts are **identical on every OS**
 because they live in one place: `internal/config/init.go`.
 
@@ -63,7 +63,7 @@ irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | ie
 
 | Variable        | Used by                 | Purpose                                           |
 | --------------- | ----------------------- | ------------------------------------------------- |
-| `MOLE_VERSION`  | `install.sh`/`.ps1`     | Git ref to checkout when cloning (default: main). |
+| `MOLE_VERSION`  | `install.sh`/`.ps1`     | Unix Git ref (default: main); Windows release tag (default: latest). |
 | `MOLE_SRC`      | `install.sh`/`.ps1`     | Path to a local clone to build from, skip clone.  |
 | `GO`            | `install.sh`            | Path to a specific `go` binary.                   |
 | `INSTALL_DIR`   | both installers         | Absolute path of the installed binary; overrides `--prefix`. |
