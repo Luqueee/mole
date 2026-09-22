@@ -31,7 +31,29 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+
+  clip-darwin:
+    name: macOS clipboard checks
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test clipboard watcher
+        run: go test -race ./internal/clip
 
   landing:
     name: Landing checks
@@ -83,7 +105,7 @@ jobs:
   deploy:
     name: Deploy landing
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [go, landing]
+    needs: [go, clip-darwin, landing]
     runs-on: ubuntu-latest
     environment:
       name: production

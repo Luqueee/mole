@@ -12,6 +12,102 @@ import (
 	"testing"
 )
 
+func TestServerRepeatedOversizedUploadsReleaseFiles(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("uses Linux proc file descriptors")
+	}
+	s, ts := newTestServer(t)
+	payload := bytes.Repeat([]byte{'x'}, MaxImageBytes+1)
+	countTempFDs := func() int {
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, entry := range entries {
+			target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+			if err == nil && strings.Contains(target, "mole-clip-put-") {
+				count++
+			}
+		}
+		return count
+	}
+	if got := countTempFDs(); got != 0 {
+		t.Fatalf("unexpected open temporary uploads: %d", got)
+	}
+	for range 8 {
+		req, err := http.NewRequest(http.MethodPut, ts.URL+"/clip", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "image/png")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+	}
+	if after := countTempFDs(); after != 0 {
+		t.Fatalf("temporary upload file descriptors remain open: %d", after)
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(s.CachePath()), "mole-clip-put-*.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary uploads remain: %v", matches)
+	}
+}
+
+func TestServerConcurrentPutGetHeadersMatchBody(t *testing.T) {
+	_, ts := newTestServer(t)
+	first := bytes.Repeat([]byte{'a'}, 101)
+	second := bytes.Repeat([]byte{'b'}, 503)
+	put := func(payload []byte) {
+		req, _ := http.NewRequest(http.MethodPut, ts.URL+"/clip", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "image/png")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Errorf("PUT status = %d", resp.StatusCode)
+		}
+	}
+	put(first)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			put(second)
+			put(first)
+		}
+	}()
+	for range 100 {
+		resp, err := http.Get(ts.URL + "/clip/latest")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if int64(len(body)) != resp.ContentLength {
+			t.Errorf("Content-Length %d, body %d", resp.ContentLength, len(body))
+		}
+		if !bytes.Equal(body, first) && !bytes.Equal(body, second) {
+			t.Errorf("served mixed image of %d bytes", len(body))
+		}
+	}
+	<-done
+}
+
 // pngMagic is the 8-byte PNG signature; tests use it as a stand-in
 // for "valid-looking PNG" without dragging a real image into the
 // fixture set.

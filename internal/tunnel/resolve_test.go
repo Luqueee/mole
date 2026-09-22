@@ -42,3 +42,22 @@ printf '%s\n' \
 		t.Fatalf("jump = %#v, want root@10.250.0.3:22", jump)
 	}
 }
+
+func TestResolveProxyJumpsExplicitChainAndNone(t *testing.T) {
+	for _, spec := range []string{"", "none", "NoNe"} {
+		jumps, err := resolveProxyJumps(spec, 22)
+		if err != nil || len(jumps) != 0 {
+			t.Fatalf("resolveProxyJumps(%q) = %v, %v", spec, jumps, err)
+		}
+	}
+	jumps, err := resolveProxyJumps("alice@jump:2200, bob@[::1]", 22)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jumps) != 2 || jumps[0].User != "alice" || jumps[0].Addr != "jump:2200" || jumps[1].User != "bob" || jumps[1].Addr != "[::1]:22" {
+		t.Fatalf("unexpected ProxyJump chain: %#v", jumps)
+	}
+	if _, err := resolveProxyJumps("@invalid", 22); err == nil {
+		t.Fatal("invalid ProxyJump accepted")
+	}
+}

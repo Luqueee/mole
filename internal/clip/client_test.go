@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -185,6 +186,111 @@ func TestClient_Watch_FiresOnNewImage(t *testing.T) {
 	// Watch returns ctx.Err() once we cancel inside the callback.
 	if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
 		t.Errorf("Watch returned %v, want ctx.Canceled", err)
+	}
+}
+
+type watchRaceHandler struct {
+	mu              sync.Mutex
+	mtime           time.Time
+	images          [][]byte
+	gets            int
+	firstGetStarted chan struct{}
+	releaseFirstGet chan struct{}
+}
+
+func (h *watchRaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	mtime := h.mtime
+	if r.Method == http.MethodGet {
+		h.gets++
+	}
+	getNumber := h.gets
+	h.mu.Unlock()
+
+	w.Header().Set("Last-Modified", mtime.UTC().Format(http.TimeFormat))
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet || getNumber == 0 || getNumber > len(h.images) {
+		http.Error(w, "unexpected request", http.StatusMethodNotAllowed)
+		return
+	}
+
+	image := h.images[getNumber-1]
+	if getNumber == 1 {
+		_, _ = w.Write(image[:1])
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		close(h.firstGetStarted)
+		<-h.releaseFirstGet
+		_, _ = w.Write(image[1:])
+		return
+	}
+	_, _ = w.Write(image)
+}
+
+func (h *watchRaceHandler) publishSecond() {
+	h.mu.Lock()
+	h.mtime = h.mtime.Add(time.Second)
+	h.mu.Unlock()
+}
+
+func TestClient_Watch_DoesNotSkipImagePublishedDuringPull(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	h := &watchRaceHandler{
+		mtime:           time.Unix(1_700_000_000, 0).UTC(),
+		images:          [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+		firstGetStarted: make(chan struct{}),
+		releaseFirstGet: make(chan struct{}),
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	c := NewClient(ts.URL, discardLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var (
+		got         [][]byte
+		callbackErr error
+		done        = make(chan error, 1)
+	)
+	go func() {
+		done <- c.Watch(ctx, time.Millisecond, func(path string) error {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				callbackErr = err
+				return err
+			}
+			got = append(got, body)
+			if len(got) == 2 {
+				cancel()
+			}
+			return nil
+		})
+	}()
+
+	select {
+	case <-h.firstGetStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first Pull did not reach the response body")
+	}
+	h.publishSecond()
+	close(h.releaseFirstGet)
+
+	watchErr := <-done
+	if callbackErr != nil {
+		t.Fatalf("Watch callback: %v", callbackErr)
+	}
+	if !errors.Is(watchErr, context.Canceled) && !errors.Is(watchErr, context.DeadlineExceeded) {
+		t.Fatalf("Watch returned %v, want cancellation after observing both images", watchErr)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Watch observed %d images, want 2: %v", len(got), got)
+	}
+	if !bytes.Equal(got[0], h.images[0]) || !bytes.Equal(got[1], h.images[1]) {
+		t.Fatalf("Watch images = %v, want %v", got, h.images)
 	}
 }
 

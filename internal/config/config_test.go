@@ -4,10 +4,121 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
 )
+
+func TestSaveClearsExistingValuesAndPreservesComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mole.yaml")
+	before := "# keep header\nremote: dev # keep remote\nports: [3000]\ndiscover_ports: [5173]\nadmin_addr: localhost:8765\ninsecure: true\nssh_port: 2222\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Remote: "dev", Ports: []int{}, DiscoverPorts: []int{}}
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# keep header", "# keep remote", "ports: []", "discover_ports: []", "admin_addr: \"\"", "insecure: false", "ssh_port: 0"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("saved YAML missing %q: %s", want, data)
+		}
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Ports) != 0 || len(loaded.DiscoverPorts) != 0 || loaded.AdminAddr != "" || loaded.Insecure || loaded.SSHPort != 0 {
+		t.Fatalf("cleared values were retained: %+v", loaded)
+	}
+}
+
+func TestSaveSelectedZeroFieldLeavesOthers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mole.yaml")
+	if err := os.WriteFile(path, []byte("remote: dev\nadmin_addr: localhost:8765\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, &Config{}, "admin_addr"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "remote: dev") || !strings.Contains(string(data), "admin_addr: \"\"") {
+		t.Fatalf("selected save changed wrong fields: %s", data)
+	}
+}
+
+func TestSaveSelectedZeroFieldCreatesNewConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mole.yaml")
+	if err := Save(path, &Config{Remote: "ignored"}, "admin_addr"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "admin_addr: \"\"") || strings.Contains(string(data), "remote:") {
+		t.Fatalf("new selected save included wrong fields: %s", data)
+	}
+}
+
+func TestSavePreservesUnknownKeysAndOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mole.yaml")
+	before := "custom_key: retained\nremote: old\n# keep this comment\nports: [3000]\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, &Config{Remote: "new", Ports: []int{8080}}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "custom_key: retained") || !strings.Contains(got, "# keep this comment") {
+		t.Fatalf("unknown key or comment lost: %s", got)
+	}
+	if strings.Index(got, "custom_key:") > strings.Index(got, "remote:") || strings.Index(got, "remote:") > strings.Index(got, "ports:") {
+		t.Fatalf("key order changed: %s", got)
+	}
+}
+
+func TestSaveAtomicWriteFailureKeepsOriginal(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("directory permissions are not portable here")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mole.yaml")
+	before := []byte("remote: dev\n")
+	if err := os.WriteFile(path, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if err := Save(path, &Config{Remote: "other"}); err == nil {
+		t.Fatal("Save succeeded in read-only directory")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(before) {
+		t.Fatalf("failed Save changed original: %q", data)
+	}
+	if err := Save(path, nil); err == nil {
+		t.Fatal("nil config accepted")
+	}
+}
 
 func TestDefault(t *testing.T) {
 	cfg := Default()

@@ -209,7 +209,7 @@ step "using source: $PROJECT_ROOT"
 # ---------------------------------------------------------------------------
 
 GO_BIN="${GO:-$(command -v go || true)}"
-[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go 1.22+ from https://go.dev/dl/ and re-run."
+[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go 1.26.4+ from https://go.dev/dl/ and re-run."
 
 BUILD_DIR="$PROJECT_ROOT/dist"
 mkdir -p "$BUILD_DIR"

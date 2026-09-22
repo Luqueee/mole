@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"time"
 )
 
 // Dialer is anything that can produce a remote net.Conn given an
@@ -28,6 +29,9 @@ type Hooks struct {
 // remote address and bridges bytes bidirectionally until either side
 // closes. Returns nil when ln is closed.
 func Serve(ln net.Listener, dial Dialer, remoteAddr string, hooks Hooks, log *slog.Logger) error {
+	const initialBackoff = 10 * time.Millisecond
+	const maxBackoff = time.Second
+	backoff := initialBackoff
 	for {
 		local, err := ln.Accept()
 		if err != nil {
@@ -35,8 +39,11 @@ func Serve(ln net.Listener, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 				return nil
 			}
 			log.Warn("accept failed", "err", err)
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
+		backoff = initialBackoff
 		go handle(local, dial, remoteAddr, hooks, log)
 	}
 }

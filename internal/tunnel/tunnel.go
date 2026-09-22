@@ -317,16 +317,22 @@ func (m *Manager) Run(cmd string) ([]byte, error) {
 	client := m.client
 	m.mu.RUnlock()
 	if client == nil {
-		if err := m.connect(); err != nil {
+		var err error
+		client, err = m.reconnect(nil)
+		if err != nil {
 			return nil, err
 		}
-		m.mu.RLock()
-		client = m.client
-		m.mu.RUnlock()
 	}
 	sess, err := client.NewSession()
 	if err != nil {
-		return nil, err
+		client, reconnectErr := m.reconnect(client)
+		if reconnectErr != nil {
+			return nil, fmt.Errorf("reconnect: %w (original: %v)", reconnectErr, err)
+		}
+		sess, err = client.NewSession()
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer sess.Close()
 	return sess.CombinedOutput(cmd)

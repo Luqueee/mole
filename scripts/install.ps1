@@ -169,7 +169,7 @@ Step "using source: $projectRoot"
 
 $goBin = $env:GO
 if (-not $goBin) { $goBin = (Get-Command go -ErrorAction SilentlyContinue).Source }
-if (-not $goBin) { Die "'go' is not installed. Install Go 1.22+ from https://go.dev/dl/ and re-run." }
+if (-not $goBin) { Die "'go' is not installed. Install Go 1.26.4+ from https://go.dev/dl/ and re-run." }
 
 $buildDir = Join-Path $projectRoot 'dist'
 if (-not (Test-Path $buildDir)) { New-Item -ItemType Directory -Path $buildDir | Out-Null }
