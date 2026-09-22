@@ -10,7 +10,7 @@
 // Usage:
 //
 //	mole update                 # update to the latest main
-//	mole update -version v0.2.0  # pin a specific git ref
+//	mole update -version v0.1.0  # pin a specific git ref
 //	mole update -dry-run         # print the command without running it
 package main
 
@@ -75,7 +75,7 @@ func runUpdate(args []string) int {
 	// clear message rather than deep inside the shell/PowerShell pipeline.
 	if _, err := exec.LookPath("go"); err != nil {
 		fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "'go' is not installed or not on PATH.")
-		fmt.Fprintln(os.Stderr, "        Install Go 1.22+ from https://go.dev/dl/ and re-run.")
+		fmt.Fprintln(os.Stderr, "        Install Go 1.26.4+ from https://go.dev/dl/ and re-run.")
 		return 1
 	}
 
