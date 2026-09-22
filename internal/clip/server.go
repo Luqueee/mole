@@ -1,4 +1,3 @@
-
 // Package clip shares a single clipboard image between two mole
 // processes over HTTP. The Mac runs Server; the LXC runs Client.
 //
@@ -28,12 +27,12 @@ import (
 // A 32 MiB ceiling is comfortably above any reasonable screenshot while
 // still rejecting accidental bulk uploads before they fill the disk.
 const MaxImageBytes = 32 << 20
+
 // ErrUnavailable signals a feature is not available on this OS. The
 // clip watcher uses it on non-Darwin builds; declaring it in a
 // platform-agnostic file lets callers (cmd/mole/clip.go) reference
 // it without a build tag of their own.
 var ErrUnavailable = errors.New("clip: not supported on this OS")
-
 
 // DefaultCachePath is the single-slot file the server writes the most
 // recent image to. Last writer wins. The mtime is the "is this new?"
@@ -76,9 +75,9 @@ func (s *Server) CachePath() string { return s.cachePath }
 // Handler returns the http.Handler exposing the server. Mount it on a
 // mux or pass it directly to http.Server.
 //
-//   PUT /clip        raw image/png body, written to the cache file
-//   GET  /clip/latest the last cached image, or 404 if nothing yet
-//   GET  /clip        alias for /clip/latest
+//	PUT /clip        raw image/png body, written to the cache file
+//	GET  /clip/latest the last cached image, or 404 if nothing yet
+//	GET  /clip        alias for /clip/latest
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /clip", s.handlePut)
@@ -108,7 +107,11 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmpName := tmp.Name()
+	closed := false
 	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
 		// On any failure path, make sure we don't leave a half-written
 		// tmp behind. A successful rename already moved it away.
 		_ = os.Remove(tmpName)
@@ -121,13 +124,14 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "image too large", http.StatusRequestEntityTooLarge)
 			return
 		}
-		_ = tmp.Close()
 		s.log.Warn("clip server: read body failed", "err", err)
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}
-	if err := tmp.Close(); err != nil {
-		s.log.Warn("clip server: tmp close failed", "err", err)
+	closeErr := tmp.Close()
+	closed = true
+	if closeErr != nil {
+		s.log.Warn("clip server: tmp close failed", "err", closeErr)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -146,24 +150,24 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request) {
-	st, err := os.Stat(s.cachePath)
+	f, err := os.Open(s.cachePath)
 	if errors.Is(err, os.ErrNotExist) {
 		http.Error(w, "no image yet", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		s.log.Warn("clip server: stat failed", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	f, err := os.Open(s.cachePath)
-	if err != nil {
 		s.log.Warn("clip server: open failed", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
 	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		s.log.Warn("clip server: stat failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Content-Length", strconv.FormatInt(st.Size(), 10))

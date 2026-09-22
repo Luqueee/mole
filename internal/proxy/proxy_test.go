@@ -12,6 +12,31 @@ import (
 	"time"
 )
 
+type failingListener struct{ calls atomic.Int64 }
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	if l.calls.Add(1) > 3 {
+		return nil, net.ErrClosed
+	}
+	return nil, errors.New("persistent accept failure")
+}
+func (*failingListener) Close() error   { return nil }
+func (*failingListener) Addr() net.Addr { return &net.TCPAddr{} }
+
+func TestServeBacksOffRepeatedAcceptFailures(t *testing.T) {
+	ln := &failingListener{}
+	start := time.Now()
+	if err := Serve(ln, dialerFunc(func(string, string) (net.Conn, error) { return nil, nil }), "unused", Hooks{}, quietLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if got := ln.calls.Load(); got != 4 {
+		t.Fatalf("Accept calls = %d, want 4", got)
+	}
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond {
+		t.Fatalf("accept failures were retried too quickly: %s", elapsed)
+	}
+}
+
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
