@@ -214,7 +214,7 @@ if (-not $onPath) {
         }
     }
 }
-if (-not $onPath) {
+if (-not $onPath -and -not $env:INSTALL_DIR) {
     $newUserPath = if ($userPath) { "$userPath;$destDir" } else { $destDir }
     [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
     $env:Path += ";$destDir"
