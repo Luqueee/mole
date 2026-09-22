@@ -86,6 +86,61 @@ func (d *deadConn) Close() error {
 // times. It is the fresh client a single redial installs.
 type liveConn struct{}
 
+type runBlockingConn struct {
+	started chan struct{}
+	release chan struct{}
+	closed  atomic.Int64
+}
+
+func (*runBlockingConn) Dial(string, string) (net.Conn, error) { return nil, io.EOF }
+func (c *runBlockingConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return c.Dial(network, addr)
+}
+func (c *runBlockingConn) NewSession() (*ssh.Session, error) {
+	close(c.started)
+	<-c.release
+	return nil, io.EOF
+}
+func (c *runBlockingConn) Close() error { c.closed.Add(1); return nil }
+
+func TestManagerRunDoesNotReplaceNewerClient(t *testing.T) {
+	old := &runBlockingConn{started: make(chan struct{}), release: make(chan struct{})}
+	fresh := &trackedLiveConn{}
+	var redials atomic.Int64
+	m := &Manager{addr: "test:22", log: discardLogger(), client: old}
+	m.dialContext = func(context.Context) (sshConn, error) { redials.Add(1); return fresh, nil }
+	runDone := make(chan error, 1)
+	go func() { _, err := m.Run("true"); runDone <- err }()
+	select {
+	case <-old.started:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not open a session")
+	}
+	conn, err := m.Dial("tcp", "127.0.0.1:3000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	close(old.release)
+	select {
+	case err := <-runDone:
+		if err == nil {
+			t.Fatal("fake session unexpectedly succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not finish")
+	}
+	if got := redials.Load(); got != 1 {
+		t.Fatalf("redials = %d, want one", got)
+	}
+	if got := fresh.closed.Load(); got != 0 {
+		t.Fatalf("newer client was closed %d times", got)
+	}
+	if got := old.closed.Load(); got != 1 {
+		t.Fatalf("stale client closed %d times", got)
+	}
+}
+
 func (l *liveConn) Dial(network, addr string) (net.Conn, error) {
 	return fakeNetConn{}, nil
 }

@@ -20,8 +20,10 @@ import (
 // xxd instead of CGO so the binary stays statically linkable across
 // macOS versions.
 type Watcher struct {
-	log    *slog.Logger
-	lastTS string // last seen SHA; "" means "never seen"
+	log     *slog.Logger
+	lastTS  string // last seen SHA; "" means "never seen"
+	readPNG func(context.Context) ([]byte, error)
+	client  *http.Client
 }
 
 // NewWatcher returns a Watcher ready to be Run.
@@ -29,7 +31,7 @@ func NewWatcher(log *slog.Logger) *Watcher {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Watcher{log: log}
+	return &Watcher{log: log, readPNG: readPasteboardPNG, client: http.DefaultClient}
 }
 
 // Run blocks until ctx is done, polling the clipboard every interval
@@ -87,7 +89,11 @@ func (w *Watcher) Run(ctx context.Context, endpoint string, interval time.Durati
 }
 
 func (w *Watcher) tick(ctx context.Context, endpoint string) error {
-	data, err := readPasteboardPNG(ctx)
+	readPNG := w.readPNG
+	if readPNG == nil {
+		readPNG = readPasteboardPNG
+	}
+	data, err := readPNG(ctx)
 	if err != nil {
 		return err
 	}
@@ -112,13 +118,23 @@ func (w *Watcher) tick(ctx context.Context, endpoint string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "image/png")
-	resp, err := http.DefaultClient.Do(req)
+	client := w.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		// The same image cannot succeed after a permanent rejection.
+		// Request timeout and rate limiting may recover, so retry those.
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 &&
+			resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+			w.lastTS = sum
+		}
 		return fmt.Errorf("clip watcher: server returned %s: %s", resp.Status, body)
 	}
 
