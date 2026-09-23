@@ -14,10 +14,10 @@
 ---
 
 `mole` opens **one** SSH connection to a remote host and forwards local TCP
-ports through it to the same ports on the remote. Turn on auto-discover and it
-figures out **what's actually listening** on the remote and forwards it for
-you — no port list to maintain. Run it in the background and watch it pick up
-new dev servers as you start them.
+ports through it to the same ports on the remote. With auto-discovery, it
+checks the remote's TCP listeners or probes a configured port list when
+listener enumeration is unavailable. Run it in the background to pick up new
+dev servers as they start.
 
 ```
 ┌────────────┐      one SSH connection       ┌──────────────────┐
@@ -33,14 +33,14 @@ new dev servers as you start them.
 | | |
 |---|---|
 | 🔌 **One connection** | A single SSH client multiplexes every forwarded port. |
-| 🔭 **Smart auto-discover** | Enumerates the remote's real TCP listeners (`ss`/`netstat`) and forwards them — any port, not a fixed list. Re-scans every 15s, so servers you start *after* launch get picked up. |
+| 🔭 **Smart auto-discover** | Enumerates the remote's TCP listeners with `ss` or `netstat`; if neither works, probes `discover_ports`. Re-scans every 15s to pick up new servers. |
 | 🧭 **SSH config aliases** | A `remote` like `dev` is resolved through `~/.ssh/config` (`ssh -G`): HostName, User, Port, IdentityFile, Include, Match — all honoured. |
 | 🛡️ **Exclude list** | System/reserved ports (22, 25, 53, 111, 631) are skipped by default; fully configurable. |
 | ♻️ **Auto-reconnect** | Transparent reconnect on tunnel drop, with periodic health checks. |
 | 🔑 **Native auth** | ssh-agent first (Unix socket / Windows named pipe), then `~/.ssh/id_*` keys. |
 | 🌙 **Background daemon** | `mole up -d` detaches; `mole down` stops it; `mole status` and `mole logs` introspect it. |
 | 🎨 **Beautiful logs** | `mole logs` renders the daemon log with colour level badges, a green `FORWARD` badge, and `(×N)` collapsing of repeats. |
-| 📦 **Single binary** | No runtime, no `node_modules`, no background service to manage. |
+| 📦 **Single binary** | No separate runtime or `node_modules`; daemon mode uses the same executable. |
 
 ## 🎨 Beautiful logs
 
@@ -55,22 +55,31 @@ distinct green **FORWARD** badge when a port starts forwarding and a burnt-orang
 
 ## 🚀 Quickstart
 
-```bash
-# 1. install
-curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
+Install on **Windows** with PowerShell 5.1 or newer:
 
-# 2. configure + start (interactive; accepts an ssh config alias as the remote)
-mole init
-
-# 3. later…
-mole status      # what's forwarded right now
-mole logs -f     # pretty, colourised, live
-mole down        # stop the background daemon
+```powershell
+irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
 ```
 
-`mole init` writes the config, then offers to start mole **in the background**
-for you. From there it keeps the tunnel up and forwards new servers as they
-appear.
+On **Linux, macOS, or FreeBSD**, install with Go 1.26.4+ and Git available:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
+```
+
+Open a new terminal if needed, then configure mole on the machine where you
+want the local ports. The remote can be a host from your SSH config:
+
+```text
+mole init
+mole status
+mole logs -f
+mole down
+```
+
+`mole init` writes `mole.yaml` and offers to start the tunnel in the
+background. Choose auto-discovery to forward services that start later, or
+enter an explicit list of ports.
 
 ## 🧰 Commands
 
@@ -84,104 +93,89 @@ appear.
 | `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
-| `mole clip` | Share clipboard images over the tunnel: `clip serve`, `clip pull`. |
-| `mole update` | Update mole in place to the latest release (re-runs the installer). |
+| `mole clip` | Share clipboard images over a separate private HTTP connection: `clip serve`, `clip pull`. |
+| `mole update` | Update in place using the installer (latest source on Unix, latest release on Windows). |
 | `mole version` · `mole help` | The obvious. |
 
 ## 📦 Install
 
-Five ways — pick whichever fits. All install a single static binary.
+### Installers
 
-### Option 1 — one-liner (no clone, no setup)
+Outside a local mole clone, the Windows installer downloads the latest release
+for amd64 or arm64, checks its SHA-256, and adds the install directory to your
+user `PATH`. It needs PowerShell 5.1 or newer, but no Go or Git:
 
-The Unix installer builds from source. The Windows installer downloads the
-latest release archive, verifies its SHA-256, and adds the install directory to
-your user `PATH`.
+```powershell
+irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
+```
 
-**Linux / macOS / FreeBSD**
+The Unix installer builds from a local mole clone when run inside one;
+otherwise it clones the latest `main`. This one-liner needs Go 1.26.4+, Git,
+and curl:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
 ```
 
-**Windows (PowerShell 5+)**
+| Platform | Default binary location |
+|----------|-------------------------|
+| Windows | `%LOCALAPPDATA%\Programs\mole\mole.exe` |
+| Linux, macOS, FreeBSD (user) | `~/.local/bin/mole` |
+| Linux, macOS, FreeBSD (root) | `/usr/local/bin/mole` |
 
-```powershell
-iwr -useb https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
-```
+Open a new PowerShell session to use the updated user `PATH`. On Unix, the
+installer prints a `PATH` hint when needed.
 
-Default install locations:
+To install from a local clone, run `./scripts/install.sh` on Unix or
+`.\scripts\install.ps1` in PowerShell; both build from source with Go. You can
+also download a [prebuilt archive](https://github.com/Luqueee/mole/releases/latest)
+for any supported platform and check it against the release's `SHA256SUMS`.
 
-| User            | Install location                |
-|-----------------|---------------------------------|
-| root (Unix)     | `/usr/local/bin/mole`           |
-| non-root (Unix) | `~/.local/bin/mole`             |
-| Windows         | `%LOCALAPPDATA%\Programs\mole\` |
-
-On Unix, if the destination isn't on your `PATH`, the script prints the exact
-line to add to your shell profile. Open a new PowerShell session after installing
-on Windows to pick up the updated user `PATH`.
-
-Useful flags:
+Custom destinations and version pins:
 
 ```bash
-./scripts/install.sh --init          # also launch the configurator
-./scripts/install.sh --prefix /opt   # custom prefix
-MOLE_VERSION=v0.1.0 ./scripts/install.sh   # pin a ref
-
-.\scripts\install.ps1 -InstallDir 'C:\Tools\mole'                  # Windows custom dir
-.\scripts\install.ps1 -Init                                          # Windows + init
+./scripts/install.sh --prefix /opt              # /opt/bin/mole
+INSTALL_DIR=~/bin/mole ./scripts/install.sh      # exact binary path
+MOLE_VERSION=v0.1.1 ./scripts/install.sh         # Git ref, outside a clone
 ```
 
-### Option 2 — `go install` (no clone, needs Go 1.26+)
+```powershell
+.\scripts\install.ps1 -InstallDir 'C:\Tools\mole' # from a clone; requires Go
+```
+
+Outside a clone, pin a published Windows release before using the one-liner:
+
+```powershell
+$env:MOLE_VERSION = 'v0.1.1'
+irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
+```
+
+The `-InstallDir` PowerShell option accepts a directory. The `INSTALL_DIR`
+environment variable accepts the full path to `mole.exe`.
+
+### Other ways to install
+
+With Go 1.26.4+:
 
 ```bash
 go install github.com/Luqueee/mole/cmd/mole@latest
-# ensure the dir is on PATH:
-export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
-### Option 3 — install script from a clone
+Add your Go `GOPATH/bin` directory to `PATH` if needed. From a clone on Unix,
+`make install` builds into `$(go env GOPATH)/bin`; `PREFIX=/usr/local` and
+`INSTALL_DIR=/path/to/mole` override that destination.
 
-```bash
-git clone https://github.com/Luqueee/mole && cd mole
-./scripts/install.sh                 # Unix   (./scripts/install.ps1 on Windows)
+### Scripted setup
+
+After installing on any platform, create a user-global config without prompts:
+
+```text
+mole init -no-prompt -remote dev -auto-discover -global
 ```
 
-Override the destination with `--prefix` or `INSTALL_DIR`:
-
-```bash
-./scripts/install.sh --prefix /opt            # → /opt/bin/mole
-INSTALL_DIR=~/bin/mole ./scripts/install.sh   # → ~/bin/mole
-```
-
-### Option 4 — `make install` from a clone
-
-```bash
-git clone https://github.com/Luqueee/mole && cd mole
-make install                         # → $(go env GOPATH)/bin/mole
-make install PREFIX=/usr/local       # → /usr/local/bin/mole
-make install INSTALL_DIR=~/bin/mole  # → ~/bin/mole
-```
-
-### Option 5 — fully automatic (scripted, zero prompts)
-
-For CI, dotfiles, Dockerfiles, and `curl | sh` lovers: install the binary **and**
-generate a working config in one non-interactive pass. With `-no-prompt`,
-`mole init` reads its answers from `MOLE_*` env vars, so there's nothing to type.
-The installer auto-detects the non-TTY stdin and forwards `-no-prompt` for you.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh \
-  | MOLE_REMOTE=dev@workstation \
-    MOLE_AUTO_DISCOVER=true \
-    sh -s -- --init
-```
-
-Add `MOLE_GLOBAL=true` to write `~/.config/mole/config.yaml` (per-user) instead
-of `./mole.yaml` (per-project). On Unix, pin a Git ref with
-`MOLE_VERSION=v0.1.0`; on Windows, pin a release tag with
-`$env:MOLE_VERSION = 'v0.1.0'`. Set `$env:MOLE_*` and run the installer with `-Init`.
+Use `-ports 3000,5173` instead of `-auto-discover` for an explicit list.
+`mole init` also reads `MOLE_REMOTE`, `MOLE_PORTS`, `MOLE_AUTO_DISCOVER`,
+`MOLE_CONFIG_PATH`, and `MOLE_GLOBAL` when their matching flags are absent.
 
 ### Build without installing
 
@@ -197,23 +191,23 @@ installer against the running binary's own location:
 
 ```bash
 mole update                  # latest main on Unix; latest release on Windows
-mole update -version v0.1.0  # Unix: git ref; Windows: release tag
+mole update -version v0.1.1  # Unix: Git ref; Windows: release tag
 mole update -dry-run         # print what it would run, change nothing
 ```
 
-Needs `go` plus `curl`/`wget` on Unix, or PowerShell on Windows. For a `go install`
-setup, re-run `go install github.com/Luqueee/mole/cmd/mole@latest` instead.
+Unix updates need Go, Git, and curl or wget. Windows updates need PowerShell.
+For a `go install` setup, re-run
+`go install github.com/Luqueee/mole/cmd/mole@latest` instead.
 
 ### Uninstall
 
 ```bash
-./scripts/uninstall.sh                 # Unix   (./scripts/uninstall.ps1 on Windows)
-curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/uninstall.sh | sh
-./scripts/uninstall.sh --purge         # also drop ~/.config/mole/
-make uninstall
+./scripts/uninstall.sh         # Unix
+./scripts/uninstall.sh --purge # also remove the user config
 ```
 
-For `go install`, just remove `$(go env GOPATH)/bin/mole`.
+On Windows, run `.\scripts\uninstall.ps1` from a clone. For a `go install`
+setup, remove the binary from `$(go env GOPATH)/bin`.
 
 ## 🛠️ Usage
 
@@ -241,10 +235,10 @@ mole up --remote dev --auto-discover           # forward whatever's listening on
 mole up --remote dev --ports 3000,5173,8080    # forward an explicit set
 ```
 
-With `--auto-discover`, mole enumerates the remote's TCP listeners and forwards
-the loopback-reachable ones, skipping the configured `exclude_ports`. It re-scans
-every 15 seconds, so a dev server you start later is forwarded automatically —
-no restart needed.
+With `--auto-discover`, mole tries `ss` or `netstat` on the remote and forwards
+listeners reachable through remote loopback, excluding `exclude_ports`. If
+neither command works, it probes only the ports in `discover_ports`. It repeats
+discovery every 15 seconds, so a new server can be forwarded without a restart.
 
 ### Config file
 
@@ -258,9 +252,9 @@ admin_addr: 127.0.0.1:9999
 log_level: info
 ```
 
-`mole up` looks for `./mole.yaml` first, then the user-global
-`~/.config/mole/config.yaml`, so a config written by `mole init -global`
-is picked up from anywhere.
+`mole up` looks for `./mole.yaml` first, then the user-global config:
+`~/.config/mole/config.yaml` on Unix or `%APPDATA%\mole\config.yaml` on Windows.
+`mole init -global` writes to that user-global location.
 
 ### Inspect a running daemon
 
@@ -287,7 +281,7 @@ forces it back on).
 mole restart                 # stop and re-launch the daemon with the same config
 
 mole ports list              # show the auto-discover port list
-mole ports add 4321          # add a port (live: applied to a running daemon too)
+mole ports add 4321          # add a discovery candidate
 mole ports remove 4321       # or: mole ports rm 4321
 
 mole config edit             # open the active mole.yaml in $VISUAL / $EDITOR
@@ -297,22 +291,26 @@ mole logs clean              # truncate the daemon log
 mole logs clean -keep 200    # …keeping the last N lines
 ```
 
-### Clipboard over the tunnel
+`mole ports` saves changes to the active config. With the admin API enabled,
+it also attempts to apply them to a running daemon; otherwise restart mole to
+pick up the updated list.
+
+### Clipboard images over a private network
 
 `mole clip` moves clipboard **images** from the machine running `clip serve` to
 the one running `clip pull` — useful for pasting a screenshot taken on a remote
-desktop. Clipboard watching is macOS-only; other platforms can still serve
-explicit pushes and pull.
+desktop. It uses a separate HTTP connection over a private network, such as
+Tailscale or WireGuard. Automatic clipboard watching is available on macOS;
+`clip pull` works on every supported platform.
 
 ```bash
-mole clip serve              # on the source machine (default: loopback 127.0.0.1:7777)
+mole clip serve              # on the source Mac; watches its clipboard by default
 mole clip pull               # on the target; uses clip_url from the config, or -url
 ```
 
-The clip endpoint has no authentication. The default loopback bind keeps it
-off the network; for a remote pull, bind to the source machine's private
-WireGuard or Tailscale address explicitly and use the same address in
-`clip_url`:
+The clip endpoint has no authentication and binds to `127.0.0.1:7777` by
+default. For a remote pull, bind it to the source machine's private network
+address and use the same address in `clip_url`:
 
 ```yaml
 clip_url: http://100.64.0.10:7777
@@ -377,8 +375,8 @@ mole restart [-config PATH]
 mole status  [-admin 127.0.0.1:9999]
 mole logs    [-f] [-n N] [-raw] [-color] [-no-color] [-no-dedup]
 mole logs clean [-keep N]
-mole ports  add <port> [-config PATH]
-mole ports  remove|rm <port> [-config PATH]
+mole ports  add [-config PATH] <port>
+mole ports  remove|rm [-config PATH] <port>
 mole ports  list|ls [-config PATH]
 mole config edit [-config PATH] [-editor CMD]
 mole init   [flags]
