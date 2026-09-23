@@ -67,19 +67,28 @@ On **Linux, macOS, or FreeBSD**, install with Go 1.26.4+ and Git available:
 curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
 ```
 
-Open a new terminal if needed, then configure mole on the machine where you
-want the local ports. The remote can be a host from your SSH config:
+Open a new terminal if needed, then start mole with an SSH `Host` alias from
+your `~/.ssh/config`. On a fresh install, choose how to select ports:
 
 ```text
-mole init
-mole status
+mole up --remote devlabs --auto-discover -d
 mole logs -f
 mole down
 ```
 
-`mole init` writes `mole.yaml` and offers to start the tunnel in the
-background. Choose auto-discovery to forward services that start later, or
-enter an explicit list of ports.
+Replace `devlabs` with your own SSH alias. Press Ctrl+C to stop following logs;
+the daemon keeps running until `mole down`.
+
+Use `--ports 3000,5173` instead of `--auto-discover` to forward specific ports.
+If `./mole.yaml` or your user-global config already sets `auto_discover: true`
+or `ports:`, use the shorter command:
+
+```text
+mole up --remote devlabs -d
+```
+
+The `-d` flag starts mole in the background. Run `mole init` if you want to
+create a config interactively.
 
 ## 🧰 Commands
 
