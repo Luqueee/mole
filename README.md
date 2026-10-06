@@ -20,11 +20,11 @@ listener enumeration is unavailable. Run it in the background to pick up new
 dev servers as they start.
 
 ```
-┌────────────┐      one SSH connection       ┌──────────────────┐
-│  browser   │ ──►  localhost:3000  ──►──────►│  workstation:3000│
-│  curl      │ ──►  localhost:5173  ──►──────►│  workstation:5173│
-│  whatever  │ ──►  localhost:8080  ──►──────►│  workstation:8080│
-└────────────┘             ▲                  └──────────────────┘
+┌────────────┐      one SSH connection        ┌────────────────────┐
+│  browser   │ ──►  localhost:3000  ──►──────►│  workstation:3000  │
+│  curl      │ ──►  localhost:5173  ──►──────►│  workstation:5173  │
+│  whatever  │ ──►  localhost:8080  ──►──────►│  workstation:8080  │
+└────────────┘             ▲                  └────────────────────┘
                            │  mole runs here, on your laptop
 ```
 
