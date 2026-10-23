@@ -1,0 +1,124 @@
+name: Desktop bundles
+
+# Builds the Wails desktop app for macOS, Windows and Linux. Pull requests that
+# touch desktop/ only check that it still bundles; a `desktop-v*` tag also
+# publishes the bundles as a GitHub release.
+on:
+  pull_request:
+    paths:
+      - desktop/**
+      - internal/**
+      - go.mod
+      - go.sum
+      - .github/workflows/desktop-bundles.yml
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: mole-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  WAILS_VERSION: v3.0.0-beta.34
+
+jobs:
+  bundle:
+    name: Bundle ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            task: darwin:package:dmg
+            files: |
+              desktop/bin/*.dmg
+          - name: Windows
+            os: windows-latest
+            task: package
+            files: |
+              desktop/bin/*.exe
+          - name: Linux
+            os: ubuntu-latest
+            task: linux:create:deb linux:create:appimage
+            files: |
+              desktop/bin/*.deb
+              desktop/bin/*.AppImage
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libfuse2
+
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+
+      - name: Bundle
+        run: wails3 task ${{ matrix.task }}
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mole-desktop-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 7 || 3 }}
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: mole-desktop-*
+          path: bundles
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" bundles/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "mole desktop ${GITHUB_REF_NAME#desktop-}" \
+            --generate-notes
