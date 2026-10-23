@@ -78,12 +78,15 @@ jobs:
         working-directory: .
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libfuse2
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libfuse2
 
       - name: Install NSIS
         if: runner.os == 'Windows'
         shell: pwsh
-        run: choco install nsis -y --no-progress
+        run: |
+          choco install nsis -y --no-progress
+          # choco's PATH change doesn't reach later steps.
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
