@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +49,31 @@ func TestInstallCLI(t *testing.T) {
 	}
 	if err := m.InstallCLI(); err != nil || !m.GetCLI().UpToDate {
 		t.Fatalf("update failed: %v", err)
+	}
+}
+
+func TestAddCLIToPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("edits the real user PATH")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	m := NewMoleService()
+
+	if st := m.GetCLI(); st.PathSet || st.Profile != filepath.Join(home, ".zshrc") {
+		t.Fatalf("before: %+v", st)
+	}
+	for range 2 { // the second call must not add a second line
+		if err := m.AddCLIToPath(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, _ := os.ReadFile(filepath.Join(home, ".zshrc"))
+	if strings.Count(string(b), pathMarker) != 1 || !strings.Contains(string(b), `$HOME/.local/bin`) {
+		t.Fatalf(".zshrc: %q", b)
+	}
+	if !m.GetCLI().PathSet {
+		t.Fatal("PathSet false after adding")
 	}
 }

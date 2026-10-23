@@ -358,7 +358,20 @@ function SetupPage({ run }: { run: Run }) {
       </div>
       {cli && !cli.bundled && <div className="border-b border-line px-5 py-4 text-xs text-dim">This build does not embed the CLI (run <span className="text-foreground">wails3 task bundle:cli</span> before building).</div>}
       {cli?.installed && !cli.dirOnPath && cli.path.startsWith(cli.installDir) && (
-        <div className="border-b border-line px-5 py-4 text-xs text-warn select-text">{cli.installDir} is not in your PATH: add it to use `mole` in a terminal.</div>
+        <div className="flex items-center border-b border-line px-5 py-4">
+          <div className="flex-1 text-xs select-text">
+            {cli.pathSet ? (
+              <span className="text-dim">Added to <span className="text-foreground">{cli.profile}</span>: open a new terminal to use `mole`.</span>
+            ) : (
+              <span className="text-warn">{cli.installDir} is not in your PATH, so `mole` won't work in a terminal.</span>
+            )}
+          </div>
+          {!cli.pathSet && (
+            <button onClick={() => run(`added to ${cli.profile}`, api.cliPath).then(load)} className="no-drag ml-6 border border-warn px-5 py-2 text-[11px] tracking-[0.2em] text-warn transition hover:bg-warn hover:text-background">
+              ADD TO PATH
+            </button>
+          )}
+        </div>
       )}
       {cli?.installed && <div className="px-5 py-4 text-[11px] text-faint">A running daemon keeps its old binary until you press RESTART.</div>}
     </div>

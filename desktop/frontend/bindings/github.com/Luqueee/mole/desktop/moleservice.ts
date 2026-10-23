@@ -17,6 +17,15 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * AddCLIToPath puts the install directory on PATH for new terminals: a line
+ * in the login shell's profile, or the user PATH on Windows. Running it
+ * twice changes nothing.
+ */
+export function AddCLIToPath(): $CancellablePromise<void> {
+    return $Call.ByID(1633129987);
+}
+
+/**
  * AddDiscoverPort adds a discovery candidate, live when the daemon is up.
  */
 export function AddDiscoverPort(port: number): $CancellablePromise<void> {

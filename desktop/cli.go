@@ -70,6 +70,8 @@ type CLIStatus struct {
 	UpToDate   bool   `json:"upToDate"`   // identical to the embedded one
 	InstallDir string `json:"installDir"` // where Install puts it
 	DirOnPath  bool   `json:"dirOnPath"`  // InstallDir is in the shell PATH
+	PathSet    bool   `json:"pathSet"`    // the shell profile already adds InstallDir
+	Profile    string `json:"profile"`    // file AddCLIToPath edits ("user PATH" on Windows)
 }
 
 // GetCLI reports whether the CLI is installed and whether it matches the
@@ -82,6 +84,7 @@ func (m *MoleService) GetCLI() CLIStatus {
 			st.DirOnPath = true
 		}
 	}
+	st.Profile, st.PathSet = pathProfile()
 	bin, err := moleBin()
 	if err != nil {
 		return st
@@ -134,4 +137,74 @@ func (m *MoleService) InstallCLI() error {
 		return err
 	}
 	return nil
+}
+
+const pathMarker = "# added by mole"
+
+// shellProfile is the startup file of the user's login shell and the line
+// that puts the install directory on PATH.
+func shellProfile() (file, line string) {
+	home, _ := os.UserHomeDir()
+	switch filepath.Base(os.Getenv("SHELL")) {
+	case "zsh":
+		return filepath.Join(home, ".zshrc"), `export PATH="$HOME/.local/bin:$PATH"`
+	case "bash":
+		if runtime.GOOS == "darwin" { // login shells there skip .bashrc
+			return filepath.Join(home, ".bash_profile"), `export PATH="$HOME/.local/bin:$PATH"`
+		}
+		return filepath.Join(home, ".bashrc"), `export PATH="$HOME/.local/bin:$PATH"`
+	case "fish":
+		return filepath.Join(home, ".config", "fish", "config.fish"), "fish_add_path $HOME/.local/bin"
+	}
+	return filepath.Join(home, ".profile"), `export PATH="$HOME/.local/bin:$PATH"`
+}
+
+const winUserPath = `[Environment]::GetEnvironmentVariable('Path','User')`
+
+// pathProfile names what AddCLIToPath edits and whether it already did.
+func pathProfile() (string, bool) {
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("powershell", "-NoProfile", "-Command", winUserPath).Output()
+		if err != nil {
+			return "user PATH", false
+		}
+		for _, p := range strings.Split(strings.TrimSpace(string(out)), ";") {
+			if strings.EqualFold(filepath.Clean(p), filepath.Clean(cliInstallDir())) {
+				return "user PATH", true
+			}
+		}
+		return "user PATH", false
+	}
+	file, _ := shellProfile()
+	b, _ := os.ReadFile(file)
+	return file, strings.Contains(string(b), pathMarker)
+}
+
+// AddCLIToPath puts the install directory on PATH for new terminals: a line
+// in the login shell's profile, or the user PATH on Windows. Running it
+// twice changes nothing.
+func (m *MoleService) AddCLIToPath() error {
+	if _, done := pathProfile(); done {
+		return nil
+	}
+	if runtime.GOOS == "windows" {
+		script := `$d=$env:MOLE_BIN_DIR; $p=` + winUserPath + `; [Environment]::SetEnvironmentVariable('Path',($p.TrimEnd(';')+';'+$d),'User')`
+		cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
+		cmd.Env = append(os.Environ(), "MOLE_BIN_DIR="+cliInstallDir())
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("update user PATH: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	file, line := shellProfile()
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "\n%s\n%s\n", pathMarker, line)
+	return err
 }

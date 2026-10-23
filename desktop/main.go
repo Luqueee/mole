@@ -28,7 +28,7 @@ func main() {
 	// 'Mac' options tailor the application when running an macOS.
 	svc := NewMoleService()
 	app := application.New(application.Options{
-		Name:        "mole-desktop",
+		Name:        "Mole",
 		Description: "Desktop control panel for mole",
 		Services: []application.Service{
 			application.NewService(svc),

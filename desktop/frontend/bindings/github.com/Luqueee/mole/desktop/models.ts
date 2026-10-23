@@ -43,6 +43,16 @@ export interface CLIStatus {
      * InstallDir is in the shell PATH
      */
     "dirOnPath": boolean;
+
+    /**
+     * the shell profile already adds InstallDir
+     */
+    "pathSet": boolean;
+
+    /**
+     * file AddCLIToPath edits ("user PATH" on Windows)
+     */
+    "profile": string;
 }
 
 /**
