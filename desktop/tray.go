@@ -11,6 +11,9 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
+// The mascot as a template image (alpha only), so the menu bar draws it white
+// or black to match the theme; color.png is the fallback for other systems.
+//
 //go:embed build/tray/template.png
 var trayTemplateIcon []byte
 
@@ -38,7 +41,7 @@ func setupTray(app *application.App, win *application.WebviewWindow, svc *MoleSe
 
 	tray := app.SystemTray.New()
 	if runtime.GOOS == "darwin" {
-		tray.SetTemplateIcon(trayTemplateIcon) // tinted by the menu bar
+		tray.SetTemplateIcon(trayTemplateIcon)
 	} else {
 		tray.SetIcon(trayColorIcon)
 	}
