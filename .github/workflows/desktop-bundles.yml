@@ -41,7 +41,7 @@ jobs:
             os: windows-latest
             task: package
             files: |
-              desktop/bin/*.exe
+              desktop/bin/*installer.exe
           - name: Linux
             os: ubuntu-latest
             task: linux:create:deb linux:create:appimage
@@ -104,7 +104,7 @@ jobs:
       - name: Upload bundles
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: mole-desktop-${{ matrix.name }}
+          name: mole-bundle-${{ matrix.name }}
           path: ${{ matrix.files }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 7 || 3 }}
@@ -120,7 +120,7 @@ jobs:
       - name: Download bundles
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: mole-desktop-*
+          pattern: mole-bundle-*
           path: bundles
           merge-multiple: true
 

@@ -58,12 +58,14 @@ function mockEvents(): Events {
 }
 
 let mockCli = false;
+let mockPathSet = false;
 function mockCliStatus(): CLIStatus {
-  return { bundled: true, installed: mockCli, path: mockCli ? "/Users/me/.local/bin/mole" : "", version: mockCli ? "v0.2.0" : "", upToDate: mockCli, installDir: "/Users/me/.local/bin", dirOnPath: false } as CLIStatus;
+  return { bundled: true, installed: mockCli, path: mockCli ? "/Users/me/.local/bin/mole" : "", version: mockCli ? "v0.2.0" : "", upToDate: mockCli, installDir: "/Users/me/.local/bin", dirOnPath: false, pathSet: mockPathSet, profile: "/Users/me/.zshrc" } as CLIStatus;
 }
 
 export const api = {
   cli: async (): Promise<CLIStatus> => (MOCK ? mockCliStatus() : MoleService.GetCLI()),
+  cliPath: async () => (MOCK ? void (mockPathSet = true) : MoleService.AddCLIToPath()),
   cliInstall: async () => (MOCK ? void (mockCli = true) : MoleService.InstallCLI()),
   events: async (since: number): Promise<Events> => (MOCK ? mockEvents() : MoleService.GetEvents(since)),
   status: async (): Promise<Status> => (MOCK ? mockStatus() : MoleService.GetStatus()),
