@@ -1,0 +1,51 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestInstallCLI(t *testing.T) {
+	want := bundledCLI()
+	if want == nil {
+		t.Skip("CLI not embedded; run `wails3 task bundle:cli`")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOCALAPPDATA", home)
+	t.Setenv("PATH", "")
+	m := NewMoleService()
+
+	if st := m.GetCLI(); st.Installed || !st.Bundled {
+		t.Fatalf("before install: %+v", st)
+	}
+	if err := m.InstallCLI(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(cliInstallDir(), cliName()))
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("installed binary differs: %v", err)
+	}
+	// Found without the install dir being on PATH, as for a Finder launch.
+	st := m.GetCLI()
+	if !st.Installed || !st.UpToDate || st.DirOnPath || st.Version == "" {
+		t.Fatalf("after install: %+v", st)
+	}
+	// Reinstalling over an existing copy works.
+	if err := m.InstallCLI(); err != nil {
+		t.Fatal(err)
+	}
+	// A stale copy is reported, then fixed.
+	p := filepath.Join(cliInstallDir(), cliName())
+	if err := os.WriteFile(p, append(want[:len(want):len(want)], 0), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if m.GetCLI().UpToDate {
+		t.Fatal("modified binary reported up to date")
+	}
+	if err := m.InstallCLI(); err != nil || !m.GetCLI().UpToDate {
+		t.Fatalf("update failed: %v", err)
+	}
+}

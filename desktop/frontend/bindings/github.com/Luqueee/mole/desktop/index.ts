@@ -7,6 +7,7 @@ export {
 };
 
 export type {
+    CLIStatus,
     Event,
     Events,
     Settings,

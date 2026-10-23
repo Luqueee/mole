@@ -268,9 +268,9 @@ func (m *MoleService) GetLogs(n int) ([]string, error) {
 }
 
 func (m *MoleService) mole(args ...string) error {
-	bin, err := exec.LookPath("mole")
+	bin, err := moleBin()
 	if err != nil {
-		return fmt.Errorf("mole binary not found in PATH: %w", err)
+		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

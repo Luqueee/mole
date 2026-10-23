@@ -31,6 +31,14 @@ export function AddPush(local: number, remote: number): $CancellablePromise<void
 }
 
 /**
+ * GetCLI reports whether the CLI is installed and whether it matches the
+ * one embedded in this app.
+ */
+export function GetCLI(): $CancellablePromise<$models.CLIStatus> {
+    return $Call.ByID(960708464);
+}
+
+/**
  * GetEvents returns the connections finished after event `since`.
  */
 export function GetEvents(since: number): $CancellablePromise<$models.Events> {
@@ -58,6 +66,15 @@ export function GetSettings(): $CancellablePromise<$models.Settings> {
  */
 export function GetStatus(): $CancellablePromise<$models.Status> {
     return $Call.ByID(562239672);
+}
+
+/**
+ * InstallCLI writes the embedded CLI into the install directory, replacing
+ * any previous copy there. A running daemon keeps its old binary until it is
+ * restarted.
+ */
+export function InstallCLI(): $CancellablePromise<void> {
+    return $Call.ByID(2356803037);
 }
 
 /**

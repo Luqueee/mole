@@ -6,6 +6,46 @@
 import * as admin$0 from "../internal/admin/models.js";
 
 /**
+ * CLIStatus describes the CLI install for the Setup tab.
+ */
+export interface CLIStatus {
+    /**
+     * this build embeds a CLI
+     */
+    "bundled": boolean;
+
+    /**
+     * a mole binary was found
+     */
+    "installed": boolean;
+
+    /**
+     * where it was found
+     */
+    "path": string;
+
+    /**
+     * its `mole version` output
+     */
+    "version": string;
+
+    /**
+     * identical to the embedded one
+     */
+    "upToDate": boolean;
+
+    /**
+     * where Install puts it
+     */
+    "installDir": string;
+
+    /**
+     * InstallDir is in the shell PATH
+     */
+    "dirOnPath": boolean;
+}
+
+/**
  * Event is one finished forwarded connection (mirror of admin.Event).
  */
 export interface Event {

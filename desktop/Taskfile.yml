@@ -24,6 +24,12 @@ tasks:
     cmds:
       - task: "{{.GOOS}}:build"
 
+  bundle:cli:
+    summary: Builds the mole CLI into embedded/ so the app can install it
+    dir: ..
+    cmds:
+      - go build -trimpath -ldflags="-s -w" -o desktop/embedded/mole{{exeExt}} ./cmd/mole
+
   package:
     summary: Packages a production build of the application
     cmds:
