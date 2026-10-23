@@ -27,7 +27,8 @@ type Hooks struct {
 
 // Serve binds to ln and, for each accepted connection, dials the
 // remote address and bridges bytes bidirectionally until either side
-// closes. Returns nil when ln is closed.
+// closes. Returns nil when ln is closed (net.ErrClosed, or io.EOF as
+// returned by x/crypto/ssh remote listeners).
 func Serve(ln net.Listener, dial Dialer, remoteAddr string, hooks Hooks, log *slog.Logger) error {
 	const initialBackoff = 10 * time.Millisecond
 	const maxBackoff = time.Second
@@ -35,7 +36,7 @@ func Serve(ln net.Listener, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 	for {
 		local, err := ln.Accept()
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
 				return nil
 			}
 			log.Warn("accept failed", "err", err)
@@ -95,10 +96,10 @@ func handle(local net.Conn, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 }
 
 // closeWrite best-effort signals "no more data from this side" to the
-// peer. Silently no-ops for non-TCP conns (e.g. in-memory fakes in
-// tests).
+// peer. Covers *net.TCPConn and SSH channel conns (both have CloseWrite);
+// no-ops for conns without it (e.g. in-memory fakes in tests).
 func closeWrite(c net.Conn) {
-	if tcp, ok := c.(*net.TCPConn); ok {
-		_ = tcp.CloseWrite()
+	if cw, ok := c.(interface{ CloseWrite() error }); ok {
+		_ = cw.CloseWrite()
 	}
 }
