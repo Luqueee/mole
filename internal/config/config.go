@@ -91,6 +91,82 @@ type Config struct {
 	// ClipIntervalMs controls the clipboard poll cadence on the Mac.
 	// 0 falls back to the runClipServe flag default (500ms).
 	ClipIntervalMs int `yaml:"clip_interval_ms"`
+
+	// Transfer configures `mole send` and this machine's inbox.
+	Transfer TransferConfig `yaml:"transfer"`
+}
+
+// DefaultTransferPort is the loopback port a receiving daemon listens on,
+// and the port the push forward exposes on the remote, for remote-to-local
+// transfers.
+const DefaultTransferPort = 9977
+
+// TransferConfig configures file transfer between the two machines.
+type TransferConfig struct {
+	// Inbox is where files sent to THIS machine land. Absolute, or starting
+	// with ~/ (default ~/mole-inbox).
+	Inbox string `yaml:"inbox,omitempty"`
+	// Receive lets the daemon accept files sent from the remote. Off by
+	// default: it exposes a port on the remote that writes into this
+	// machine. Sending from this machine to the remote needs no setting.
+	Receive bool `yaml:"receive,omitempty"`
+	// Accept is "ask" (default: each incoming transfer waits for the user)
+	// or "auto" (incoming transfers are saved straight away).
+	Accept string `yaml:"accept,omitempty"`
+	// Port is the loopback port used for remote-to-local transfers
+	// (default DefaultTransferPort).
+	Port int `yaml:"port,omitempty"`
+	// MaxSizeMB caps one incoming transfer, in MiB (0 = no cap).
+	MaxSizeMB int `yaml:"max_size_mb,omitempty"`
+}
+
+// InboxDir returns the absolute inbox folder, expanding a leading ~.
+func (t TransferConfig) InboxDir() string {
+	home, _ := os.UserHomeDir()
+	d := t.Inbox
+	switch {
+	case d == "":
+		d = filepath.Join(home, "mole-inbox")
+	case d == "~" || strings.HasPrefix(d, "~/") || strings.HasPrefix(d, `~\`):
+		d = filepath.Join(home, d[1:])
+	}
+	return filepath.Clean(d)
+}
+
+// AcceptMode returns "ask" or "auto".
+func (t TransferConfig) AcceptMode() string {
+	if t.Accept == "auto" {
+		return "auto"
+	}
+	return "ask"
+}
+
+// PortOrDefault returns the transfer port.
+func (t TransferConfig) PortOrDefault() int {
+	if t.Port == 0 {
+		return DefaultTransferPort
+	}
+	return t.Port
+}
+
+// MaxBytes returns the incoming-transfer cap in bytes (0 = none).
+func (t TransferConfig) MaxBytes() int64 { return int64(t.MaxSizeMB) << 20 }
+
+// Validate checks the transfer settings.
+func (t TransferConfig) Validate() error {
+	if t.Inbox != "" && !filepath.IsAbs(t.Inbox) && t.Inbox != "~" && !strings.HasPrefix(t.Inbox, "~/") && !strings.HasPrefix(t.Inbox, `~\`) {
+		return fmt.Errorf("transfer.inbox: %q must be an absolute path or start with ~/", t.Inbox)
+	}
+	if t.Accept != "" && t.Accept != "ask" && t.Accept != "auto" {
+		return fmt.Errorf("transfer.accept: %q must be \"ask\" or \"auto\"", t.Accept)
+	}
+	if t.Port != 0 && (t.Port < 1 || t.Port > 65535) {
+		return fmt.Errorf("transfer.port: %d out of range (1-65535)", t.Port)
+	}
+	if t.MaxSizeMB < 0 {
+		return fmt.Errorf("transfer.max_size_mb: %d must not be negative", t.MaxSizeMB)
+	}
+	return nil
 }
 
 // DefaultPushBind is the remote address push forwards bind to unless the
@@ -285,6 +361,9 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("parse config %q: domain_ports: %d out of range (1-%d)", path, p, 65535-meshdns.PortShift)
 		}
 	}
+	if err := cfg.Transfer.Validate(); err != nil {
+		return nil, fmt.Errorf("parse config %q: %w", path, err)
+	}
 	seen := make(map[int]bool, len(cfg.Push))
 	for _, r := range cfg.Push {
 		if err := r.Validate(); err != nil {
@@ -404,6 +483,7 @@ var configFields = map[string]bool{
 	"discover_ports": true, "exclude_ports": true, "admin_addr": true,
 	"log_level": true, "ssh_port": true, "insecure": true,
 	"clip_url": true, "clip_listen": true, "clip_interval_ms": true,
+	"transfer": true,
 }
 
 func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
@@ -463,6 +543,7 @@ func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
 		{"clip_url", cfg.ClipURL, cfg.ClipURL != ""},
 		{"clip_listen", cfg.ClipListen, cfg.ClipListen != ""},
 		{"clip_interval_ms", cfg.ClipIntervalMs, cfg.ClipIntervalMs != 0},
+		{"transfer", cfg.Transfer, cfg.Transfer != (TransferConfig{})},
 	}
 	for _, item := range values {
 		if err := write(item.key, item.value, item.nonzero); err != nil {

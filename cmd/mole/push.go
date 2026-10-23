@@ -44,6 +44,9 @@ type pushForwarder struct {
 	rules  map[int]config.PushRule // by local port
 	active map[int]net.Listener
 	failed map[int]string // bind error, logged once per failure streak
+	// hidden rules belong to mole itself (the file-transfer receiver): they
+	// are not listed and their traffic is not counted in the stats.
+	hidden map[int]bool
 }
 
 func newPushForwarder(remote remoteListener, log *slog.Logger, hooks proxy.Hooks) *pushForwarder {
@@ -55,6 +58,7 @@ func newPushForwarder(remote remoteListener, log *slog.Logger, hooks proxy.Hooks
 		rules:  make(map[int]config.PushRule),
 		active: make(map[int]net.Listener),
 		failed: make(map[int]string),
+		hidden: make(map[int]bool),
 	}
 }
 
@@ -77,8 +81,12 @@ func (f *pushForwarder) ensureLocked(r config.PushRule) error {
 	f.active[r.Local] = ln
 	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(r.Local))
 	f.log.Info("pushing", "remote", remoteAddr, "local", localAddr)
+	hooks := f.hooks
+	if f.hidden[r.Local] {
+		hooks = proxy.Hooks{Dir: proxy.DirPush}
+	}
 	go func() {
-		if err := proxy.Serve(ln, f.dialer, localAddr, f.hooks.WithPort(r.Local), f.log); err != nil {
+		if err := proxy.Serve(ln, f.dialer, localAddr, hooks.WithPort(r.Local), f.log); err != nil {
 			f.log.Warn("push proxy terminated", "local", r.Local, "err", err)
 		}
 		f.mu.Lock()
@@ -141,10 +149,56 @@ func (f *pushForwarder) AddPush(local, remote int, bind string) error {
 	return f.ensureLocked(r)
 }
 
+// addHidden opens an internal push forward (local -> same port on the remote)
+// for mole's own use. Unlike AddPush it does not stay registered on failure:
+// the caller decides whether to retry.
+func (f *pushForwarder) addHidden(port, remotePort int) error {
+	r := config.PushRule{Local: port}
+	if remotePort != port {
+		r.Remote = remotePort
+	}
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.rules[port]; ok {
+		return fmt.Errorf("%w: local port %d is already pushed", admin.ErrConflict, port)
+	}
+	f.rules[port] = r
+	f.hidden[port] = true
+	if err := f.ensureLocked(r); err != nil {
+		delete(f.rules, port)
+		delete(f.hidden, port)
+		delete(f.failed, port)
+		return err
+	}
+	return nil
+}
+
+// removeHidden closes an internal push forward.
+func (f *pushForwarder) removeHidden(port int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.hidden[port] {
+		return
+	}
+	delete(f.hidden, port)
+	delete(f.rules, port)
+	delete(f.failed, port)
+	if ln, ok := f.active[port]; ok {
+		_ = ln.Close()
+		delete(f.active, port)
+	}
+}
+
 // RemovePush implements admin.PushController; idempotent.
 func (f *pushForwarder) RemovePush(local int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.hidden[local] {
+		return nil // owned by mole itself, not a user push
+	}
 	delete(f.rules, local)
 	delete(f.failed, local)
 	if ln, ok := f.active[local]; ok {
@@ -161,6 +215,9 @@ func (f *pushForwarder) ListPush() []admin.PushInfo {
 	defer f.mu.Unlock()
 	out := make([]admin.PushInfo, 0, len(f.rules))
 	for _, r := range f.rules {
+		if f.hidden[r.Local] {
+			continue
+		}
 		info := admin.PushInfo{Local: r.Local, Remote: r.RemotePort(), Bind: r.BindAddr(), State: "active"}
 		if _, ok := f.active[r.Local]; !ok {
 			info.State = "failed"

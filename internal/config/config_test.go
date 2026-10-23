@@ -555,3 +555,54 @@ func TestMergePorts_RealisticDiscoveryFlow(t *testing.T) {
 		t.Errorf("MergePorts = %v, want %v", got, want)
 	}
 }
+
+func TestTransferConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mole.yaml")
+	if err := os.WriteFile(path, []byte("remote: devlabs\n# keep me\ntransfer:\n  inbox: ~/drop\n  receive: true\n  accept: auto\n  port: 9100\n  max_size_mb: 50\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	tc := cfg.Transfer
+	if tc.InboxDir() != filepath.Join(home, "drop") || !tc.Receive || tc.AcceptMode() != "auto" || tc.PortOrDefault() != 9100 || tc.MaxBytes() != 50<<20 {
+		t.Fatalf("parsed: %+v inbox=%s", tc, tc.InboxDir())
+	}
+
+	d := Default().Transfer
+	if d.InboxDir() != filepath.Join(home, "mole-inbox") || d.Receive || d.AcceptMode() != "ask" || d.PortOrDefault() != DefaultTransferPort || d.MaxBytes() != 0 {
+		t.Fatalf("defaults: %+v", d)
+	}
+
+	// Save touches only the transfer block and keeps the rest of the file.
+	cfg.Transfer.Receive = false
+	cfg.Transfer.Inbox = "/srv/inbox"
+	if err := Save(path, cfg, "transfer"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "# keep me") || !strings.Contains(string(raw), "/srv/inbox") || strings.Contains(string(raw), "receive: true") {
+		t.Fatalf("saved file:\n%s", raw)
+	}
+	again, err := Load(path)
+	if err != nil || again.Transfer.Inbox != "/srv/inbox" || again.Transfer.Receive || again.Remote != "devlabs" {
+		t.Fatalf("reload: %+v %v", again, err)
+	}
+
+	for name, body := range map[string]string{
+		"relative inbox": "transfer:\n  inbox: relative/dir\n",
+		"bad accept":     "transfer:\n  accept: sometimes\n",
+		"bad port":       "transfer:\n  port: 70000\n",
+		"negative size":  "transfer:\n  max_size_mb: -1\n",
+		"unknown key":    "transfer:\n  nope: 1\n",
+	} {
+		p := filepath.Join(dir, "bad.yaml")
+		os.WriteFile(p, []byte(body), 0o644)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
