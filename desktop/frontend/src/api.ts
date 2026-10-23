@@ -1,4 +1,9 @@
-import { MoleService, type Status, type Events, type CLIStatus } from "../bindings/github.com/Luqueee/mole/desktop";
+import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult } from "../bindings/github.com/Luqueee/mole/desktop";
+import type { Active, Pending, Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
+
+// TransferView with the nulls Go emits for empty slices turned into lists.
+export type Transfers = { supported: boolean; last: number; records: TRecord[]; active: Active[]; pending: Pending[] };
+const normalize = (v: TransferView): Transfers => ({ supported: v.supported, last: v.last, records: v.records ?? [], active: v.active ?? [], pending: v.pending ?? [] });
 
 // Browser-only design mode (?mock): the Wails runtime is absent, so the UI
 // is fed synthetic data. The desktop app never takes this path.
@@ -57,6 +62,26 @@ function mockEvents(): Events {
   return { supported: true, last: mockId, events: out } as Events;
 }
 
+// Mock transfers: one offer waiting, one file in flight, a little history.
+let mockReceive = true;
+let mockPending = [{ id: 7, peer: "devlabs", to: "", files: [{ name: "build-2026-10-24.tar.gz", size: 48_300_000, mode: 420, mtime: 0 }, { name: "notes.md", size: 2_100, mode: 420, mtime: 0 }], total: 48_302_100, at_ms: Date.now() - 20_000 }];
+const mockT0 = Date.now();
+function mockTransfers(): TransferView {
+  const now = Date.now();
+  const sent = Math.min(((now - mockT0) % 20_000) / 20_000, 1) * 120_000_000;
+  return {
+    supported: true,
+    last: 3,
+    records: [
+      { id: 1, dir: "send", peer: "devlabs", name: "schema.sql", saved: "schema.sql", size: 84_000, bytes: 84_000, start_ms: now - 3_600_000, dur_ms: 90, status: "ok" },
+      { id: 2, dir: "recv", peer: "devlabs", name: "core.dump", saved: "core (1).dump", size: 912_000_000, bytes: 304_000_000, start_ms: now - 900_000, dur_ms: 41_000, status: "failed", error: "write: no space left on device" },
+      { id: 3, dir: "recv", peer: "devlabs", name: "wallpaper.png", size: 3_400_000, bytes: 0, start_ms: now - 120_000, dur_ms: 0, status: "rejected", error: "rejected by the user" },
+    ],
+    active: [{ id: 4, dir: "send", peer: "devlabs", name: "dataset.parquet", size: 120_000_000, bytes: Math.round(sent), start_ms: now - 4_000 }],
+    pending: mockPending,
+  } as TransferView;
+}
+
 let mockCli = false;
 let mockPathSet = false;
 function mockCliStatus(): CLIStatus {
@@ -64,6 +89,14 @@ function mockCliStatus(): CLIStatus {
 }
 
 export const api = {
+  transfers: async (since: number): Promise<Transfers> => normalize(MOCK ? mockTransfers() : await MoleService.GetTransfers(since)),
+  pick: async (): Promise<string[]> => (MOCK ? [] : ((await MoleService.PickFiles()) ?? [])),
+  send: async (paths: string[], to: string): Promise<SendResult[]> => (MOCK ? paths.map((name) => ({ name, saved: name, dir: "/home/dev/mole-inbox" })) : ((await MoleService.SendFiles(paths, to)) ?? [])),
+  setFolder: async (to: string) => (MOCK ? undefined : MoleService.SetSendFolder(to)),
+  decide: async (id: number, accept: boolean) => (MOCK ? void (mockPending = mockPending.filter((p) => p.id !== id)) : MoleService.ResolveTransfer(id, accept)),
+  setReceive: async (on: boolean) => (MOCK ? void (mockReceive = on) : MoleService.SetReceive(on)),
+  openInbox: async () => (MOCK ? undefined : MoleService.OpenInbox()),
+  mockReceive: () => mockReceive,
   cli: async (): Promise<CLIStatus> => (MOCK ? mockCliStatus() : MoleService.GetCLI()),
   cliPath: async () => (MOCK ? void (mockPathSet = true) : MoleService.AddCLIToPath()),
   cliInstall: async () => (MOCK ? void (mockCli = true) : MoleService.InstallCLI()),

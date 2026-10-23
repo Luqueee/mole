@@ -78,12 +78,35 @@ export function GetStatus(): $CancellablePromise<$models.Status> {
 }
 
 /**
+ * GetTransfers returns the transfers finished after since, those in
+ * progress and the offers waiting for an answer.
+ */
+export function GetTransfers(since: number): $CancellablePromise<$models.TransferView> {
+    return $Call.ByID(2096181738, since);
+}
+
+/**
  * InstallCLI writes the embedded CLI into the install directory, replacing
  * any previous copy there. A running daemon keeps its old binary until it is
  * restarted.
  */
 export function InstallCLI(): $CancellablePromise<void> {
     return $Call.ByID(2356803037);
+}
+
+/**
+ * OpenInbox shows the inbox folder in the system file manager.
+ */
+export function OpenInbox(): $CancellablePromise<void> {
+    return $Call.ByID(2427007018);
+}
+
+/**
+ * PickFiles opens the system file dialog and returns the chosen paths
+ * (none if the user cancels).
+ */
+export function PickFiles(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(4035773186);
 }
 
 /**
@@ -100,8 +123,38 @@ export function RemovePush(local: number): $CancellablePromise<void> {
     return $Call.ByID(2814054518, local);
 }
 
+/**
+ * ResolveTransfer accepts or rejects an incoming offer.
+ */
+export function ResolveTransfer(id: number, accept: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3535712769, id, accept);
+}
+
 export function Restart(): $CancellablePromise<void> {
     return $Call.ByID(693861389);
+}
+
+/**
+ * SendFiles sends each file to the remote's inbox through the daemon, one
+ * after another. A file that fails does not stop the others.
+ */
+export function SendFiles(paths: string[] | null, to: string): $CancellablePromise<$models.SendResult[] | null> {
+    return $Call.ByID(3427970343, paths, to);
+}
+
+/**
+ * SetReceive turns on or off the acceptance of files sent from the remote,
+ * and remembers the choice in the config.
+ */
+export function SetReceive(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1618710319, on);
+}
+
+/**
+ * SetSendFolder sets where dropped files are put inside the remote's inbox.
+ */
+export function SetSendFolder(to: string): $CancellablePromise<void> {
+    return $Call.ByID(559321852, to);
 }
 
 export function Start(): $CancellablePromise<void> {

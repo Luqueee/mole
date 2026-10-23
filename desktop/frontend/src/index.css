@@ -236,3 +236,10 @@ body {
   100% { left: calc(100% - 54px); opacity: 0; background: var(--live); box-shadow: 0 0 14px 1px var(--live); }
 }
 @keyframes pill-x-push { 0% { left: calc(100% - 54px); opacity: 0 } 3% { opacity: 1 } 60% { left: 0; opacity: 1 } 100% { left: 0; opacity: 0 } }
+
+/* Wails marks the element under a dragged file with this class. */
+.drop-zone.file-drop-target-active {
+  border-color: var(--accent-hot);
+  background: rgba(255, 90, 20, 0.12);
+  color: var(--foreground);
+}

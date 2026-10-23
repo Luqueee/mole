@@ -49,6 +49,9 @@ func setupTray(app *application.App, win *application.WebviewWindow, svc *MoleSe
 	menu := app.NewMenu()
 	state := menu.Add("mole")
 	state.SetEnabled(false)
+	incoming := menu.Add("")
+	incoming.SetHidden(true)
+	incoming.OnClick(func(*application.Context) { show() })
 	menu.AddSeparator()
 	menu.Add("Show mole").OnClick(func(*application.Context) { show() })
 	start := menu.Add("Start")
@@ -68,7 +71,7 @@ func setupTray(app *application.App, win *application.WebviewWindow, svc *MoleSe
 				if err := fn(); err != nil {
 					app.Logger.Warn("tray action failed", "err", err)
 				}
-				refreshTray(tray, menu, state, start, stop, svc)
+				refreshTray(tray, menu, state, incoming, start, stop, svc)
 			}()
 		}
 	}
@@ -76,15 +79,15 @@ func setupTray(app *application.App, win *application.WebviewWindow, svc *MoleSe
 	stop.OnClick(act(svc.Stop))
 	restart.OnClick(act(svc.Restart))
 
-	refreshTray(tray, menu, state, start, stop, svc)
+	refreshTray(tray, menu, state, incoming, start, stop, svc)
 	go func() {
 		for range time.Tick(3 * time.Second) {
-			refreshTray(tray, menu, state, start, stop, svc)
+			refreshTray(tray, menu, state, incoming, start, stop, svc)
 		}
 	}()
 }
 
-func refreshTray(tray *application.SystemTray, menu *application.Menu, state, start, stop *application.MenuItem, svc *MoleService) {
+func refreshTray(tray *application.SystemTray, menu *application.Menu, state, incoming, start, stop *application.MenuItem, svc *MoleService) {
 	st := svc.GetStatus()
 	switch {
 	case st.Running:
@@ -98,5 +101,14 @@ func refreshTray(tray *application.SystemTray, menu *application.Menu, state, st
 	}
 	start.SetEnabled(!st.Running)
 	stop.SetEnabled(st.Running)
+	// Files offered by the remote wait for an answer: say so where the user
+	// will see it even with the window hidden.
+	if n := svc.pendingCount(); n > 0 && st.Running {
+		incoming.SetLabel(fmt.Sprintf("⬇ %d incoming transfer(s) waiting…", n))
+		incoming.SetHidden(false)
+		tray.SetLabel(fmt.Sprintf("%d ⬇%d", len(st.Ports), n))
+	} else {
+		incoming.SetHidden(true)
+	}
 	menu.Update()
 }
