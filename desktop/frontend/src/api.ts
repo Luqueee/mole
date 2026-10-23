@@ -1,4 +1,4 @@
-import { MoleService, type Status, type Events } from "../bindings/github.com/Luqueee/mole/desktop";
+import { MoleService, type Status, type Events, type CLIStatus } from "../bindings/github.com/Luqueee/mole/desktop";
 
 // Browser-only design mode (?mock): the Wails runtime is absent, so the UI
 // is fed synthetic data. The desktop app never takes this path.
@@ -57,7 +57,14 @@ function mockEvents(): Events {
   return { supported: true, last: mockId, events: out } as Events;
 }
 
+let mockCli = false;
+function mockCliStatus(): CLIStatus {
+  return { bundled: true, installed: mockCli, path: mockCli ? "/Users/me/.local/bin/mole" : "", version: mockCli ? "v0.2.0" : "", upToDate: mockCli, installDir: "/Users/me/.local/bin", dirOnPath: false } as CLIStatus;
+}
+
 export const api = {
+  cli: async (): Promise<CLIStatus> => (MOCK ? mockCliStatus() : MoleService.GetCLI()),
+  cliInstall: async () => (MOCK ? void (mockCli = true) : MoleService.InstallCLI()),
   events: async (since: number): Promise<Events> => (MOCK ? mockEvents() : MoleService.GetEvents(since)),
   status: async (): Promise<Status> => (MOCK ? mockStatus() : MoleService.GetStatus()),
   discover: async (): Promise<number[]> =>

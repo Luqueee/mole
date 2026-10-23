@@ -6,7 +6,8 @@ export {
     MoleService
 };
 
-export type {
+export {
+    CLIStatus,
     Event,
     Events,
     Settings,

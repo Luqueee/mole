@@ -10,7 +10,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -31,25 +31,41 @@ export function AddPush(local: number, remote: number): $CancellablePromise<void
 }
 
 /**
+ * GetCLI reports whether the CLI is installed and whether it matches the
+ * one embedded in this app.
+ */
+export function GetCLI(): $CancellablePromise<$models.CLIStatus> {
+    return $Call.ByID(960708464).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * GetEvents returns the connections finished after event `since`.
  */
 export function GetEvents(since: number): $CancellablePromise<$models.Events> {
-    return $Call.ByID(835198243, since);
+    return $Call.ByID(835198243, since).then(($result: any) => {
+        return $$createType1($result);
+    });
 }
 
 /**
  * GetLogs returns the last n lines of the daemon log. Only the tail of the
  * file is read: the log grows without bound.
  */
-export function GetLogs(n: number): $CancellablePromise<string[] | null> {
-    return $Call.ByID(288713117, n);
+export function GetLogs(n: number): $CancellablePromise<string[]> {
+    return $Call.ByID(288713117, n).then(($result: any) => {
+        return $$createType2($result);
+    });
 }
 
 /**
  * GetSettings returns the active config.
  */
 export function GetSettings(): $CancellablePromise<$models.Settings> {
-    return $Call.ByID(1785834435);
+    return $Call.ByID(1785834435).then(($result: any) => {
+        return $$createType3($result);
+    });
 }
 
 /**
@@ -57,7 +73,18 @@ export function GetSettings(): $CancellablePromise<$models.Settings> {
  * returns Running=false so the UI can offer to start it.
  */
 export function GetStatus(): $CancellablePromise<$models.Status> {
-    return $Call.ByID(562239672);
+    return $Call.ByID(562239672).then(($result: any) => {
+        return $$createType4($result);
+    });
+}
+
+/**
+ * InstallCLI writes the embedded CLI into the install directory, replacing
+ * any previous copy there. A running daemon keeps its old binary until it is
+ * restarted.
+ */
+export function InstallCLI(): $CancellablePromise<void> {
+    return $Call.ByID(2356803037);
 }
 
 /**
@@ -85,3 +112,10 @@ export function Start(): $CancellablePromise<void> {
 export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(2128813218);
 }
+
+// Private type creation functions
+const $$createType0 = $models.CLIStatus.createFrom;
+const $$createType1 = $models.Events.createFrom;
+const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = $models.Settings.createFrom;
+const $$createType4 = $models.Status.createFrom;

@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Activity, Cable, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
-import type { Status, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
+import { Activity, Cable, Terminal, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
+import type { Status, CLIStatus, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import { api, MOCK } from "./api";
 
-type Tab = "status" | "ports" | "logs";
+type Tab = "status" | "ports" | "logs" | "setup";
 const NAV: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: "status", label: "STATUS", icon: Activity },
   { id: "ports", label: "PORTS", icon: Cable },
   { id: "logs", label: "LOGS", icon: ScrollText },
+  { id: "setup", label: "SETUP", icon: Terminal },
 ];
 const LEVEL = { ERROR: "text-bad", WARN: "text-warn", INFO: "text-live", DEBUG: "text-dim" } as const;
 function parseLog(l: string) {
@@ -329,6 +330,41 @@ function PortsPage({ discover, forwarded, push, run }: { discover: number[]; for
 }
 
 
+function SetupPage({ run }: { run: Run }) {
+  const [cli, setCli] = useState<CLIStatus | null>(null);
+  const load = useCallback(() => api.cli().then(setCli).catch(() => {}), []);
+  useEffect(() => void load(), [load]);
+  const state = !cli ? "…" : !cli.installed ? "NOT INSTALLED" : cli.bundled && !cli.upToDate ? "UPDATE AVAILABLE" : "INSTALLED";
+  const tone = state === "INSTALLED" ? "text-live" : state === "UPDATE AVAILABLE" ? "text-warn" : "text-faint";
+  const label = !cli?.installed ? "INSTALL" : cli.upToDate ? "REINSTALL" : "UPDATE";
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <SectionHead title="CLI" hint="THE mole COMMAND FOR YOUR TERMINAL" />
+      <div className="flex items-center border-b border-line px-5 py-5">
+        <span className={`mr-4 size-2 ${state === "INSTALLED" ? "bg-live" : state === "UPDATE AVAILABLE" ? "bg-warn" : "bg-faint"}`} />
+        <div className="flex-1">
+          <div className={`font-display text-3xl font-bold tracking-wide ${tone}`}>{state}</div>
+          <div className="mt-2 text-xs text-dim select-text">
+            {cli?.installed ? `${cli.path}${cli.version ? ` · ${cli.version}` : ""}` : `will be installed to ${cli?.installDir ?? "…"}`}
+          </div>
+        </div>
+        <button
+          disabled={!cli?.bundled}
+          onClick={() => run("CLI installed", api.cliInstall).then(load)}
+          className="no-drag bg-hot px-8 py-4 font-display text-sm font-bold tracking-[0.2em] text-background transition enabled:hover:brightness-110 enabled:active:translate-y-px disabled:opacity-30"
+        >
+          {label}
+        </button>
+      </div>
+      {cli && !cli.bundled && <div className="border-b border-line px-5 py-4 text-xs text-dim">This build does not embed the CLI (run <span className="text-foreground">wails3 task bundle:cli</span> before building).</div>}
+      {cli?.installed && !cli.dirOnPath && cli.path.startsWith(cli.installDir) && (
+        <div className="border-b border-line px-5 py-4 text-xs text-warn select-text">{cli.installDir} is not in your PATH: add it to use `mole` in a terminal.</div>
+      )}
+      {cli?.installed && <div className="px-5 py-4 text-[11px] text-faint">A running daemon keeps its old binary until you press RESTART.</div>}
+    </div>
+  );
+}
+
 function LogsPage({ lines }: { lines: string[] }) {
   const [filter, setFilter] = useState<"ALL" | keyof typeof LEVEL>("ALL");
   const ref = useRef<HTMLDivElement>(null);
@@ -499,6 +535,7 @@ export default function App() {
           {tab === "status" && <StatusPage s={s} hist={hist} trips={trips} conns={conns} supported={supported} />}
           {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} push={s.push ?? []} run={run} />}
           {tab === "logs" && <LogsPage lines={logs} />}
+          {tab === "setup" && <SetupPage run={run} />}
         </main>
       </div>
       <Toaster position="bottom-right" />

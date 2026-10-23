@@ -9,3 +9,5 @@ build/ios/xcode/overlay.json
 build/ios/xcode/gen/
 build/android/overlay.json
 build/android/gen/
+embedded/mole
+embedded/mole.exe
