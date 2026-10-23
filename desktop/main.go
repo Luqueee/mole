@@ -26,17 +26,18 @@ func main() {
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
 	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
 	// 'Mac' options tailor the application when running an macOS.
+	svc := NewMoleService()
 	app := application.New(application.Options{
 		Name:        "mole-desktop",
 		Description: "Desktop control panel for mole",
 		Services: []application.Service{
-			application.NewService(NewMoleService()),
+			application.NewService(svc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
 		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: true,
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
 
@@ -45,7 +46,7 @@ func main() {
 	// 'Mac' options tailor the window when running on macOS.
 	// 'BackgroundColour' is the background colour of the window.
 	// 'URL' is the URL that will be loaded into the webview.
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "mole",
 		// Window sized to the golden ratio (1000 / 618 ≈ 1.618).
 		Width:     1180,
@@ -61,8 +62,8 @@ func main() {
 		URL:              "/",
 	})
 
-	// Create a goroutine that emits an event containing the current time every second.
-	// The frontend can listen to this event and update the UI accordingly.
+	setupTray(app, win, svc)
+
 	// Run the application. This blocks until the application has been exited.
 	err := app.Run()
 
