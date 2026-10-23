@@ -33,6 +33,7 @@ import (
 	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
 	"github.com/Luqueee/mole/internal/discover"
+	"github.com/Luqueee/mole/internal/meshdns"
 	"github.com/Luqueee/mole/internal/proxy"
 	"github.com/Luqueee/mole/internal/tunnel"
 )
@@ -65,6 +66,12 @@ func main() {
 		os.Exit(runClip(args))
 	case "ports":
 		os.Exit(runPorts(args))
+	case "push":
+		os.Exit(runPush(args))
+	case "unpush":
+		os.Exit(runUnpush(args))
+	case "dns":
+		os.Exit(runDNS(args))
 	case "config":
 		os.Exit(runConfig(args))
 	case "init":
@@ -99,6 +106,9 @@ func printUsage() {
 		{"update", "Update mole in place to the latest release"},
 		{"restart", "Stop and re-launch a backgrounded mole using the same config"},
 		{"ports", "Manage the auto-discover port list (add/remove/list)"},
+		{"push", "Expose a local port on the remote (push list|LOCAL[:REMOTE])"},
+		{"dns", "Route configured domains to the remote (dns install|uninstall; Linux)"},
+		{"unpush", "Remove a push forward"},
 		{"init", "Generate a mole.yaml (interactive; run once per machine)"},
 		{"config", "Open the active mole.yaml in $VISUAL / $EDITOR (see `mole config -h`)"},
 		{"version", "Print version and exit"},
@@ -215,6 +225,16 @@ Either -remote or a config file with 'remote:' is required.`)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Push forwards (local -> remote). Remote listeners die with the SSH
+	// connection, so the reconnect hook must be registered before Watch
+	// starts, or a reconnect during startup would be missed.
+	pushFwd := newPushForwarder(mgr, log, proxy.Hooks{
+		OnConnect:    stats.OnConnect,
+		OnDisconnect: stats.OnDisconnect,
+		OnDialFail:   stats.OnDialFail,
+	})
+	defer pushFwd.closeAll()
+	mgr.OnReconnect(pushFwd.reopenAll)
 
 	// Watch SSH connection and auto-reconnect.
 	go mgr.Watch(ctx, 10*time.Second)
@@ -246,64 +266,94 @@ Either -remote or a config file with 'remote:' is required.`)
 	}
 	defer fwd.closeAll()
 
-// Forward any explicitly-configured ports up front. These are pinned:
-// auto-discovery's pruning never closes them, even if the remote
-// service is momentarily down.
-for _, p := range cfg.Ports {
-	fwd.pinned[p] = true
-	fwd.ensure(p)
-}
+	pushFwd.start(cfg.Push)
 
-if cfg.AutoDiscover {
-	// Initial sweep, then keep re-discovering so dev servers that
-	// come up after launch are forwarded automatically — no need to
-	// restart mole when you start your dev server.
-		discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
-	go func() {
-		t := time.NewTicker(15 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
-			}
+	// Split-DNS: names under cfg.Domains resolve to virtual IPs and are
+	// forwarded by name, so the remote does the real DNS resolution.
+	if len(cfg.Domains) > 0 {
+		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, proxy.Hooks{
+			OnConnect:    stats.OnConnect,
+			OnDisconnect: stats.OnDisconnect,
+			OnDialFail:   stats.OnDialFail,
+		}, log)
+		defer mesh.Close()
+		pc, err := net.ListenPacket("udp", meshdns.StubAddr)
+		if err != nil {
+			log.Error("dns stub bind failed", "addr", meshdns.StubAddr, "err", err)
+			return 1
 		}
-	}()
-}
+		defer pc.Close()
+		tl, err := net.Listen("tcp", meshdns.StubAddr)
+		if err != nil {
+			log.Error("dns stub bind failed", "addr", meshdns.StubAddr, "err", err)
+			return 1
+		}
+		defer tl.Close()
+		go mesh.ServeUDP(pc)
+		go mesh.ServeTCP(tl)
+		log.Info("dns stub listening", "addr", meshdns.StubAddr, "domains", cfg.Domains, "ports", cfg.DomainPortsOrDefault())
+	}
+
+	// Forward any explicitly-configured ports up front. These are pinned:
+	// auto-discovery's pruning never closes them, even if the remote
+	// service is momentarily down.
+	for _, p := range cfg.Ports {
+		fwd.pinned[p] = true
+		fwd.ensure(p)
+	}
+
+	if cfg.AutoDiscover {
+		// Initial sweep, then keep re-discovering so dev servers that
+		// come up after launch are forwarded automatically — no need to
+		// restart mole when you start your dev server.
+		discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
+		go func() {
+			t := time.NewTicker(15 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
+				}
+			}
+		}()
+	}
 
 	// Without auto-discover, an empty port set is a usage error. With
 	// it, an empty set just means "nothing up yet" — keep watching.
-	if !cfg.AutoDiscover && len(fwd.ports()) == 0 {
+	if !cfg.AutoDiscover && len(fwd.ports()) == 0 && len(cfg.Push) == 0 && len(cfg.Domains) == 0 {
 		log.Error("no ports to forward — use -ports or -auto-discover")
 		return 1
 	}
 	if len(fwd.ports()) == 0 {
-}
+	}
 
-// Admin HTTP API.
-var adminSrv *http.Server
-if cfg.AdminAddr != "" {
-	info := map[string]any{
-		"remote":        cfg.Remote,
-		"auto_discover": cfg.AutoDiscover,
-	}
-	srv := admin.New(stats, info).
-		WithPorts(fwd.ports).
-		WithPortController(fwd)
-	adminSrv = &http.Server{
-		Addr:              cfg.AdminAddr,
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	go func() {
-		log.Info("admin listening", "addr", cfg.AdminAddr)
-		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Warn("admin server stopped", "err", err)
+	// Admin HTTP API.
+	var adminSrv *http.Server
+	if cfg.AdminAddr != "" {
+		info := map[string]any{
+			"remote":        cfg.Remote,
+			"auto_discover": cfg.AutoDiscover,
+			"domains":       cfg.Domains,
 		}
-	}()
-}
+		srv := admin.New(stats, info).
+			WithPorts(fwd.ports).
+			WithPortController(fwd).
+			WithPushController(pushFwd)
+		adminSrv = &http.Server{
+			Addr:              cfg.AdminAddr,
+			Handler:           srv.Handler(),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			log.Info("admin listening", "addr", cfg.AdminAddr)
+			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Warn("admin server stopped", "err", err)
+			}
+		}()
+	}
 
 	log.Info("mole up. Press Ctrl+C to stop.")
 	sig := make(chan os.Signal, 1)
@@ -428,7 +478,6 @@ func (f *forwarder) closeAll() {
 	}
 }
 
-
 // AddDiscover starts forwarding port as if it had been on the
 // discover_ports: list at startup. Thread-safe; idempotent.
 // Returns a non-nil error if the port is in the excluded set or
@@ -477,6 +526,7 @@ func (f *forwarder) RemoveDiscover(port int) error {
 	f.log.Info("unforwarded (live remove)", "port", port, "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(port)))
 	return nil
 }
+
 // discoverInto reconciles the forwarded port set with what's live on the
 // remote. It prefers enumerating the remote's actual TCP listeners (so
 // any port is found); when that enumeration is authoritative it also

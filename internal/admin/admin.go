@@ -61,12 +61,14 @@ type snapshot struct {
 func New(stats *Stats, extra map[string]any) *Server {
 	return &Server{stats: stats, extra: extra}
 }
+
 // Server is a tiny HTTP server exposing /status and /health.
 type Server struct {
-	stats   *Stats
-	extra   map[string]any
-	portsFn func() []int
+	stats    *Stats
+	extra    map[string]any
+	portsFn  func() []int
 	portsCtl PortController // optional: live-mutate the discover-port set
+	pushCtl  PushController // optional: push (remote) forwards
 }
 
 // PortController is the live-mutation counterpart of WithPorts. When
@@ -80,6 +82,30 @@ type PortController interface {
 	AddDiscover(port int) error
 	RemoveDiscover(port int) error
 }
+
+// PushInfo describes one push forward (local service exposed on the remote).
+type PushInfo struct {
+	Local  int    `json:"local"`
+	Remote int    `json:"remote"`
+	Bind   string `json:"bind"`
+	State  string `json:"state"` // "active" | "failed"
+	Error  string `json:"error,omitempty"`
+}
+
+// PushController manages push forwards. AddPush returns an error wrapping
+// ErrConflict when the local port is already pushed.
+type PushController interface {
+	AddPush(local, remote int, bind string) error
+	RemovePush(local int) error
+	ListPush() []PushInfo
+}
+
+// WithPushController enables /ports/push and lists push forwards in /status.
+func (s *Server) WithPushController(ctl PushController) *Server {
+	s.pushCtl = ctl
+	return s
+}
+
 // WithPorts registers a callback returning the currently forwarded
 // ports. When set, /status reports them live under info.ports —
 // useful when the port set changes at runtime (periodic
@@ -107,6 +133,10 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /ports/discover", s.handlePortAdd)
 		mux.HandleFunc("DELETE /ports/discover/", s.handlePortDelete)
 	}
+	if s.pushCtl != nil {
+		mux.HandleFunc("POST /ports/push", s.handlePushAdd)
+		mux.HandleFunc("DELETE /ports/push/", s.handlePushDelete)
+	}
 	return mux
 }
 
@@ -125,6 +155,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 			merged[k] = v
 		}
 		merged["ports"] = s.portsFn()
+		info = merged
+	}
+	if s.pushCtl != nil {
+		merged := make(map[string]any, len(info)+1)
+		for k, v := range info {
+			merged[k] = v
+		}
+		merged["push"] = s.pushCtl.ListPush()
 		info = merged
 	}
 	out := map[string]any{
@@ -188,6 +226,54 @@ func (s *Server) handlePortDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.portsCtl.RemoveDiscover(port); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"removed"}`))
+}
+
+type pushRequest struct {
+	Local  int    `json:"local"`
+	Remote int    `json:"remote"`
+	Bind   string `json:"bind"`
+}
+
+// handlePushAdd accepts { "local": N, "remote": M, "bind": "..." } (remote
+// and bind optional). 201 added, 400 invalid, 409 already pushed, 500 bind failed.
+func (s *Server) handlePushAdd(w http.ResponseWriter, r *http.Request) {
+	var req pushRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Remote == 0 {
+		req.Remote = req.Local
+	}
+	if req.Local < 1 || req.Local > 65535 || req.Remote < 1 || req.Remote > 65535 {
+		http.Error(w, "port out of range (1-65535)", http.StatusBadRequest)
+		return
+	}
+	if err := s.pushCtl.AddPush(req.Local, req.Remote, req.Bind); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrConflict) {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(`{"status":"added"}`))
+}
+
+// handlePushDelete accepts DELETE /ports/push/{local port}; idempotent.
+func (s *Server) handlePushDelete(w http.ResponseWriter, r *http.Request) {
+	port, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/ports/push/"))
+	if err != nil || port < 1 || port > 65535 {
+		http.Error(w, "invalid port in path", http.StatusBadRequest)
+		return
+	}
+	if err := s.pushCtl.RemovePush(port); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

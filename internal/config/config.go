@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Luqueee/mole/internal/meshdns"
 )
 
 // DefaultClipListen is the least-exposure bind address for the unauthenticated
@@ -32,6 +34,19 @@ type Config struct {
 	// Ports is the explicit list of local ports to forward.
 	// On the remote, the same port number is used.
 	Ports []int `yaml:"ports"`
+
+	// Push lists local services exposed on the remote (ssh -R), over the
+	// same SSH connection as Ports. Always explicit; never auto-discovered.
+	Push []PushRule `yaml:"push"`
+
+	// Domains are DNS suffixes (e.g. "kena.lan") whose names are resolved
+	// on the remote: a local DNS stub hands out virtual IPs and mole
+	// forwards connections to those IPs by name. See `mole dns install`.
+	Domains []string `yaml:"domains"`
+
+	// DomainPorts are the ports forwarded for every name under Domains.
+	// Default: 80 and 443.
+	DomainPorts []int `yaml:"domain_ports"`
 
 	// AutoDiscover, if true, probes the remote for common dev ports
 	// (from DiscoverPorts) and forwards the ones that respond.
@@ -76,6 +91,45 @@ type Config struct {
 	// ClipIntervalMs controls the clipboard poll cadence on the Mac.
 	// 0 falls back to the runClipServe flag default (500ms).
 	ClipIntervalMs int `yaml:"clip_interval_ms"`
+}
+
+// DefaultPushBind is the remote address push forwards bind to unless the
+// rule says otherwise. Loopback keeps the port reachable only from the
+// remote host itself; exposing it further needs GatewayPorts on sshd.
+const DefaultPushBind = "127.0.0.1"
+
+// PushRule exposes the local port Local on the remote at Remote.
+type PushRule struct {
+	Local  int    `yaml:"local"`
+	Remote int    `yaml:"remote,omitempty"` // default: same as Local
+	Bind   string `yaml:"bind,omitempty"`   // default: DefaultPushBind
+}
+
+// RemotePort returns the port opened on the remote.
+func (r PushRule) RemotePort() int {
+	if r.Remote == 0 {
+		return r.Local
+	}
+	return r.Remote
+}
+
+// BindAddr returns the remote bind address.
+func (r PushRule) BindAddr() string {
+	if r.Bind == "" {
+		return DefaultPushBind
+	}
+	return r.Bind
+}
+
+// Validate checks port ranges.
+func (r PushRule) Validate() error {
+	if r.Local < 1 || r.Local > 65535 {
+		return fmt.Errorf("push: local port %d out of range (1-65535)", r.Local)
+	}
+	if p := r.RemotePort(); p < 1 || p > 65535 {
+		return fmt.Errorf("push: remote port %d out of range (1-65535)", p)
+	}
+	return nil
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -221,6 +275,27 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	for _, d := range cfg.Domains {
+		if err := ValidateDomain(d); err != nil {
+			return nil, fmt.Errorf("parse config %q: %w", path, err)
+		}
+	}
+	for _, p := range cfg.DomainPorts {
+		if p < 1 || p > 65535-meshdns.PortShift {
+			return nil, fmt.Errorf("parse config %q: domain_ports: %d out of range (1-%d)", path, p, 65535-meshdns.PortShift)
+		}
+	}
+	seen := make(map[int]bool, len(cfg.Push))
+	for _, r := range cfg.Push {
+		if err := r.Validate(); err != nil {
+			return nil, fmt.Errorf("parse config %q: %w", path, err)
+		}
+		if seen[r.Local] {
+			return nil, fmt.Errorf("parse config %q: push: duplicate local port %d", path, r.Local)
+		}
+		seen[r.Local] = true
+	}
+
 	return cfg, nil
 }
 
@@ -325,7 +400,7 @@ func Save(path string, cfg *Config, fields ...string) error {
 }
 
 var configFields = map[string]bool{
-	"remote": true, "ports": true, "auto_discover": true,
+	"remote": true, "ports": true, "push": true, "domains": true, "domain_ports": true, "auto_discover": true,
 	"discover_ports": true, "exclude_ports": true, "admin_addr": true,
 	"log_level": true, "ssh_port": true, "insecure": true,
 	"clip_url": true, "clip_listen": true, "clip_interval_ms": true,
@@ -375,6 +450,9 @@ func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
 	}{
 		{"remote", cfg.Remote, cfg.Remote != ""},
 		{"ports", nonNilPorts(cfg.Ports), len(cfg.Ports) > 0},
+		{"push", nonNilPush(cfg.Push), len(cfg.Push) > 0},
+		{"domains", nonNilStrings(cfg.Domains), len(cfg.Domains) > 0},
+		{"domain_ports", nonNilPorts(cfg.DomainPorts), len(cfg.DomainPorts) > 0},
 		{"auto_discover", cfg.AutoDiscover, cfg.AutoDiscover},
 		{"discover_ports", nonNilPorts(cfg.DiscoverPorts), len(cfg.DiscoverPorts) > 0},
 		{"exclude_ports", nonNilPorts(cfg.ExcludePorts), len(cfg.ExcludePorts) > 0},
@@ -399,6 +477,41 @@ func nonNilPorts(ports []int) []int {
 		return []int{}
 	}
 	return ports
+}
+
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// DomainPortsOrDefault returns DomainPorts, or 80 and 443 when unset.
+func (c *Config) DomainPortsOrDefault() []int {
+	if len(c.DomainPorts) == 0 {
+		return []int{80, 443}
+	}
+	return c.DomainPorts
+}
+
+// ValidateDomain accepts plain DNS suffixes (letters, digits, '-', '.');
+// the value ends up in a systemd unit, so nothing else is allowed.
+func ValidateDomain(d string) error {
+	if d == "" || len(d) > 253 || strings.HasPrefix(d, ".") || strings.HasSuffix(d, ".") || strings.Contains(d, "..") {
+		return fmt.Errorf("domains: invalid domain %q", d)
+	}
+	for _, r := range d {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '.') {
+			return fmt.Errorf("domains: invalid domain %q (lowercase letters, digits, '-' and '.' only)", d)
+		}
+	}
+	return nil
+}
+func nonNilPush(rules []PushRule) []PushRule {
+	if rules == nil {
+		return []PushRule{}
+	}
+	return rules
 }
 
 // atomicWriteFile writes data to path via a temp file + rename so

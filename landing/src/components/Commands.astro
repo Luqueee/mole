@@ -27,6 +27,14 @@ const commands = [
     desc: "Manage the auto-discover port list: add, remove, list.",
   },
   {
+    cmd: "mole push",
+    desc: "Expose a local port on the remote over the same SSH connection: push LOCAL[:REMOTE], push list, unpush LOCAL.",
+  },
+  {
+    cmd: "mole dns",
+    desc: "Resolve configured domains on the remote, no browser setup: dns install, dns uninstall (Linux).",
+  },
+  {
     cmd: "mole config",
     desc: "Open the active mole.yaml in $VISUAL / $EDITOR.",
   },

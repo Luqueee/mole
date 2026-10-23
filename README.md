@@ -100,6 +100,8 @@ create a config interactively.
 | `mole status` | Query the local admin API for live stats + forwarded ports. |
 | `mole logs` | Show the daemon log, colourised; `-f` to follow, `clean` to truncate it. |
 | `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
+| `mole push` · `mole unpush` | Expose a local port on the remote (`ssh -R`): `push LOCAL[:REMOTE]`, `push list`, `unpush LOCAL`. |
+| `mole dns` | Route configured `domains:` to the remote's DNS: `dns install`, `dns uninstall` (Linux, root). |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
 | `mole clip` | Share clipboard images over a separate private HTTP connection: `clip serve`, `clip pull`. |
@@ -304,6 +306,54 @@ mole logs clean -keep 200    # …keeping the last N lines
 it also attempts to apply them to a running daemon; otherwise restart mole to
 pick up the updated list.
 
+### Push: expose a local service on the remote
+
+`mole up` normally *pulls* remote ports to `localhost` (`ssh -L`). `push` is the
+opposite (`ssh -R`), over the same SSH connection: a service on **your machine**
+becomes reachable from the **remote**.
+
+```bash
+mole push 3000:8080          # on the remote, localhost:8080 now reaches your :3000
+mole push 3000              # same port on both sides
+mole push list              # forwards and their state (active | failed: reason)
+mole unpush 3000            # close the remote listener
+```
+
+```yaml
+push:
+  - local: 3000
+    remote: 8080     # default: same as local
+    bind: 127.0.0.1  # address on the remote (default: loopback)
+```
+
+Like `mole ports`, changes are saved to the config and applied live if the
+daemon is running. Push forwards are always explicit — never auto-discovered.
+They are re-opened automatically after an SSH reconnect.
+
+### Resolve a domain on the remote (split DNS)
+
+To reach names that only the remote can resolve (e.g. `admin.kena.lan`) from
+your browser with no proxy settings:
+
+```yaml
+domains: [kena.lan]
+domain_ports: [80, 443]   # optional (default)
+```
+
+```bash
+sudo mole dns install     # once per machine: mole0 link + nftables + boot unit
+mole up
+curl https://admin.kena.lan
+sudo mole dns uninstall
+```
+
+mole runs a tiny DNS stub for `*.kena.lan` (only those names — your normal DNS
+is untouched), answers with a virtual `127.77.x.y` IP, and forwards connections
+to it through SSH **by name**, so the remote's `sshd` does the real DNS
+resolution. nftables redirects the domain ports to unprivileged listeners, so
+mole coexists with local servers already owning `:80`/`:443`. Requires Linux
+with `systemd-resolved` and `nft`.
+
 ### Clipboard images over a private network
 
 `mole clip` moves clipboard **images** from the machine running `clip serve` to
@@ -387,6 +437,10 @@ mole logs clean [-keep N]
 mole ports  add [-config PATH] <port>
 mole ports  remove|rm [-config PATH] <port>
 mole ports  list|ls [-config PATH]
+mole push   [-config PATH] [-bind ADDR] LOCAL[:REMOTE]
+mole push   list|ls [-config PATH]
+mole unpush [-config PATH] LOCAL
+mole dns    install|uninstall [-config PATH]      (Linux, needs root)
 mole config edit [-config PATH] [-editor CMD]
 mole init   [flags]
 mole clip   serve [-listen 127.0.0.1:7777] [-watch] [-config PATH] [-log-level L]
@@ -411,6 +465,9 @@ mole version · mole help
 | `clip_url`       | string | —                    | Clip server URL used by `mole clip pull`           |
 | `clip_listen`    | string | `127.0.0.1:7777`     | Bind address; use a private Tailscale/WireGuard IP for remote access |
 | `clip_interval_ms` | int  | —                    | Clipboard poll interval for `clip serve -watch`    |
+| `push`           | rule[] | `[]`                 | Local services exposed on the remote (`local`, optional `remote`, optional `bind`; default bind `127.0.0.1`) |
+| `domains`        | string[] | `[]`               | DNS suffixes (e.g. `kena.lan`) resolved **on the remote**; needs `sudo mole dns install` |
+| `domain_ports`   | int[]  | `[80,443]`           | Ports forwarded for every name under `domains` (1–45535) |
 
 Fallback `discover_ports`:
 
@@ -455,6 +512,16 @@ SSH auth is native per platform:
   pruned, and when enumeration isn't available mole only adds, never removes.
 - **TCP only** — no UDP forwarding yet.
 - **Pageant** (PuTTY's Windows agent) isn't supported — OpenSSH agent only.
+- **Push forwards need `AllowTcpForwarding`** on the remote `sshd` (on by
+  default). They bind `127.0.0.1` on the remote unless `bind:` says otherwise;
+  exposing them beyond that needs `GatewayPorts` on the remote — mole never
+  enables it. A bind failure is reported once and shown as `failed` in
+  `mole push list` / `mole status`; it is retried after each reconnect.
+- **`domains:` is Linux-only** (systemd-resolved + nftables, one `sudo mole dns
+  install` per machine). Browsers with their own DNS-over-HTTPS bypass it.
+  Every configured domain port must be free of conflicts on the virtual IPs;
+  a name whose port can't be bound answers `SERVFAIL` rather than being
+  published half-working.
 
 ## 🧑‍💻 Development
 

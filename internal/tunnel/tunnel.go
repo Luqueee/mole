@@ -58,6 +58,11 @@ type Manager struct {
 	// waiting when their request is cancelled.
 	reconnectMu   chan struct{}
 	reconnectOnce sync.Once
+
+	// onReconnect callbacks run (asynchronously) after a replacement
+	// transport is installed; remote listeners died with the old one.
+	hookMu      sync.Mutex
+	onReconnect []func()
 }
 
 // dialAgentFunc is swappable in tests so agent connection ownership can be
@@ -195,10 +200,38 @@ func (m *Manager) reconnectContext(ctx context.Context, dead sshConn) (sshConn, 
 		return nil, err
 	}
 	m.log.Info("reconnected to remote")
+	m.hookMu.Lock()
+	hooks := append([]func(){}, m.onReconnect...)
+	m.hookMu.Unlock()
+	for _, fn := range hooks {
+		go fn()
+	}
 	m.mu.RLock()
 	cur = m.client
 	m.mu.RUnlock()
 	return cur, nil
+}
+
+// OnReconnect registers fn to run after every successful reconnect.
+func (m *Manager) OnReconnect(fn func()) {
+	m.hookMu.Lock()
+	m.onReconnect = append(m.onReconnect, fn)
+	m.hookMu.Unlock()
+}
+
+// Listen opens a listener on the remote (ssh -R). It does not reconnect:
+// Watch/Dial do, then OnReconnect lets callers re-open their listeners.
+func (m *Manager) Listen(network, addr string) (net.Listener, error) {
+	m.mu.RLock()
+	client := m.client
+	m.mu.RUnlock()
+	l, ok := client.(interface {
+		Listen(network, addr string) (net.Listener, error)
+	})
+	if !ok {
+		return nil, errors.New("tunnel: not connected")
+	}
+	return l.Listen(network, addr)
 }
 
 // Dial opens a TCP connection through the SSH tunnel to addr (typically
@@ -509,6 +542,10 @@ func (c *jumpSSHConn) NewSession() (*ssh.Session, error) {
 	return c.client.NewSession()
 }
 
+func (c *jumpSSHConn) Listen(network, addr string) (net.Listener, error) {
+	return c.client.Listen(network, addr)
+}
+
 func (c *jumpSSHConn) Close() error {
 	err := c.client.Close()
 	for i := len(c.jumps) - 1; i >= 0; i-- {
@@ -540,6 +577,10 @@ func (c *contextSSHConn) DialContext(ctx context.Context, network, addr string) 
 
 func (c *contextSSHConn) NewSession() (*ssh.Session, error) {
 	return c.client.NewSession()
+}
+
+func (c *contextSSHConn) Listen(network, addr string) (net.Listener, error) {
+	return c.client.Listen(network, addr)
 }
 
 func (c *contextSSHConn) Close() error {
