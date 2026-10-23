@@ -101,6 +101,7 @@ create a config interactively.
 | `mole logs` | Show the daemon log, colourised; `-f` to follow, `clean` to truncate it. |
 | `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
 | `mole push` · `mole unpush` | Expose a local port on the remote (`ssh -R`): `push LOCAL[:REMOTE]`, `push list`, `unpush LOCAL`. |
+| `mole doctor` | Diagnose config, SSH, push and split DNS with the fix for each problem: `doctor [name...]`. |
 | `mole dns` | Route configured `domains:` to the remote's DNS: `dns install`, `dns uninstall` (Linux, root). |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
@@ -354,6 +355,25 @@ resolution. nftables redirects the domain ports to unprivileged listeners, so
 mole coexists with local servers already owning `:80`/`:443`. Requires Linux
 with `systemd-resolved` and `nft`.
 
+### Diagnose with `mole doctor`
+
+When something doesn't work, `mole doctor` checks the config, the SSH login,
+whether the remote `sshd` allows pull *and* push forwarding, the daemon, push
+forwards and the split-DNS setup, and prints a verdict per line with the fix
+under each problem. Pass names to probe them end to end (remote DNS → local
+resolution → TCP connect):
+
+```text
+$ mole doctor admin.kena.lan
+  ❯ SSH
+    ✓  connect              authenticated in 628ms
+    ✓  pull forwarding      direct-tcpip channels open
+    ✗  push forwarding      sshd refused the remote listener
+       ↳ set `AllowTcpForwarding yes` in the remote sshd_config
+```
+
+The exit status is 1 if any check failed. It never changes anything.
+
 ### Clipboard images over a private network
 
 `mole clip` moves clipboard **images** from the machine running `clip serve` to
@@ -441,6 +461,7 @@ mole push   [-config PATH] [-bind ADDR] LOCAL[:REMOTE]
 mole push   list|ls [-config PATH]
 mole unpush [-config PATH] LOCAL
 mole dns    install|uninstall [-config PATH]      (Linux, needs root)
+mole doctor [-config PATH] [-timeout 10s] [name...]
 mole config edit [-config PATH] [-editor CMD]
 mole init   [flags]
 mole clip   serve [-listen 127.0.0.1:7777] [-watch] [-config PATH] [-log-level L]

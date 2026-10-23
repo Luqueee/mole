@@ -72,6 +72,8 @@ func main() {
 		os.Exit(runUnpush(args))
 	case "dns":
 		os.Exit(runDNS(args))
+	case "doctor":
+		os.Exit(runDoctor(args))
 	case "config":
 		os.Exit(runConfig(args))
 	case "init":
@@ -107,6 +109,7 @@ func printUsage() {
 		{"restart", "Stop and re-launch a backgrounded mole using the same config"},
 		{"ports", "Manage the auto-discover port list (add/remove/list)"},
 		{"push", "Expose a local port on the remote (push list|LOCAL[:REMOTE])"},
+		{"doctor", "Diagnose config, SSH, push and split DNS (doctor [name...])"},
 		{"dns", "Route configured domains to the remote (dns install|uninstall; Linux)"},
 		{"unpush", "Remove a push forward"},
 		{"init", "Generate a mole.yaml (interactive; run once per machine)"},

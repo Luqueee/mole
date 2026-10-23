@@ -33,6 +33,10 @@ type sshTestServer struct {
 	// host is not resolved here); hosts records what clients asked for.
 	backend string
 	hosts   []string
+	// stall makes the server authenticate and then ignore everything.
+	stall bool
+	// ignoreCancel accepts tcpip-forward but never answers its cancellation.
+	ignoreCancel bool
 }
 
 func newSSHTestServer(t *testing.T, clientKey ssh.PublicKey) *sshTestServer {
@@ -110,6 +114,16 @@ func (s *sshTestServer) handle(raw net.Conn) {
 	s.mu.Lock()
 	s.scs = append(s.scs, sc)
 	s.mu.Unlock()
+	if s.stall {
+		// authenticated, then never answers any channel open or request
+		go func() {
+			for range chans {
+			}
+		}()
+		for range reqs {
+		}
+		return
+	}
 	go func() {
 		for nc := range chans {
 			if nc.ChannelType() == "direct-tcpip" {
@@ -143,8 +157,13 @@ func (s *sshTestServer) handle(raw net.Conn) {
 				_ = r.Reply(false, nil)
 				continue
 			}
+			var reply []byte
+			if p.Port == 0 { // client asked for any port: tell it which
+				p.Port = uint32(l.Addr().(*net.TCPAddr).Port)
+				reply = ssh.Marshal(struct{ Port uint32 }{p.Port})
+			}
 			lns[p.Port] = l
-			_ = r.Reply(true, nil)
+			_ = r.Reply(true, reply)
 			go func() {
 				for {
 					c, err := l.Accept()
@@ -171,6 +190,9 @@ func (s *sshTestServer) handle(raw net.Conn) {
 			}()
 		case "cancel-tcpip-forward":
 			_ = ssh.Unmarshal(r.Payload, &p)
+			if s.ignoreCancel {
+				continue // accepted the forward, never answers the cancel
+			}
 			if l := lns[p.Port]; l != nil {
 				_ = l.Close()
 				delete(lns, p.Port)
