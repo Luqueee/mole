@@ -3,249 +3,69 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Create as $Create } from "@wailsio/runtime";
+import * as admin$0 from "../internal/admin/models.js";
 
 /**
  * Event is one finished forwarded connection (mirror of admin.Event).
  */
-export class Event {
+export interface Event {
     "id": number;
+
+    /**
+     * "pull" or "push"
+     */
+    "dir": string;
     "port": number;
     "startMs": number;
     "durMs": number;
     "bytesOut": number;
     "bytesIn": number;
     "failed": boolean;
-
-    /** Creates a new Event instance. */
-    constructor($$source: Partial<Event> = {}) {
-        if (!("id" in $$source)) {
-            this["id"] = 0;
-        }
-        if (!("port" in $$source)) {
-            this["port"] = 0;
-        }
-        if (!("startMs" in $$source)) {
-            this["startMs"] = 0;
-        }
-        if (!("durMs" in $$source)) {
-            this["durMs"] = 0;
-        }
-        if (!("bytesOut" in $$source)) {
-            this["bytesOut"] = 0;
-        }
-        if (!("bytesIn" in $$source)) {
-            this["bytesIn"] = 0;
-        }
-        if (!("failed" in $$source)) {
-            this["failed"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new Event instance from a string or object.
-     */
-    static createFrom($$source: any = {}): Event {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new Event($$parsedSource as Partial<Event>);
-    }
 }
 
 /**
  * Events is the answer of GetEvents. Supported is false for daemons that
  * predate the /events endpoint.
  */
-export class Events {
+export interface Events {
     "supported": boolean;
     "last": number;
-    "events": Event[];
-
-    /** Creates a new Events instance. */
-    constructor($$source: Partial<Events> = {}) {
-        if (!("supported" in $$source)) {
-            this["supported"] = false;
-        }
-        if (!("last" in $$source)) {
-            this["last"] = 0;
-        }
-        if (!("events" in $$source)) {
-            this["events"] = [];
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new Events instance from a string or object.
-     */
-    static createFrom($$source: any = {}): Events {
-        const $$createField2_0 = $$createType1;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("events" in $$parsedSource) {
-            $$parsedSource["events"] = $$createField2_0($$parsedSource["events"]);
-        }
-        return new Events($$parsedSource as Partial<Events>);
-    }
+    "events": Event[] | null;
 }
 
 /**
  * Settings is the editable subset of the mole config.
  */
-export class Settings {
+export interface Settings {
     "path": string;
     "remote": string;
     "autoDiscover": boolean;
-    "discoverPorts": number[];
-    "ports": number[];
-    "excludePorts": number[];
+    "discoverPorts": number[] | null;
+    "ports": number[] | null;
+    "excludePorts": number[] | null;
     "adminAddr": string;
-
-    /** Creates a new Settings instance. */
-    constructor($$source: Partial<Settings> = {}) {
-        if (!("path" in $$source)) {
-            this["path"] = "";
-        }
-        if (!("remote" in $$source)) {
-            this["remote"] = "";
-        }
-        if (!("autoDiscover" in $$source)) {
-            this["autoDiscover"] = false;
-        }
-        if (!("discoverPorts" in $$source)) {
-            this["discoverPorts"] = [];
-        }
-        if (!("ports" in $$source)) {
-            this["ports"] = [];
-        }
-        if (!("excludePorts" in $$source)) {
-            this["excludePorts"] = [];
-        }
-        if (!("adminAddr" in $$source)) {
-            this["adminAddr"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new Settings instance from a string or object.
-     */
-    static createFrom($$source: any = {}): Settings {
-        const $$createField3_0 = $$createType2;
-        const $$createField4_0 = $$createType2;
-        const $$createField5_0 = $$createType2;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("discoverPorts" in $$parsedSource) {
-            $$parsedSource["discoverPorts"] = $$createField3_0($$parsedSource["discoverPorts"]);
-        }
-        if ("ports" in $$parsedSource) {
-            $$parsedSource["ports"] = $$createField4_0($$parsedSource["ports"]);
-        }
-        if ("excludePorts" in $$parsedSource) {
-            $$parsedSource["excludePorts"] = $$createField5_0($$parsedSource["excludePorts"]);
-        }
-        return new Settings($$parsedSource as Partial<Settings>);
-    }
 }
 
 /**
  * Stats mirrors the "stats" object of the admin /status response.
  */
-export class Stats {
+export interface Stats {
     "uptime": string;
     "active_conns": number;
     "total_conns": number;
     "failed_dials": number;
-
-    /** Creates a new Stats instance. */
-    constructor($$source: Partial<Stats> = {}) {
-        if (!("uptime" in $$source)) {
-            this["uptime"] = "";
-        }
-        if (!("active_conns" in $$source)) {
-            this["active_conns"] = 0;
-        }
-        if (!("total_conns" in $$source)) {
-            this["total_conns"] = 0;
-        }
-        if (!("failed_dials" in $$source)) {
-            this["failed_dials"] = 0;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new Stats instance from a string or object.
-     */
-    static createFrom($$source: any = {}): Stats {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new Stats($$parsedSource as Partial<Stats>);
-    }
 }
 
 /**
  * Status is what the frontend renders on its dashboard.
  */
-export class Status {
+export interface Status {
     "running": boolean;
     "adminAddr": string;
     "remote": string;
     "stats": Stats;
-    "ports": number[];
-    "info": { [_ in string]?: any };
+    "ports": number[] | null;
+    "push": admin$0.PushInfo[] | null;
+    "info": { [_ in string]?: any } | null;
     "error"?: string;
-
-    /** Creates a new Status instance. */
-    constructor($$source: Partial<Status> = {}) {
-        if (!("running" in $$source)) {
-            this["running"] = false;
-        }
-        if (!("adminAddr" in $$source)) {
-            this["adminAddr"] = "";
-        }
-        if (!("remote" in $$source)) {
-            this["remote"] = "";
-        }
-        if (!("stats" in $$source)) {
-            this["stats"] = (new Stats());
-        }
-        if (!("ports" in $$source)) {
-            this["ports"] = [];
-        }
-        if (!("info" in $$source)) {
-            this["info"] = {};
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new Status instance from a string or object.
-     */
-    static createFrom($$source: any = {}): Status {
-        const $$createField3_0 = $$createType3;
-        const $$createField4_0 = $$createType2;
-        const $$createField5_0 = $$createType4;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("stats" in $$parsedSource) {
-            $$parsedSource["stats"] = $$createField3_0($$parsedSource["stats"]);
-        }
-        if ("ports" in $$parsedSource) {
-            $$parsedSource["ports"] = $$createField4_0($$parsedSource["ports"]);
-        }
-        if ("info" in $$parsedSource) {
-            $$parsedSource["info"] = $$createField5_0($$parsedSource["info"]);
-        }
-        return new Status($$parsedSource as Partial<Status>);
-    }
 }
-
-// Private type creation functions
-const $$createType0 = Event.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = Stats.createFrom;
-const $$createType4 = $Create.Map($Create.Any, $Create.Any);

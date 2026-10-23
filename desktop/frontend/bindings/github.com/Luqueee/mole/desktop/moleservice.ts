@@ -10,7 +10,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -24,31 +24,32 @@ export function AddDiscoverPort(port: number): $CancellablePromise<void> {
 }
 
 /**
+ * AddPush exposes a local port on the remote (ssh -R), live when the daemon is up.
+ */
+export function AddPush(local: number, remote: number): $CancellablePromise<void> {
+    return $Call.ByID(408367857, local, remote);
+}
+
+/**
  * GetEvents returns the connections finished after event `since`.
  */
 export function GetEvents(since: number): $CancellablePromise<$models.Events> {
-    return $Call.ByID(835198243, since).then(($result: any) => {
-        return $$createType0($result);
-    });
+    return $Call.ByID(835198243, since);
 }
 
 /**
  * GetLogs returns the last n lines of the daemon log. Only the tail of the
  * file is read: the log grows without bound.
  */
-export function GetLogs(n: number): $CancellablePromise<string[]> {
-    return $Call.ByID(288713117, n).then(($result: any) => {
-        return $$createType1($result);
-    });
+export function GetLogs(n: number): $CancellablePromise<string[] | null> {
+    return $Call.ByID(288713117, n);
 }
 
 /**
  * GetSettings returns the active config.
  */
 export function GetSettings(): $CancellablePromise<$models.Settings> {
-    return $Call.ByID(1785834435).then(($result: any) => {
-        return $$createType2($result);
-    });
+    return $Call.ByID(1785834435);
 }
 
 /**
@@ -56,9 +57,7 @@ export function GetSettings(): $CancellablePromise<$models.Settings> {
  * returns Running=false so the UI can offer to start it.
  */
 export function GetStatus(): $CancellablePromise<$models.Status> {
-    return $Call.ByID(562239672).then(($result: any) => {
-        return $$createType3($result);
-    });
+    return $Call.ByID(562239672);
 }
 
 /**
@@ -66,6 +65,13 @@ export function GetStatus(): $CancellablePromise<$models.Status> {
  */
 export function RemoveDiscoverPort(port: number): $CancellablePromise<void> {
     return $Call.ByID(4233456690, port);
+}
+
+/**
+ * RemovePush closes a push forward.
+ */
+export function RemovePush(local: number): $CancellablePromise<void> {
+    return $Call.ByID(2814054518, local);
 }
 
 export function Restart(): $CancellablePromise<void> {
@@ -79,9 +85,3 @@ export function Start(): $CancellablePromise<void> {
 export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(2128813218);
 }
-
-// Private type creation functions
-const $$createType0 = $models.Events.createFrom;
-const $$createType1 = $Create.Array($Create.Any);
-const $$createType2 = $models.Settings.createFrom;
-const $$createType3 = $models.Status.createFrom;

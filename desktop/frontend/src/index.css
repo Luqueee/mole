@@ -223,3 +223,16 @@ body {
   100% { left: 0; opacity: 0; background: var(--live); box-shadow: 0 0 14px 1px var(--live); }
 }
 @keyframes pill-x { 0% { left: 0; opacity: 0 } 3% { opacity: 1 } 60% { left: calc(100% - 54px); opacity: 1 } 100% { left: calc(100% - 54px); opacity: 0 } }
+
+/* push (remote → local): mirror of pill-rt, enters from the remote end */
+.pill-push { animation-name: pill-rt-push; }
+.pill-push.pill-bad { animation-name: pill-x-push; }
+@keyframes pill-rt-push {
+  0%   { left: calc(100% - 54px); opacity: 0; background: var(--warn); box-shadow: 0 0 14px 1px var(--warn); }
+  3%   { opacity: 1; }
+  49%  { left: 0; background: var(--warn); box-shadow: 0 0 14px 1px var(--warn); }
+  51%  { left: 0; background: var(--live); box-shadow: 0 0 14px 1px var(--live); }
+  97%  { opacity: 1; }
+  100% { left: calc(100% - 54px); opacity: 0; background: var(--live); box-shadow: 0 0 14px 1px var(--live); }
+}
+@keyframes pill-x-push { 0% { left: calc(100% - 54px); opacity: 0 } 3% { opacity: 1 } 60% { left: 0; opacity: 1 } 100% { left: 0; opacity: 0 } }

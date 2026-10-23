@@ -124,10 +124,10 @@ func (m *Mesh) Resolve(name string) (net.IP, error) {
 		targets = append(targets, net.JoinHostPort(name, strconv.Itoa(p)))
 	}
 	for i, ln := range opened {
-		target := targets[i]
+		target, port := targets[i], m.ports[i]
 		m.lns = append(m.lns, ln)
 		go func() {
-			if err := proxy.Serve(ln, m.dialer, target, m.hooks, m.log); err != nil {
+			if err := proxy.Serve(ln, m.dialer, target, m.hooks.WithPort(port), m.log); err != nil {
 				m.log.Warn("mesh proxy terminated", "target", target, "err", err)
 			}
 		}()

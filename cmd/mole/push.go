@@ -78,7 +78,7 @@ func (f *pushForwarder) ensureLocked(r config.PushRule) error {
 	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(r.Local))
 	f.log.Info("pushing", "remote", remoteAddr, "local", localAddr)
 	go func() {
-		if err := proxy.Serve(ln, f.dialer, localAddr, f.hooks, f.log); err != nil {
+		if err := proxy.Serve(ln, f.dialer, localAddr, f.hooks.WithPort(r.Local), f.log); err != nil {
 			f.log.Warn("push proxy terminated", "local", r.Local, "err", err)
 		}
 		f.mu.Lock()

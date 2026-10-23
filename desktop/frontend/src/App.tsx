@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Activity, Cable, Plus, RotateCw, ScrollText, Square, Play, X, ArrowRight } from "lucide-react";
+import { Activity, Cable, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
 import type { Status, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
+import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import { api, MOCK } from "./api";
 
 type Tab = "status" | "ports" | "logs";
@@ -67,26 +68,33 @@ function Cell({ label, value, hist, tone, caption, size = "text-4xl" }: { label:
 }
 
 const TRIP = 2000; // ms for a full round trip along the trunk
-type Trip = { id: number; port: number; failed: boolean; row: number };
+type Trip = { id: number; dir: string; port: number; failed: boolean; row: number };
 type Seen = Conn & { at: number };
 const fmtBytes = (n: number) => (n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`);
 const hhmmss = (ms: number) => new Date(ms).toTimeString().slice(0, 8);
 
-/** Ports ordered by recent activity first, then numerically. */
-function rankPorts(ports: number[], conns: Seen[], now: number) {
-  const last = new Map<number, number>();
-  const count = new Map<number, number>();
+type Lane = { dir: string; port: number };
+
+/** Lanes (direction + port) ordered by recent activity first, then numerically. */
+function rankPorts(lanes: Lane[], conns: Seen[], now: number) {
+  const key = (dir: string, port: number) => `${dir}:${port}`;
+  const last = new Map<string, number>();
+  const count = new Map<string, number>();
   for (const c of conns) {
-    last.set(c.port, Math.max(last.get(c.port) ?? 0, c.at));
-    if (now - c.at < 60_000) count.set(c.port, (count.get(c.port) ?? 0) + 1);
+    const k = key(c.dir, c.port);
+    last.set(k, Math.max(last.get(k) ?? 0, c.at));
+    if (now - c.at < 60_000) count.set(k, (count.get(k) ?? 0) + 1);
   }
-  return [...ports]
-    .sort((x, y) => (last.get(y) ?? 0) - (last.get(x) ?? 0) || x - y)
-    .map((p) => ({ port: p, hot: now - (last.get(p) ?? 0) < 3000, n: count.get(p) ?? 0, seen: last.has(p) }));
+  return [...lanes]
+    .sort((x, y) => (last.get(key(y.dir, y.port)) ?? 0) - (last.get(key(x.dir, x.port)) ?? 0) || x.port - y.port)
+    .map((l) => {
+      const k = key(l.dir, l.port);
+      return { ...l, hot: now - (last.get(k) ?? 0) < 3000, n: count.get(k) ?? 0, seen: last.has(k) };
+    });
 }
 
-function LocalBox({ ports, conns }: { ports: number[]; conns: Seen[] }) {
-  const ranked = rankPorts(ports, conns, Date.now());
+function LocalBox({ lanes, conns }: { lanes: Lane[]; conns: Seen[] }) {
+  const ranked = rankPorts(lanes, conns, Date.now());
   const shown = ranked.slice(0, 6);
   return (
     <div className="flex min-h-0 flex-col border border-line bg-panel p-4">
@@ -94,9 +102,9 @@ function LocalBox({ ports, conns }: { ports: number[]; conns: Seen[] }) {
       <div className="mt-1 font-display text-xl font-bold">127.0.0.1</div>
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-hidden text-[11px]">
         {shown.map((r) => (
-          <div key={r.port} className="flex items-center gap-2">
+          <div key={`${r.dir}:${r.port}`} className="flex items-center gap-2">
             <span className={`size-1.5 ${r.hot ? "bg-hot shadow-[0_0_8px_var(--accent-hot)]" : r.seen ? "bg-live" : "bg-faint"}`} />
-            <span className={r.seen ? "text-foreground" : "text-dim"}>:{r.port}</span>
+            <span className={r.seen ? "text-foreground" : "text-dim"}>{r.dir === "push" ? "←" : ""}:{r.port}</span>
             <span className="ml-auto tabular-nums text-faint">{r.n ? `×${r.n}` : ""}</span>
           </div>
         ))}
@@ -110,6 +118,7 @@ function RemoteBox({ remote, ports, s }: { remote: string; ports: number; s: Sta
   const rows: [string, string][] = [
     ["TUNNEL", s.running ? "UP" : "DOWN"],
     ["FORWARDED", String(ports)],
+    ["PUSHED", String((s.push ?? []).filter((p) => p.state === "active").length)],
     ["CONNS", String(s.stats.active_conns)],
     ["DIAL FAIL", String(s.stats.failed_dials)],
   ];
@@ -138,8 +147,8 @@ function Trunk({ running, trips, last }: { running: boolean; trips: Trip[]; last
       {/* packets */}
       <div className="absolute inset-x-0 top-1/2 h-[52px] -translate-y-1/2">
         {trips.map((t) => (
-          <span key={t.id} className={`pill ${t.failed ? "pill-bad" : ""}`} style={{ top: 4 + t.row * 15, animationDuration: `${TRIP}ms` }}>
-            :{t.port}
+          <span key={t.id} className={`pill ${t.dir === "push" ? "pill-push" : ""} ${t.failed ? "pill-bad" : ""}`} style={{ top: 4 + t.row * 15, animationDuration: `${TRIP}ms` }}>
+            {t.dir === "push" ? "←" : ""}:{t.port}
           </span>
         ))}
       </div>
@@ -148,7 +157,7 @@ function Trunk({ running, trips, last }: { running: boolean; trips: Trip[]; last
         <div className="font-display text-xl font-extrabold tracking-[0.25em]">MOLE</div>
         <div className="mt-1 text-[9px] tracking-[0.3em]">1× SSH</div>
         <div className="absolute inset-x-0 bottom-3 px-1 text-center text-[9px] leading-4 tracking-[0.12em]">
-          {last ? (last.failed ? `:${last.port} FAILED` : `:${last.port} · ${fmtBytes(last.bytesIn + last.bytesOut)}`) : "IDLE"}
+          {last ? `${last.dir === "push" ? "←" : "→"}:${last.port} ${last.failed ? "FAILED" : "· " + fmtBytes(last.bytesIn + last.bytesOut)}` : "IDLE"}
         </div>
       </div>
     </div>
@@ -157,10 +166,14 @@ function Trunk({ running, trips, last }: { running: boolean; trips: Trip[]; last
 
 function Tunnel({ s, trips, conns, supported }: { s: Status; trips: Trip[]; conns: Seen[]; supported: boolean }) {
   const ports = s.ports ?? [];
+  const lanes = [
+    ...ports.map((port) => ({ dir: "pull", port })),
+    ...(s.push ?? []).map((p) => ({ dir: "push", port: p.local })),
+  ];
   return (
     <div className="grid-bg relative shrink-0 border-b border-line p-4">
       <div className="grid h-[176px] grid-cols-[210px_1fr_210px] gap-0">
-        <LocalBox ports={ports} conns={conns} />
+        <LocalBox lanes={lanes} conns={conns} />
         <Trunk running={s.running} trips={trips} last={conns[conns.length - 1] ?? null} />
         <RemoteBox remote={s.remote} ports={ports.length} s={s} />
       </div>
@@ -178,6 +191,7 @@ function Waterfall({ conns }: { conns: Seen[] }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-4 border-b border-line px-5 py-2 text-[10px] tracking-[0.25em] text-dim">
         <span className="w-16">TIME</span>
+        <span className="w-16">DIR</span>
         <span className="w-16">PORT</span>
         <span className="flex-1">DURATION</span>
         <span className="w-28 text-right">↑ OUT</span>
@@ -187,6 +201,7 @@ function Waterfall({ conns }: { conns: Seen[] }) {
         {rows.map((r) => (
           <div key={r.id} className="rise flex items-center gap-4 border-b border-line/60 px-5 py-[7px] text-[11px] hover:bg-white/[0.03]">
             <span className="w-16 text-faint">{hhmmss(r.at)}</span>
+            <span className={`w-16 whitespace-nowrap text-[9px] font-bold tracking-[0.15em] ${r.dir === "push" ? "text-warn" : "text-hot"}`}>{r.dir === "push" ? "← PUSH" : "PULL →"}</span>
             <span className="w-16 font-bold">:{r.port}</span>
             <span className="flex flex-1 items-center gap-3">
               <span className="h-2 bg-line" style={{ width: "100%", maxWidth: "70%" }}>
@@ -223,47 +238,92 @@ function StatusPage({ s, hist, trips, conns, supported }: { s: Status; hist: Rec
   );
 }
 
-function PortsPage({ discover, forwarded, run }: { discover: number[]; forwarded: number[]; run: (l: string, f: () => Promise<unknown>) => Promise<void> }) {
+type Run = (l: string, f: () => Promise<unknown>) => Promise<void>;
+const validPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
+
+function SectionHead({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex items-baseline gap-4 border-b border-line bg-white/[0.02] px-5 py-2 text-[10px] tracking-[0.25em]">
+      <span className="font-bold text-foreground">{title}</span>
+      <span className="text-faint">{hint}</span>
+    </div>
+  );
+}
+
+function AddRow({ value, onChange, onAdd, placeholder, pattern }: { value: string; onChange: (v: string) => void; onAdd: () => void; placeholder: string; pattern: RegExp }) {
+  return (
+    <div className="no-drag flex items-stretch border-b border-line">
+      <div className="flex items-center px-5 text-hot"><Plus size={20} /></div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(pattern, ""))}
+        onKeyDown={(e) => e.key === "Enter" && onAdd()}
+        placeholder={placeholder}
+        className="flex-1 bg-transparent py-5 font-display text-3xl font-bold tracking-wide text-foreground outline-none placeholder:text-faint select-text"
+      />
+      <button onClick={onAdd} className="bg-hot px-8 font-display text-sm font-bold tracking-[0.2em] text-background transition hover:brightness-110 active:translate-y-px">
+        ADD
+      </button>
+    </div>
+  );
+}
+
+function PortsPage({ discover, forwarded, push, run }: { discover: number[]; forwarded: number[]; push: PushInfo[]; run: Run }) {
   const [v, setV] = useState("");
+  const [pv, setPv] = useState("");
   const add = () => {
     const p = Number(v);
-    if (!Number.isInteger(p) || p < 1 || p > 65535) return toast.error("Port must be 1–65535");
+    if (!validPort(p)) return toast.error("Port must be 1–65535");
     run(`+ ${p}`, () => api.add(p)).then(() => setV(""));
   };
+  const addPush = () => {
+    const m = /^(\d+)(?::(\d+))?$/.exec(pv);
+    const local = Number(m?.[1]);
+    const remote = m?.[2] ? Number(m[2]) : 0;
+    if (!m || !validPort(local) || (remote !== 0 && !validPort(remote))) return toast.error("Use LOCAL or LOCAL:REMOTE, ports 1–65535");
+    run(`← ${local}${remote ? `:${remote}` : ""}`, () => api.pushAdd(local, remote)).then(() => setPv(""));
+  };
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="no-drag flex items-stretch border-b border-line">
-        <div className="flex items-center px-5 text-hot"><Plus size={20} /></div>
-        <input
-          value={v}
-          onChange={(e) => setV(e.target.value.replace(/\D/g, ""))}
-          onKeyDown={(e) => e.key === "Enter" && add()}
-          placeholder="ADD DISCOVERY PORT"
-          className="flex-1 bg-transparent py-5 font-display text-3xl font-bold tracking-wide text-foreground outline-none placeholder:text-faint select-text"
-        />
-        <button onClick={add} className="bg-hot px-8 font-display text-sm font-bold tracking-[0.2em] text-background transition hover:brightness-110 active:translate-y-px">
-          ADD
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {discover.map((p, i) => {
-          const live = forwarded.includes(p);
-          return (
-            <div key={p} style={{ animationDelay: `${i * 30}ms` }} className="rise group flex items-center border-b border-line px-5 py-4 transition hover:bg-white/[0.03]">
-              <span className={`mr-4 size-2 ${live ? "bg-live" : "bg-faint"}`} />
-              <span className="w-28 font-display text-3xl font-bold tabular-nums">{p}</span>
-              <span className="flex flex-1 items-center gap-3 text-xs text-dim">
-                localhost:{p} <ArrowRight size={14} className="text-hot" /> remote:{p}
-              </span>
-              <span className={`mr-6 text-[10px] tracking-[0.25em] ${live ? "text-live" : "text-faint"}`}>{live ? "FORWARDING" : "IDLE"}</span>
-              <button aria-label={`Remove ${p}`} onClick={() => run(`− ${p}`, () => api.remove(p))} className="no-drag p-1 text-faint transition hover:text-bad">
-                <X size={18} />
-              </button>
-            </div>
-          );
-        })}
-        {discover.length === 0 && <div className="p-8 text-xs tracking-[0.3em] text-faint">NO CANDIDATES</div>}
-      </div>
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <SectionHead title="PULL" hint="REMOTE PORTS APPEAR ON THIS MACHINE (-L)" />
+      <AddRow value={v} onChange={setV} onAdd={add} placeholder="ADD DISCOVERY PORT" pattern={/\D/g} />
+      {discover.map((p, i) => {
+        const live = forwarded.includes(p);
+        return (
+          <div key={p} style={{ animationDelay: `${i * 30}ms` }} className="rise group flex items-center border-b border-line px-5 py-4 transition hover:bg-white/[0.03]">
+            <span className={`mr-4 size-2 ${live ? "bg-live" : "bg-faint"}`} />
+            <span className="w-28 font-display text-3xl font-bold tabular-nums">{p}</span>
+            <span className="flex flex-1 items-center gap-3 text-xs text-dim">
+              localhost:{p} <ArrowLeft size={14} className="text-hot" /> remote:{p}
+            </span>
+            <span className={`mr-6 text-[10px] tracking-[0.25em] ${live ? "text-live" : "text-faint"}`}>{live ? "FORWARDING" : "IDLE"}</span>
+            <button aria-label={`Remove ${p}`} onClick={() => run(`− ${p}`, () => api.remove(p))} className="no-drag p-1 text-faint transition hover:text-bad">
+              <X size={18} />
+            </button>
+          </div>
+        );
+      })}
+      {discover.length === 0 && <div className="p-8 text-xs tracking-[0.3em] text-faint">NO CANDIDATES</div>}
+
+      <SectionHead title="PUSH" hint="LOCAL PORTS APPEAR ON THE REMOTE (-R)" />
+      <AddRow value={pv} onChange={setPv} onAdd={addPush} placeholder="PUSH LOCAL[:REMOTE]" pattern={/[^\d:]/g} />
+      {push.map((p, i) => (
+        <div key={p.local} style={{ animationDelay: `${i * 30}ms` }} className="rise group flex items-center border-b border-line px-5 py-4 transition hover:bg-white/[0.03]">
+          <span className={`mr-4 size-2 ${p.state === "active" ? "bg-warn" : p.state === "failed" ? "bg-bad" : "bg-faint"}`} />
+          <span className="w-28 font-display text-3xl font-bold tabular-nums">{p.local}</span>
+          <span className="flex flex-1 items-center gap-3 text-xs text-dim">
+            localhost:{p.local} <ArrowRight size={14} className="text-warn" /> remote:{p.remote}
+            {p.state === "failed" && p.error && <span className="text-bad">· {p.error}</span>}
+          </span>
+          <span className={`mr-6 text-[10px] tracking-[0.25em] ${p.state === "active" ? "text-warn" : p.state === "failed" ? "text-bad" : "text-faint"}`}>
+            {p.state === "active" ? "PUSHING" : p.state === "failed" ? "FAILED" : "IDLE"}
+          </span>
+          <button aria-label={`Remove push ${p.local}`} onClick={() => run(`− ${p.local}`, () => api.pushRemove(p.local))} className="no-drag p-1 text-faint transition hover:text-bad">
+            <X size={18} />
+          </button>
+        </div>
+      ))}
+      {push.length === 0 && <div className="p-8 text-xs tracking-[0.3em] text-faint">NOTHING PUSHED</div>}
     </div>
   );
 }
@@ -373,11 +433,11 @@ export default function App() {
         setSupported(r.supported);
         const first = cursor.current === null;
         cursor.current = r.last;
-        if (first || !r.events.length) return; // don't replay history on startup
+        if (first || !r.events?.length) return; // don't replay history on startup
         const fresh = r.events.slice(-8);
         const at = Date.now();
         setConns((c) => [...c, ...fresh.map((e) => ({ ...e, at }))].slice(-120));
-        setTrips((t) => [...t, ...fresh.map((e) => ({ id: e.id, port: e.port, failed: e.failed, row: rowSeq.current++ % 3 }))]);
+        setTrips((t) => [...t, ...fresh.map((e) => ({ id: e.id, dir: e.dir, port: e.port, failed: e.failed, row: rowSeq.current++ % 3 }))]);
         setTimeout(() => setTrips((t) => t.filter((x) => !fresh.some((f) => f.id === x.id))), TRIP + 200);
       } catch { /* daemon down: ignore */ }
     };
@@ -437,7 +497,7 @@ export default function App() {
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {s.error && <div className="border-b border-bad bg-bad/10 px-5 py-2 text-[11px] text-bad">{s.error}</div>}
           {tab === "status" && <StatusPage s={s} hist={hist} trips={trips} conns={conns} supported={supported} />}
-          {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} run={run} />}
+          {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} push={s.push ?? []} run={run} />}
           {tab === "logs" && <LogsPage lines={logs} />}
         </main>
       </div>

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
 )
 
@@ -40,13 +41,14 @@ type Stats struct {
 
 // Status is what the frontend renders on its dashboard.
 type Status struct {
-	Running   bool           `json:"running"`
-	AdminAddr string         `json:"adminAddr"`
-	Remote    string         `json:"remote"`
-	Stats     Stats          `json:"stats"`
-	Ports     []int          `json:"ports"`
-	Info      map[string]any `json:"info"`
-	Error     string         `json:"error,omitempty"`
+	Running   bool             `json:"running"`
+	AdminAddr string           `json:"adminAddr"`
+	Remote    string           `json:"remote"`
+	Stats     Stats            `json:"stats"`
+	Ports     []int            `json:"ports"`
+	Push      []admin.PushInfo `json:"push"`
+	Info      map[string]any   `json:"info"`
+	Error     string           `json:"error,omitempty"`
 }
 
 // Settings is the editable subset of the mole config.
@@ -74,6 +76,9 @@ func (m *MoleService) GetStatus() Status {
 		return Status{Error: err.Error()}
 	}
 	st := Status{AdminAddr: cfg.AdminAddr, Remote: cfg.Remote}
+	for _, r := range cfg.Push { // daemon down: show what would be pushed
+		st.Push = append(st.Push, admin.PushInfo{Local: r.Local, Remote: r.RemotePort(), Bind: r.BindAddr(), State: "stopped"})
+	}
 	if cfg.AdminAddr == "" {
 		st.Error = "admin_addr is not set in the mole config; status is unavailable"
 		return st
@@ -92,6 +97,11 @@ func (m *MoleService) GetStatus() Status {
 		return st
 	}
 	st.Running, st.Stats, st.Info = true, body.Stats, body.Info
+	if raw, ok := body.Info["push"]; ok { // the daemon's live view replaces the config's
+		b, _ := json.Marshal(raw)
+		st.Push = nil
+		_ = json.Unmarshal(b, &st.Push)
+	}
 	defer func() {
 		// Daemons that predate live port reporting answer with an empty
 		// list even while forwarding; ask the OS what the process holds.
@@ -112,6 +122,7 @@ func (m *MoleService) GetStatus() Status {
 // Event is one finished forwarded connection (mirror of admin.Event).
 type Event struct {
 	ID       uint64 `json:"id"`
+	Dir      string `json:"dir"` // "pull" or "push"
 	Port     int    `json:"port"`
 	StartMs  int64  `json:"startMs"`
 	DurMs    int64  `json:"durMs"`
@@ -144,23 +155,15 @@ func (m *MoleService) GetEvents(since uint64) Events {
 		return none
 	}
 	var body struct {
-		Last   uint64 `json:"last"`
-		Events []struct {
-			ID       uint64 `json:"id"`
-			Port     int    `json:"port"`
-			StartMs  int64  `json:"start_ms"`
-			DurMs    int64  `json:"dur_ms"`
-			BytesOut int64  `json:"bytes_out"`
-			BytesIn  int64  `json:"bytes_in"`
-			Failed   bool   `json:"failed"`
-		} `json:"events"`
+		Last   uint64        `json:"last"`
+		Events []admin.Event `json:"events"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return none
 	}
 	out := Events{Supported: true, Last: body.Last, Events: make([]Event, 0, len(body.Events))}
 	for _, e := range body.Events {
-		out.Events = append(out.Events, Event{e.ID, e.Port, e.StartMs, e.DurMs, e.BytesOut, e.BytesIn, e.Failed})
+		out.Events = append(out.Events, Event{e.ID, e.Dir, e.Port, e.StartMs, e.DurMs, e.BytesOut, e.BytesIn, e.Failed})
 	}
 	return out
 }
@@ -213,6 +216,20 @@ func (m *MoleService) AddDiscoverPort(port int) error {
 // RemoveDiscoverPort removes a discovery candidate.
 func (m *MoleService) RemoveDiscoverPort(port int) error {
 	return m.mole("ports", "remove", fmt.Sprint(port))
+}
+
+// AddPush exposes a local port on the remote (ssh -R), live when the daemon is up.
+func (m *MoleService) AddPush(local, remote int) error {
+	spec := fmt.Sprint(local)
+	if remote != 0 && remote != local {
+		spec += ":" + fmt.Sprint(remote)
+	}
+	return m.mole("push", spec)
+}
+
+// RemovePush closes a push forward.
+func (m *MoleService) RemovePush(local int) error {
+	return m.mole("unpush", fmt.Sprint(local))
 }
 
 func (m *MoleService) Start() error   { return m.mole("up", "-d") }

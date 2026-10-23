@@ -6,7 +6,7 @@ export {
     MoleService
 };
 
-export {
+export type {
     Event,
     Events,
     Settings,

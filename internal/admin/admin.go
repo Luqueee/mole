@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Luqueee/mole/internal/proxy"
 )
 
 // ErrConflict marks a controller error caused by a client-side port
@@ -36,6 +38,7 @@ type Stats struct {
 // Event is one finished forwarded connection, as served by GET /events.
 type Event struct {
 	ID       uint64 `json:"id"`
+	Dir      string `json:"dir"` // "pull" (-L) or "push" (-R)
 	Port     int    `json:"port"`
 	StartMs  int64  `json:"start_ms"`
 	DurMs    int64  `json:"dur_ms"`
@@ -91,6 +94,23 @@ func (s *Stats) OnDisconnect() {
 // OnDialFail is called when a dial to the remote fails.
 func (s *Stats) OnDialFail() {
 	s.failedDials.Add(1)
+}
+
+// Hooks returns proxy hooks that feed these stats and the event ring for a
+// forwarder of the given direction (proxy.DirPull or proxy.DirPush).
+func (s *Stats) Hooks(dir string) proxy.Hooks {
+	return proxy.Hooks{
+		OnConnect:    s.OnConnect,
+		OnDisconnect: s.OnDisconnect,
+		OnDialFail:   s.OnDialFail,
+		Dir:          dir,
+		OnConn: func(ci proxy.ConnInfo) {
+			s.Record(Event{
+				Dir: ci.Dir, Port: ci.Port, StartMs: ci.Start.UnixMilli(), DurMs: ci.Duration.Milliseconds(),
+				BytesOut: ci.BytesOut, BytesIn: ci.BytesIn, Failed: ci.DialFail,
+			})
+		},
+	}
 }
 
 type snapshot struct {

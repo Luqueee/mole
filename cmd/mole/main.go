@@ -231,11 +231,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	// Push forwards (local -> remote). Remote listeners die with the SSH
 	// connection, so the reconnect hook must be registered before Watch
 	// starts, or a reconnect during startup would be missed.
-	pushFwd := newPushForwarder(mgr, log, proxy.Hooks{
-		OnConnect:    stats.OnConnect,
-		OnDisconnect: stats.OnDisconnect,
-		OnDialFail:   stats.OnDialFail,
-	})
+	pushFwd := newPushForwarder(mgr, log, stats.Hooks(proxy.DirPush))
 	defer pushFwd.closeAll()
 	mgr.OnReconnect(pushFwd.reopenAll)
 
@@ -261,17 +257,7 @@ Either -remote or a config file with 'remote:' is required.`)
 		remoteLabel: cfg.Remote,
 		log:         log,
 		exclude:     exclude,
-		hooks: proxy.Hooks{
-			OnConnect:    stats.OnConnect,
-			OnDisconnect: stats.OnDisconnect,
-			OnDialFail:   stats.OnDialFail,
-			OnConn: func(ci proxy.ConnInfo) {
-				stats.Record(admin.Event{
-					Port: ci.Port, StartMs: ci.Start.UnixMilli(), DurMs: ci.Duration.Milliseconds(),
-					BytesOut: ci.BytesOut, BytesIn: ci.BytesIn, Failed: ci.DialFail,
-				})
-			},
-		},
+		hooks:       stats.Hooks(proxy.DirPull),
 	}
 	defer fwd.closeAll()
 
@@ -280,11 +266,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	// Split-DNS: names under cfg.Domains resolve to virtual IPs and are
 	// forwarded by name, so the remote does the real DNS resolution.
 	if len(cfg.Domains) > 0 {
-		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, proxy.Hooks{
-			OnConnect:    stats.OnConnect,
-			OnDisconnect: stats.OnDisconnect,
-			OnDialFail:   stats.OnDialFail,
-		}, log)
+		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, stats.Hooks(proxy.DirPull), log)
 		defer mesh.Close()
 		pc, err := net.ListenPacket("udp", meshdns.StubAddr)
 		if err != nil {
@@ -432,13 +414,7 @@ func (f *forwarder) ensureLocked(p int) error {
 	remoteAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(p))
 	f.active[p] = ln
 	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(p)))
-	hooks := f.hooks
-	if onConn := f.hooks.OnConn; onConn != nil {
-		hooks.OnConn = func(ci proxy.ConnInfo) {
-			ci.Port = p
-			onConn(ci)
-		}
-	}
+	hooks := f.hooks.WithPort(p)
 	go func(p int, listener net.Listener) {
 		if err := proxy.Serve(listener, f.mgr, remoteAddr, hooks, f.log); err != nil {
 			f.log.Warn("proxy terminated", "port", p, "err", err)

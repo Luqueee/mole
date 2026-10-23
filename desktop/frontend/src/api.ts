@@ -7,6 +7,10 @@ export const MOCK = new URLSearchParams(location.search).has("mock");
 const t0 = Date.now();
 const mockPorts = [3007, 3011, 3013, 3389, 3390, 5355, 9224, 11434, 35005, 38907, 40261, 44481, 45567, 46299, 54001, 54002, 54003, 55301, 55437, 55438];
 let mockDiscover = [3000, 5173, 8080, 9229, 4321, 6006];
+let mockPush = [
+  { local: 3000, remote: 8080, bind: "127.0.0.1", state: "active", error: "" },
+  { local: 5432, remote: 5432, bind: "127.0.0.1", state: "failed", error: "remote port 5432 in use" },
+];
 
 function mockStatus(): Status {
   const s = (Date.now() - t0) / 1000;
@@ -22,6 +26,7 @@ function mockStatus(): Status {
       failed_dials: 1445 + Math.floor(s / 9),
     },
     ports: mockPorts,
+    push: mockPush,
     info: {},
   } as Status;
 }
@@ -45,8 +50,9 @@ function mockEvents(): Events {
   if (!mockNext) mockNext = now + 800;
   if (now >= mockNext) {
     mockNext = now + 500 + Math.random() * 900;
-    const port = [3011, 3013, 3011, 3007, 11434][Math.floor(Math.random() * 5)];
-    out.push({ id: ++mockId, port, startMs: now, durMs: 4 + Math.round(Math.random() * 60), bytesOut: 380, bytesIn: 800 + Math.round(Math.random() * 9000), failed: Math.random() < 0.12 });
+    const push = Math.random() < 0.3;
+    const port = push ? 3000 : [3011, 3013, 3011, 3007, 11434][Math.floor(Math.random() * 5)];
+    out.push({ id: ++mockId, dir: push ? "push" : "pull", port, startMs: now, durMs: 4 + Math.round(Math.random() * 60), bytesOut: 380, bytesIn: 800 + Math.round(Math.random() * 9000), failed: Math.random() < 0.12 });
   }
   return { supported: true, last: mockId, events: out } as Events;
 }
@@ -60,6 +66,10 @@ export const api = {
   add: async (p: number) => (MOCK ? void (mockDiscover = [...mockDiscover, p]) : MoleService.AddDiscoverPort(p)),
   remove: async (p: number) =>
     MOCK ? void (mockDiscover = mockDiscover.filter((x) => x !== p)) : MoleService.RemoveDiscoverPort(p),
+  pushAdd: async (local: number, remote: number) =>
+    MOCK ? void (mockPush = [...mockPush, { local, remote: remote || local, bind: "127.0.0.1", state: "active", error: "" }]) : MoleService.AddPush(local, remote),
+  pushRemove: async (local: number) =>
+    MOCK ? void (mockPush = mockPush.filter((x) => x.local !== local)) : MoleService.RemovePush(local),
   start: async () => (MOCK ? undefined : MoleService.Start()),
   stop: async () => (MOCK ? undefined : MoleService.Stop()),
   restart: async () => (MOCK ? undefined : MoleService.Restart()),

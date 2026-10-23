@@ -23,14 +23,35 @@ type Hooks struct {
 	OnConnect    func()
 	OnDisconnect func()
 	OnDialFail   func()
+	// Dir is the direction this forwarder serves (DirPull when empty).
+	Dir string
 	// OnConn is called once per connection when it finishes, with the
 	// timing and byte counts of the whole round trip. Port is left zero by
-	// Serve; the caller that knows the port fills it in.
+	// Serve; the caller that knows the port fills it in (see WithPort).
 	OnConn func(ConnInfo)
+}
+
+// Directions of a forwarded connection. Pull: a local listener forwards to
+// the remote (-L). Push: a remote listener forwards to a local service (-R).
+const (
+	DirPull = "pull"
+	DirPush = "push"
+)
+
+// WithPort returns a copy whose OnConn reports connections as port.
+func (h Hooks) WithPort(port int) Hooks {
+	if next := h.OnConn; next != nil {
+		h.OnConn = func(ci ConnInfo) {
+			ci.Port = port
+			next(ci)
+		}
+	}
+	return h
 }
 
 // ConnInfo describes one finished forwarded connection.
 type ConnInfo struct {
+	Dir      string // DirPull or DirPush
 	Port     int
 	Start    time.Time
 	Duration time.Duration
@@ -65,7 +86,10 @@ func Serve(ln net.Listener, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 
 func handle(local net.Conn, dial Dialer, remoteAddr string, hooks Hooks, log *slog.Logger) {
 	defer local.Close()
-	info := ConnInfo{Start: time.Now()}
+	info := ConnInfo{Start: time.Now(), Dir: hooks.Dir}
+	if info.Dir == "" {
+		info.Dir = DirPull
+	}
 	if hooks.OnConn != nil {
 		defer func() {
 			info.Duration = time.Since(info.Start)
