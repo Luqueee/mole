@@ -265,6 +265,12 @@ Either -remote or a config file with 'remote:' is required.`)
 			OnConnect:    stats.OnConnect,
 			OnDisconnect: stats.OnDisconnect,
 			OnDialFail:   stats.OnDialFail,
+			OnConn: func(ci proxy.ConnInfo) {
+				stats.Record(admin.Event{
+					Port: ci.Port, StartMs: ci.Start.UnixMilli(), DurMs: ci.Duration.Milliseconds(),
+					BytesOut: ci.BytesOut, BytesIn: ci.BytesIn, Failed: ci.DialFail,
+				})
+			},
 		},
 	}
 	defer fwd.closeAll()
@@ -426,8 +432,15 @@ func (f *forwarder) ensureLocked(p int) error {
 	remoteAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(p))
 	f.active[p] = ln
 	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(p)))
+	hooks := f.hooks
+	if onConn := f.hooks.OnConn; onConn != nil {
+		hooks.OnConn = func(ci proxy.ConnInfo) {
+			ci.Port = p
+			onConn(ci)
+		}
+	}
 	go func(p int, listener net.Listener) {
-		if err := proxy.Serve(listener, f.mgr, remoteAddr, f.hooks, f.log); err != nil {
+		if err := proxy.Serve(listener, f.mgr, remoteAddr, hooks, f.log); err != nil {
 			f.log.Warn("proxy terminated", "port", p, "err", err)
 		}
 		f.mu.Lock()
