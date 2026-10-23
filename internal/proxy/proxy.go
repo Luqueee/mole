@@ -23,6 +23,41 @@ type Hooks struct {
 	OnConnect    func()
 	OnDisconnect func()
 	OnDialFail   func()
+	// Dir is the direction this forwarder serves (DirPull when empty).
+	Dir string
+	// OnConn is called once per connection when it finishes, with the
+	// timing and byte counts of the whole round trip. Port is left zero by
+	// Serve; the caller that knows the port fills it in (see WithPort).
+	OnConn func(ConnInfo)
+}
+
+// Directions of a forwarded connection. Pull: a local listener forwards to
+// the remote (-L). Push: a remote listener forwards to a local service (-R).
+const (
+	DirPull = "pull"
+	DirPush = "push"
+)
+
+// WithPort returns a copy whose OnConn reports connections as port.
+func (h Hooks) WithPort(port int) Hooks {
+	if next := h.OnConn; next != nil {
+		h.OnConn = func(ci ConnInfo) {
+			ci.Port = port
+			next(ci)
+		}
+	}
+	return h
+}
+
+// ConnInfo describes one finished forwarded connection.
+type ConnInfo struct {
+	Dir      string // DirPull or DirPush
+	Port     int
+	Start    time.Time
+	Duration time.Duration
+	BytesOut int64 // local -> remote
+	BytesIn  int64 // remote -> local
+	DialFail bool
 }
 
 // Serve binds to ln and, for each accepted connection, dials the
@@ -51,6 +86,16 @@ func Serve(ln net.Listener, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 
 func handle(local net.Conn, dial Dialer, remoteAddr string, hooks Hooks, log *slog.Logger) {
 	defer local.Close()
+	info := ConnInfo{Start: time.Now(), Dir: hooks.Dir}
+	if info.Dir == "" {
+		info.Dir = DirPull
+	}
+	if hooks.OnConn != nil {
+		defer func() {
+			info.Duration = time.Since(info.Start)
+			hooks.OnConn(info)
+		}()
+	}
 	if hooks.OnConnect != nil {
 		hooks.OnConnect()
 	}
@@ -62,6 +107,7 @@ func handle(local net.Conn, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 
 	remote, err := dial.Dial("tcp", remoteAddr)
 	if err != nil {
+		info.DialFail = true
 		if hooks.OnDialFail != nil {
 			hooks.OnDialFail()
 		}
@@ -82,12 +128,12 @@ func handle(local net.Conn, dial Dialer, remoteAddr string, hooks Hooks, log *sl
 	// each copy returns; the final Close below frees anything leftover.
 	errc := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(remote, local)
+		info.BytesOut, _ = io.Copy(remote, local)
 		closeWrite(remote)
 		errc <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(local, remote)
+		info.BytesIn, _ = io.Copy(local, remote)
 		closeWrite(local)
 		errc <- struct{}{}
 	}()

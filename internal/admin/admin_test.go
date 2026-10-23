@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -492,5 +493,30 @@ func TestServer_PortEndpoints_UnregisteredWithoutController(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("POST without controller: status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestEventsSince(t *testing.T) {
+	st := NewStats()
+	for i := 1; i <= maxEvents+10; i++ {
+		st.Record(Event{Port: i})
+	}
+	all, last := st.EventsSince(0)
+	if len(all) != maxEvents || last != uint64(maxEvents+10) {
+		t.Fatalf("ring: got %d events, last=%d", len(all), last)
+	}
+	tail, _ := st.EventsSince(last - 2)
+	if len(tail) != 2 || tail[0].ID != last-1 {
+		t.Fatalf("since: got %+v", tail)
+	}
+
+	rec := httptest.NewRecorder()
+	New(st, nil).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/events?since="+strconv.FormatUint(last-1, 10), nil))
+	var body struct {
+		Events []Event `json:"events"`
+		Last   uint64  `json:"last"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Events) != 1 || body.Last != last {
+		t.Fatalf("handler: %v %s", err, rec.Body.String())
 	}
 }

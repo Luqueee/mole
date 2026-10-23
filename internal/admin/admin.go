@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Luqueee/mole/internal/proxy"
 )
 
 // ErrConflict marks a controller error caused by a client-side port
@@ -23,9 +26,53 @@ var ErrConflict = errors.New("admin: port conflict")
 type Stats struct {
 	StartedAt time.Time
 
+	evMu   sync.Mutex
+	events []Event // ring of the most recent connections, oldest first
+	nextID uint64
+
 	activeConns atomic.Int64
 	totalConns  atomic.Uint64
 	failedDials atomic.Uint64
+}
+
+// Event is one finished forwarded connection, as served by GET /events.
+type Event struct {
+	ID       uint64 `json:"id"`
+	Dir      string `json:"dir"` // "pull" (-L) or "push" (-R)
+	Port     int    `json:"port"`
+	StartMs  int64  `json:"start_ms"`
+	DurMs    int64  `json:"dur_ms"`
+	BytesOut int64  `json:"bytes_out"`
+	BytesIn  int64  `json:"bytes_in"`
+	Failed   bool   `json:"failed"`
+}
+
+const maxEvents = 256
+
+// Record appends a finished connection to the event ring, assigning its ID.
+func (s *Stats) Record(ev Event) {
+	s.evMu.Lock()
+	defer s.evMu.Unlock()
+	s.nextID++
+	ev.ID = s.nextID
+	if len(s.events) >= maxEvents {
+		s.events = append(s.events[:0], s.events[1:]...)
+	}
+	s.events = append(s.events, ev)
+}
+
+// EventsSince returns the events with ID greater than since, and the
+// newest ID issued so far (so a poller can resume from it).
+func (s *Stats) EventsSince(since uint64) ([]Event, uint64) {
+	s.evMu.Lock()
+	defer s.evMu.Unlock()
+	out := []Event{}
+	for _, ev := range s.events {
+		if ev.ID > since {
+			out = append(out, ev)
+		}
+	}
+	return out, s.nextID
 }
 
 // NewStats returns a Stats with StartedAt set to now.
@@ -47,6 +94,23 @@ func (s *Stats) OnDisconnect() {
 // OnDialFail is called when a dial to the remote fails.
 func (s *Stats) OnDialFail() {
 	s.failedDials.Add(1)
+}
+
+// Hooks returns proxy hooks that feed these stats and the event ring for a
+// forwarder of the given direction (proxy.DirPull or proxy.DirPush).
+func (s *Stats) Hooks(dir string) proxy.Hooks {
+	return proxy.Hooks{
+		OnConnect:    s.OnConnect,
+		OnDisconnect: s.OnDisconnect,
+		OnDialFail:   s.OnDialFail,
+		Dir:          dir,
+		OnConn: func(ci proxy.ConnInfo) {
+			s.Record(Event{
+				Dir: ci.Dir, Port: ci.Port, StartMs: ci.Start.UnixMilli(), DurMs: ci.Duration.Milliseconds(),
+				BytesOut: ci.BytesOut, BytesIn: ci.BytesIn, Failed: ci.DialFail,
+			})
+		},
+	}
 }
 
 type snapshot struct {
@@ -129,6 +193,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/events", s.handleEvents)
 	if s.portsCtl != nil {
 		mux.HandleFunc("POST /ports/discover", s.handlePortAdd)
 		mux.HandleFunc("DELETE /ports/discover/", s.handlePortDelete)
@@ -171,6 +236,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// handleEvents serves GET /events?since=N: the connections finished after
+// event N, plus the newest ID to poll from next time.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
+	evs, last := s.stats.EventsSince(since)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"events": evs, "last": last})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

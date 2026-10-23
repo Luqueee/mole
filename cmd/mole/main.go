@@ -231,11 +231,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	// Push forwards (local -> remote). Remote listeners die with the SSH
 	// connection, so the reconnect hook must be registered before Watch
 	// starts, or a reconnect during startup would be missed.
-	pushFwd := newPushForwarder(mgr, log, proxy.Hooks{
-		OnConnect:    stats.OnConnect,
-		OnDisconnect: stats.OnDisconnect,
-		OnDialFail:   stats.OnDialFail,
-	})
+	pushFwd := newPushForwarder(mgr, log, stats.Hooks(proxy.DirPush))
 	defer pushFwd.closeAll()
 	mgr.OnReconnect(pushFwd.reopenAll)
 
@@ -261,11 +257,7 @@ Either -remote or a config file with 'remote:' is required.`)
 		remoteLabel: cfg.Remote,
 		log:         log,
 		exclude:     exclude,
-		hooks: proxy.Hooks{
-			OnConnect:    stats.OnConnect,
-			OnDisconnect: stats.OnDisconnect,
-			OnDialFail:   stats.OnDialFail,
-		},
+		hooks:       stats.Hooks(proxy.DirPull),
 	}
 	defer fwd.closeAll()
 
@@ -274,11 +266,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	// Split-DNS: names under cfg.Domains resolve to virtual IPs and are
 	// forwarded by name, so the remote does the real DNS resolution.
 	if len(cfg.Domains) > 0 {
-		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, proxy.Hooks{
-			OnConnect:    stats.OnConnect,
-			OnDisconnect: stats.OnDisconnect,
-			OnDialFail:   stats.OnDialFail,
-		}, log)
+		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, stats.Hooks(proxy.DirPull), log)
 		defer mesh.Close()
 		pc, err := net.ListenPacket("udp", meshdns.StubAddr)
 		if err != nil {
@@ -324,13 +312,10 @@ Either -remote or a config file with 'remote:' is required.`)
 		}()
 	}
 
-	// Without auto-discover, an empty port set is a usage error. With
-	// it, an empty set just means "nothing up yet" — keep watching.
+	// An empty set is fine: ports and pushes can be added at runtime
+	// (mole ports add, mole push, the desktop app).
 	if !cfg.AutoDiscover && len(fwd.ports()) == 0 && len(cfg.Push) == 0 && len(cfg.Domains) == 0 {
-		log.Error("no ports to forward — use -ports or -auto-discover")
-		return 1
-	}
-	if len(fwd.ports()) == 0 {
+		log.Info("nothing to forward yet; add ports or pushes at runtime (`mole ports add`, `mole push`)")
 	}
 
 	// Admin HTTP API.
@@ -426,8 +411,9 @@ func (f *forwarder) ensureLocked(p int) error {
 	remoteAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(p))
 	f.active[p] = ln
 	f.log.Info("forwarding", "local", ln.Addr().String(), "remote", net.JoinHostPort(f.remoteLabel, strconv.Itoa(p)))
+	hooks := f.hooks.WithPort(p)
 	go func(p int, listener net.Listener) {
-		if err := proxy.Serve(listener, f.mgr, remoteAddr, f.hooks, f.log); err != nil {
+		if err := proxy.Serve(listener, f.mgr, remoteAddr, hooks, f.log); err != nil {
 			f.log.Warn("proxy terminated", "port", p, "err", err)
 		}
 		f.mu.Lock()
