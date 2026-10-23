@@ -312,13 +312,10 @@ Either -remote or a config file with 'remote:' is required.`)
 		}()
 	}
 
-	// Without auto-discover, an empty port set is a usage error. With
-	// it, an empty set just means "nothing up yet" — keep watching.
+	// An empty set is fine: ports and pushes can be added at runtime
+	// (mole ports add, mole push, the desktop app).
 	if !cfg.AutoDiscover && len(fwd.ports()) == 0 && len(cfg.Push) == 0 && len(cfg.Domains) == 0 {
-		log.Error("no ports to forward — use -ports or -auto-discover")
-		return 1
-	}
-	if len(fwd.ports()) == 0 {
+		log.Info("nothing to forward yet; add ports or pushes at runtime (`mole ports add`, `mole push`)")
 	}
 
 	// Admin HTTP API.

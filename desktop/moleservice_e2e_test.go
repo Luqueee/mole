@@ -179,8 +179,7 @@ func TestServicePushEndToEnd(t *testing.T) {
 	})
 
 	adminPort := freePort(t)
-	// mole up refuses to start with nothing to forward, so pin one pull port
-	cfg := fmt.Sprintf("remote: u@%s\nauto_discover: false\nports: [%d]\nadmin_addr: 127.0.0.1:%d\n", sshAddr, freePort(t), adminPort)
+	cfg := fmt.Sprintf("remote: u@%s\nauto_discover: false\nadmin_addr: 127.0.0.1:%d\n", sshAddr, adminPort)
 	if err := os.WriteFile(config.LocalPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
