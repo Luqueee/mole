@@ -563,7 +563,7 @@ function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved, aut
             hint={d.running ? "FORWARDING ON THAT MACHINE" : "NOT RUNNING"}
             right={
               <>
-                <Btn tone="live" disabled={d.running || !!busy} onClick={() => act("start", "started", () => api.nodeStart(name))}><Play size={11} /> {busy === "start" ? "STARTING…" : "START"}</Btn>
+                <Btn tone="live" title={d.remote ? undefined : "this node has no remote configured"} disabled={d.running || !!busy || !d.remote} onClick={() => act("start", "started", () => api.nodeStart(name))}><Play size={11} /> {busy === "start" ? "STARTING…" : "START"}</Btn>
                 <Btn disabled={!!busy} onClick={() => act("restart", "restarted", () => api.nodeRestart(name))}><RotateCw size={11} /> {busy === "restart" ? "RESTARTING…" : "RESTART"}</Btn>
                 <Btn tone="bad" disabled={!d.running || !!busy} onClick={() => act("stop", "stopped", () => api.nodeStop(name))}><Square size={11} /> {busy === "stop" ? "STOPPING…" : "STOP"}</Btn>
               </>
@@ -576,6 +576,11 @@ function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved, aut
               <Stat label="TOTAL" value={d.totalConns.toLocaleString("en")} />
               <Stat label="FAILED" value={d.failedDials.toLocaleString("en")} tone={d.failedDials ? "text-bad" : undefined} />
             </div>
+            {!d.remote && (
+              <div className="mt-4 border border-warn bg-warn/10 px-4 py-3 text-xs text-warn">
+                This node has no <span className="font-bold">remote:</span> in its config, so its daemon has nothing to connect to and START would exit at once. A daemon forwards ports to <em>another</em> machine over SSH: on that node, run <span className="font-bold">mole init</span> (or add <span className="font-bold">remote: user@host</span> to its config) naming the machine it should reach, e.g. this one.
+              </div>
+            )}
             <div className="mt-4 grid grid-cols-4 gap-x-6 gap-y-3">
               <Fact k="ITS PRIMARY REMOTE" v={d.remote} />
               <Fact k="ADMIN" v={d.adminAddr} />
