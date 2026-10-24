@@ -525,6 +525,34 @@ func TestSendSkipsBlankLinesBeforeTheReply(t *testing.T) {
 	}
 }
 
+// A peer that is not mole may have exited, leaving only a banner, before we
+// write the offer: the write fails, and the banner must still win over the
+// broken pipe. The outcome used to depend on which of two channels a select
+// picked, hence the repetitions.
+func TestSendExplainsAPeerThatLeftBeforeTheOffer(t *testing.T) {
+	for i := 0; i < 40; i++ {
+		conn := &gonePeer{r: strings.NewReader("\n  mole  v0.1.1\n  usage...\n")}
+		_, err := Send(context.Background(), conn, []File{memFile("a", []byte("a"), 0o644, 0)}, SendOptions{})
+		var bad *BadReplyError
+		if !errors.As(err, &bad) || !strings.Contains(bad.Line, "mole  v0.1.1") {
+			t.Fatalf("iteration %d: got %v", i, err)
+		}
+	}
+}
+
+// gonePeer reads a fixed banner and refuses every write, as a process that has
+// already exited does. The write fails a moment late, so that the reader has
+// already finished by the time the failure is explained: the order in which
+// the race went wrong.
+type gonePeer struct{ r io.Reader }
+
+func (g *gonePeer) Read(p []byte) (int, error) { return g.r.Read(p) }
+func (g *gonePeer) Write(p []byte) (int, error) {
+	time.Sleep(15 * time.Millisecond)
+	return 0, io.EOF
+}
+func (g *gonePeer) Close() error { return nil }
+
 func TestSendHearsRefusalWhileUploading(t *testing.T) {
 	cl, sv := tcpPair(t)
 	go func() {

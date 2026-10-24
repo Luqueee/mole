@@ -110,17 +110,34 @@ func Send(ctx context.Context, conn io.ReadWriteCloser, files []File, opt SendOp
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// The peer was not mole and left before we finished writing (a mole
+		// too old to know `recv` prints its usage and exits): what it printed
+		// is the explanation, not the broken pipe.
+		notMole := func(rerr error) error {
+			var bad *BadReplyError
+			if errors.As(rerr, &bad) {
+				return bad
+			}
+			return nil
+		}
 		select {
 		case rp, ok := <-replies:
 			if ok && !rp.OK {
 				return &RemoteError{Msg: rp.Error}
 			}
+			if !ok {
+				// The reader ends by sending its error and then closing
+				// replies, so a closed channel may mean its error is waiting.
+				select {
+				case rerr := <-readErr:
+					if bad := notMole(rerr); bad != nil {
+						return bad
+					}
+				default:
+				}
+			}
 		case rerr := <-readErr:
-			// The peer was not mole and left before we finished writing (a
-			// mole too old to know `recv` prints its usage and exits): what
-			// it printed is the explanation, not the broken pipe.
-			var bad *BadReplyError
-			if errors.As(rerr, &bad) {
+			if bad := notMole(rerr); bad != nil {
 				return bad
 			}
 		case <-time.After(500 * time.Millisecond):
