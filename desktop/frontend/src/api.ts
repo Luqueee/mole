@@ -1,4 +1,4 @@
-import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult, type NodeList as RawNodeList, type NodeInfo as RawNodeInfo, type NodeDaemon as RawNodeDaemon, type NodeSpec, type NodeEntry, type NodeJobView, type NodeRunResult, type SSHHost, type AppUpdate, type UpdateProgress } from "../bindings/github.com/Luqueee/mole/desktop";
+import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult, type NodeList as RawNodeList, type NodeInfo as RawNodeInfo, type NodeDaemon as RawNodeDaemon, type NodeSpec, type NodeEntry, type NodeJobView, type NodeRunResult, type SSHHost, type AppUpdate, type UpdateProgress, type DomainInfo as RawDomainInfo } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import type { Active, Pending, Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
 
@@ -14,6 +14,10 @@ const normalizeNodeInfo = (i: RawNodeInfo): NodeInfo => ({
   ...i,
   daemon: i.daemon ? { ...i.daemon, ports: i.daemon.ports ?? [], push: i.daemon.push ?? [], discoverPorts: i.daemon.discoverPorts ?? [], excludePorts: i.daemon.excludePorts ?? [] } : null,
 });
+
+// DomainInfo with the nulls Go emits for empty slices turned into lists.
+type RawRoute = NonNullable<RawDomainInfo["routes"]>[number];
+export type DomainInfo = Omit<RawDomainInfo, "domains" | "routes"> & { domains: string[]; routes: (Omit<RawRoute, "hosts"> & { hosts: string[] })[] };
 
 // Browser-only design mode (?mock): the Wails runtime is absent, so the UI
 // is fed synthetic data. The desktop app never takes this path.
@@ -153,6 +157,24 @@ const mockProgress = (): UpdateProgress => {
   return f < 1 ? { phase: "downloading", bytes: Math.round(f * 62_000_000), total: 62_000_000, path: "", error: "" } : { phase: "opened", bytes: 62_000_000, total: 62_000_000, path: "/Users/me/Library/Caches/mole/updates/mole.dmg", error: "" };
 };
 
+// ───────── domains (mock) ─────────
+
+let mockDomain = "mole.lan";
+let mockDns = false;
+let mockRoutes = [{ name: "web", target: "127.0.0.1:3000" }, { name: "api", target: "10.0.0.5:8080" }, { name: "db", target: "@buildbox/127.0.0.1:5432" }, { name: "admin", target: "https://admin.corp:443" }];
+const mockDomainInfo = (): DomainInfo => ({
+  remote: "devlabs",
+  domains: mockDomain ? [mockDomain] : [],
+  routes: mockRoutes.map((r) => {
+    const host = `${r.name}.${mockDomain}`;
+    return { name: r.name, hosts: mockDomain ? [host] : [], target: r.target, url: mockDns ? `http://${host}` : `http://${host}:7080` };
+  }),
+  routePort: 7080,
+  running: true,
+  warning: /\.(local|dev|app)$/.test(mockDomain) ? `.${mockDomain.split(".").pop()} is a poor choice: use .lan or .test` : "",
+  dns: { supported: true, installed: mockDns && !!mockDomain, detail: mockDns ? "" : `missing: /etc/resolver/${mockDomain}, pf redirect` },
+});
+
 export const api = {
   appVersion: async (): Promise<string> => (MOCK ? "0.4.0" : MoleService.GetAppVersion()),
   appCheck: async (force: boolean): Promise<AppUpdate> => (MOCK ? mockUpdate() : MoleService.CheckAppUpdate(force)),
@@ -223,6 +245,17 @@ export const api = {
     MOCK ? void (mockPush = [...mockPush, { local, remote: remote || local, bind: "127.0.0.1", state: "active", error: "" }]) : MoleService.AddPush(local, remote),
   pushRemove: async (local: number) =>
     MOCK ? void (mockPush = mockPush.filter((x) => x.local !== local)) : MoleService.RemovePush(local),
+  domains: async (): Promise<DomainInfo> => {
+    if (MOCK) return mockDomainInfo();
+    const d = await MoleService.GetDomains();
+    return { ...d, domains: d.domains ?? [], routes: (d.routes ?? []).map((r) => ({ ...r, hosts: r.hosts ?? [] })) };
+  },
+  domainSet: async (name: string) => (MOCK ? (await mockSleep(500), void ((mockDomain = name), (mockDns = false))) : MoleService.SetDomain(name)),
+  routeAdd: async (name: string, target: string) => (MOCK ? void (mockRoutes = [...mockRoutes.filter((r) => r.name !== name), { name, target }]) : MoleService.AddRoute(name, target)),
+  routeRemove: async (name: string) => (MOCK ? void (mockRoutes = mockRoutes.filter((r) => r.name !== name)) : MoleService.RemoveRoute(name)),
+  routeOpen: async (name: string) => (MOCK ? void window.open(mockDomainInfo().routes.find((r) => r.name === name)?.url) : MoleService.OpenRoute(name)),
+  dnsInstall: async () => (MOCK ? (await mockSleep(1500), void (mockDns = true)) : MoleService.InstallDNS()),
+  dnsUninstall: async () => (MOCK ? (await mockSleep(1000), void (mockDns = false)) : MoleService.UninstallDNS()),
   start: async () => (MOCK ? undefined : MoleService.Start()),
   stop: async () => (MOCK ? undefined : MoleService.Stop()),
   restart: async () => (MOCK ? undefined : MoleService.Restart()),

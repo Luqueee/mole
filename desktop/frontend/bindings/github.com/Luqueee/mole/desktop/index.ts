@@ -9,6 +9,8 @@ export {
 export type {
     AppUpdate,
     CLIStatus,
+    DNSState,
+    DomainInfo,
     Event,
     Events,
     NodeDaemon,
@@ -18,6 +20,7 @@ export type {
     NodeList,
     NodeRunResult,
     NodeSpec,
+    RouteView,
     SSHHost,
     SelfInfo,
     SendResult,

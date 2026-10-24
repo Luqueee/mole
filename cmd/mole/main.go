@@ -35,6 +35,7 @@ import (
 	"github.com/Luqueee/mole/internal/discover"
 	"github.com/Luqueee/mole/internal/meshdns"
 	"github.com/Luqueee/mole/internal/proxy"
+	"github.com/Luqueee/mole/internal/routes"
 	"github.com/Luqueee/mole/internal/tunnel"
 )
 
@@ -91,6 +92,10 @@ func main() {
 		os.Exit(runNode(args))
 	case "dns":
 		os.Exit(runDNS(args))
+	case "route":
+		os.Exit(runRoute(args))
+	case "domain":
+		os.Exit(runDomain(args))
 	case "doctor":
 		os.Exit(runDoctor(args))
 	case "config":
@@ -129,6 +134,8 @@ func printUsage() {
 		{"push", "Expose a local port on the remote (push list|LOCAL[:REMOTE])"},
 		{"doctor", "Diagnose config, SSH, push and split DNS (doctor [name...])"},
 		{"dns", "Route configured domains to the remote (dns install|uninstall; Linux)"},
+		{"domain", "Set the domain named routes live under (domain set NAME|show)"},
+		{"route", "Name a remote service: a.DOMAIN -> port (route add|rm|ls)"},
 		{"unpush", "Remove a push forward"},
 		{"send", "Send files to the other machine's inbox (picker when no files; alias: ftp)"},
 		{"inbox", "Where received files land; accept incoming transfers (inbox -h)"},
@@ -306,24 +313,54 @@ Either -remote or a config file with 'remote:' is required.`)
 
 	// Split-DNS: names under cfg.Domains resolve to virtual IPs and are
 	// forwarded by name, so the remote does the real DNS resolution.
+	var routeCtl *routeManager
 	if len(cfg.Domains) > 0 {
 		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, stats.Hooks(proxy.DirPull), log)
 		defer mesh.Close()
-		pc, err := net.ListenPacket("udp", meshdns.StubAddr)
+		stubAddr := meshdns.StubListenAddr()
+		pc, err := net.ListenPacket("udp", stubAddr)
 		if err != nil {
-			log.Error("dns stub bind failed", "addr", meshdns.StubAddr, "err", err)
+			log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
 			return 1
 		}
 		defer pc.Close()
-		tl, err := net.Listen("tcp", meshdns.StubAddr)
+		tl, err := net.Listen("tcp", stubAddr)
 		if err != nil {
-			log.Error("dns stub bind failed", "addr", meshdns.StubAddr, "err", err)
+			log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
 			return 1
 		}
 		defer tl.Close()
+
+		// Named routes: the stub answers 127.0.0.1 for them and a Host-routing
+		// proxy forwards each request to its service on the remote.
+		table := routes.NewTable(cfg.Domains, cfg.Routes)
+		mesh.SetRoutes(table)
+		// Routes to other nodes go through a tunnel of their own, opened the
+		// first time one is used; the primary remote reuses mgr.
+		var pool *routes.Pool
+		pool = routes.NewPool(mgr, func(name string) (routes.NodeConn, error) {
+			return openNodeTunnel(pool.Context(), resolvedPath, name, log)
+		}, log)
+		defer pool.Close()
+		routeCtl = &routeManager{table: table, hasNode: func(name string) bool { return nodeConfigured(resolvedPath, name) }}
+		routePort := cfg.RoutePortOrDefault()
+		if rl, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(routePort))); err != nil {
+			log.Warn("route proxy bind failed; named routes will not answer", "port", routePort, "err", err)
+		} else {
+			defer rl.Close()
+			go func() {
+				if err := routes.New(table, pool, stats.Hooks(proxy.DirPull), log).Serve(rl); err != nil {
+					log.Warn("route proxy terminated", "err", err)
+				}
+			}()
+			log.Info("route proxy listening", "addr", rl.Addr().String(), "routes", len(cfg.Routes))
+		}
+
 		go mesh.ServeUDP(pc)
 		go mesh.ServeTCP(tl)
-		log.Info("dns stub listening", "addr", meshdns.StubAddr, "domains", cfg.Domains, "ports", cfg.DomainPortsOrDefault())
+		log.Info("dns stub listening", "addr", stubAddr, "domains", cfg.Domains, "ports", cfg.DomainPortsOrDefault())
+	} else if len(cfg.Routes) > 0 {
+		log.Warn("routes: ignored, no domains: configured (`mole domain set NAME`)")
 	}
 
 	// Forward any explicitly-configured ports up front. These are pinned:
@@ -372,6 +409,9 @@ Either -remote or a config file with 'remote:' is required.`)
 			WithPortController(fwd).
 			WithPushController(pushFwd).
 			WithTransferController(hub)
+		if routeCtl != nil {
+			srv = srv.WithRouteController(routeCtl)
+		}
 		adminSrv = &http.Server{
 			Addr:              cfg.AdminAddr,
 			Handler:           srv.Handler(),

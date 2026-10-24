@@ -49,6 +49,15 @@ type Config struct {
 	// Default: 80 and 443.
 	DomainPorts []int `yaml:"domain_ports"`
 
+	// Routes name services on the remote: "a: 3000" makes a.<domain> reach
+	// 127.0.0.1:3000 on the remote, "api: 10.0.0.5:8080" another host it can
+	// see. Plain HTTP, routed by the Host header on RoutePort.
+	Routes map[string]string `yaml:"routes"`
+
+	// RoutePort is the local port of the Host-routing proxy for Routes.
+	// Default: DefaultRoutePort.
+	RoutePort int `yaml:"route_port"`
+
 	// AutoDiscover, if true, probes the remote for common dev ports
 	// (from DiscoverPorts) and forwards the ones that respond.
 	AutoDiscover bool `yaml:"auto_discover"`
@@ -450,6 +459,19 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("parse config %q: domain_ports: %d out of range (1-%d)", path, p, 65535-meshdns.PortShift)
 		}
 	}
+	if cfg.RoutePort != 0 && (cfg.RoutePort < 1024 || cfg.RoutePort > 65535) {
+		return nil, fmt.Errorf("parse config %q: route_port: %d out of range (1024-65535)", path, cfg.RoutePort)
+	}
+	for name, target := range cfg.Routes {
+		if err := ValidateRouteName(name); err != nil {
+			return nil, fmt.Errorf("parse config %q: %w", path, err)
+		}
+		norm, err := NormalizeRouteTarget(target)
+		if err != nil {
+			return nil, fmt.Errorf("parse config %q: routes.%s: %w", path, name, err)
+		}
+		cfg.Routes[name] = norm
+	}
 	if err := cfg.Transfer.Validate(); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
@@ -598,7 +620,7 @@ func stripYAMLComments(data []byte) []byte {
 }
 
 var configFields = map[string]bool{
-	"remote": true, "ports": true, "push": true, "domains": true, "domain_ports": true, "auto_discover": true,
+	"remote": true, "ports": true, "push": true, "domains": true, "domain_ports": true, "routes": true, "route_port": true, "auto_discover": true,
 	"discover_ports": true, "exclude_ports": true, "admin_addr": true,
 	"log_level": true, "ssh_port": true, "insecure": true,
 	"clip_url": true, "clip_listen": true, "clip_interval_ms": true,
@@ -652,6 +674,8 @@ func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
 		{"push", nonNilPush(cfg.Push), len(cfg.Push) > 0},
 		{"domains", nonNilStrings(cfg.Domains), len(cfg.Domains) > 0},
 		{"domain_ports", nonNilPorts(cfg.DomainPorts), len(cfg.DomainPorts) > 0},
+		{"routes", nonNilRoutes(cfg.Routes), len(cfg.Routes) > 0},
+		{"route_port", cfg.RoutePort, cfg.RoutePort != 0},
 		{"auto_discover", cfg.AutoDiscover, cfg.AutoDiscover},
 		{"discover_ports", nonNilPorts(cfg.DiscoverPorts), len(cfg.DiscoverPorts) > 0},
 		{"exclude_ports", nonNilPorts(cfg.ExcludePorts), len(cfg.ExcludePorts) > 0},
@@ -687,12 +711,145 @@ func nonNilStrings(s []string) []string {
 	return s
 }
 
+func nonNilRoutes(r map[string]string) map[string]string {
+	if r == nil {
+		return map[string]string{}
+	}
+	return r
+}
+
+// DefaultRoutePort is where the Host-routing proxy listens unless route_port
+// says otherwise. Unprivileged on purpose: `mole dns install` can redirect
+// port 80 to it.
+const DefaultRoutePort = 7080
+
+// RoutePortOrDefault returns RoutePort, or DefaultRoutePort when unset.
+func (c *Config) RoutePortOrDefault() int {
+	if c.RoutePort == 0 {
+		return DefaultRoutePort
+	}
+	return c.RoutePort
+}
+
+// ValidateRouteName accepts one DNS label: it is prefixed to a domain.
+func ValidateRouteName(n string) error {
+	if n == "" || len(n) > 63 || strings.HasPrefix(n, "-") || strings.HasSuffix(n, "-") {
+		return fmt.Errorf("routes: invalid name %q", n)
+	}
+	for _, r := range n {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return fmt.Errorf("routes: invalid name %q (lowercase letters, digits and '-' only)", n)
+		}
+	}
+	return nil
+}
+
+// NormalizeRouteTarget returns the canonical form of a route target, which is
+// [@NODE/][https://]HOST:PORT. Accepted inputs:
+//
+//	3000                       -> 127.0.0.1:3000             the remote's loopback
+//	10.0.0.5:8080              -> 10.0.0.5:8080              a host the remote sees
+//	admin.corp                 -> admin.corp:80              a name the remote resolves
+//	https://admin.corp         -> https://admin.corp:443     same, over TLS
+//	http://admin.corp:8080     -> admin.corp:8080
+//	@dockers:3000              -> @dockers/127.0.0.1:3000    a node's loopback
+//	@dockers/https://db.corp   -> @dockers/https://db.corp:443
+//
+// A bare number is a port, not a host. The scheme only decides the default
+// port and whether the proxy speaks TLS; plain http is left out of the
+// canonical form. "@NODE:PORT" is a shorthand: NODE:PORT alone would be
+// ambiguous with HOST:PORT. Whether the node exists is the caller's check
+// (RouteNode).
+func NormalizeRouteTarget(t string) (string, error) {
+	t = strings.TrimSpace(t)
+	bad := fmt.Errorf("invalid target %q (expected PORT, HOST[:PORT], https://HOST[:PORT], or either behind @NODE/)", t)
+	node := ""
+	if rest, ok := strings.CutPrefix(t, "@"); ok {
+		i := strings.IndexAny(rest, ":/")
+		if i < 0 {
+			return "", bad
+		}
+		node, t = rest[:i], rest[i+1:]
+		if err := ValidNodeName(node); err != nil {
+			return "", fmt.Errorf("invalid target: %w", err)
+		}
+	}
+	scheme, defPort := "http", "80"
+	if rest, ok := strings.CutPrefix(t, "https://"); ok {
+		scheme, defPort, t = "https", "443", rest
+	} else if rest, ok := strings.CutPrefix(t, "http://"); ok {
+		t = rest
+	}
+	host, port, hasPort := strings.Cut(t, ":")
+	switch {
+	case !hasPort && isAllDigits(t) && scheme == "http" && !strings.Contains(t, "."):
+		host, port = "127.0.0.1", t // a bare number: a port on the machine itself
+	case !hasPort:
+		port = defPort // a name: the scheme's default port
+	}
+	if host == "" || strings.ContainsAny(host, " /@") {
+		return "", bad
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil || p < 1 || p > 65535 {
+		return "", bad
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(p))
+	if scheme == "https" {
+		addr = "https://" + addr
+	}
+	if node != "" {
+		return "@" + node + "/" + addr, nil
+	}
+	return addr, nil
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// RouteNode returns the node a canonical route target goes through, or "" for
+// the primary remote.
+func RouteNode(target string) string {
+	rest, ok := strings.CutPrefix(target, "@")
+	if !ok {
+		return ""
+	}
+	node, _, _ := strings.Cut(rest, "/")
+	return node
+}
+
 // DomainPortsOrDefault returns DomainPorts, or 80 and 443 when unset.
 func (c *Config) DomainPortsOrDefault() []int {
 	if len(c.DomainPorts) == 0 {
 		return []int{80, 443}
 	}
 	return c.DomainPorts
+}
+
+// DomainAdvice returns a warning when d is valid but a poor choice, or "".
+// Mole serves every name under the domain itself, so a domain that is not
+// reserved for private use hides the real one, and a few TLDs break in
+// browsers whatever mole does.
+func DomainAdvice(d string) string {
+	tld := d[strings.LastIndex(d, ".")+1:]
+	switch tld {
+	case "local":
+		return ".local is taken by mDNS (Bonjour/Avahi): lookups are slow or ignored; use .lan or .test"
+	case "dev", "app", "page", "new":
+		return "." + tld + " is on the browser HSTS preload list: browsers force HTTPS, so plain HTTP routes will not load; use .lan or .test"
+	case "lan", "test", "localhost", "internal", "home", "arpa", "example", "invalid", "corp", "intranet", "private":
+		return ""
+	}
+	return d + " looks like a public domain: while this is set, names under it stop reaching the real site from this machine"
 }
 
 // ValidateDomain accepts plain DNS suffixes (letters, digits, '-', '.');

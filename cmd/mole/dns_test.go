@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/xml"
+	"html"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,10 +31,11 @@ func TestDNSUnitRoutesOnlyDomainsOnDedicatedLink(t *testing.T) {
 }
 
 func TestDNSNftRulesRedirectOnlyVirtualIPsToShiftedPorts(t *testing.T) {
-	r := dnsNftRules([]int{80, 443})
+	r := dnsNftRules([]int{80, 443}, 7080)
 	for _, want := range []string{
 		"ip daddr 127.77.0.0/16 tcp dport 80 dnat to :20080",
 		"ip daddr 127.77.0.0/16 tcp dport 443 dnat to :20443",
+		"ip daddr 127.77.0.1 tcp dport 80 dnat to 127.0.0.1:7080",
 		"type nat hook output",
 	} {
 		if !strings.Contains(r, want) {
@@ -68,7 +72,7 @@ func runStartScript(t *testing.T, failOn, nftFile, extra string) (rc int, out st
 	}
 	if nftFile == "" {
 		nftFile = filepath.Join(dir, "mole.nft")
-		if err := os.WriteFile(nftFile, []byte(dnsNftRules([]int{80})), 0o644); err != nil {
+		if err := os.WriteFile(nftFile, []byte(dnsNftRules([]int{80}, 7080)), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,5 +128,64 @@ E
 	rc, out := runStartScript(t, "", "", py)
 	if rc != 0 || !strings.Contains(out, "GOT MOLE") {
 		t.Fatalf("rc=%d out=%q, want GOT MOLE", rc, out)
+	}
+}
+
+func TestMacResolverFilePointsAtLoopbackStub(t *testing.T) {
+	got := macResolverFile()
+	if !strings.HasPrefix(got, macResolverMarker+"\n") || !strings.Contains(got, "nameserver 127.0.0.1\nport 5300\n") {
+		t.Errorf("resolver file:\n%s", got)
+	}
+}
+
+func TestMacPfRedirectsOnlyTheRouteIP(t *testing.T) {
+	got := macPfRules(7080)
+	want := "rdr pass on lo0 inet proto tcp from any to 127.77.0.1 port 80 -> 127.0.0.1 port 7080\n"
+	if got != want {
+		t.Errorf("rules = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "to any") || strings.Contains(got, "to 127.0.0.1 ") {
+		t.Error("the redirect must not capture localhost:80")
+	}
+}
+
+func TestMacStartScriptAndPlist(t *testing.T) {
+	s := macStartScript()
+	for _, want := range []string{
+		"ifconfig lo0 alias 127.77.0.1 netmask 255.255.255.255",
+		"pfctl -a com.apple/mole -f /etc/pf.anchors/mole",
+		"pfctl -E",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("script missing %q: %s", want, s)
+		}
+	}
+	p := macPlist()
+	for _, want := range []string{"<string>dev.mole.dns</string>", "<key>RunAtLoad</key>", html.EscapeString(s)} {
+		if !strings.Contains(p, want) {
+			t.Errorf("plist missing %q", want)
+		}
+	}
+	// '&&' in the script must be escaped: launchd rejects a malformed plist.
+	dec := xml.NewDecoder(strings.NewReader(p))
+	for {
+		if _, err := dec.Token(); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("plist is not well-formed XML: %v", err)
+		}
+	}
+}
+
+func TestMacPlistPassesPlutil(t *testing.T) {
+	if _, err := exec.LookPath("plutil"); err != nil {
+		t.Skip("no plutil")
+	}
+	path := filepath.Join(t.TempDir(), "dev.mole.dns.plist")
+	if err := os.WriteFile(path, []byte(macPlist()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint: %v\n%s", err, out)
 	}
 }

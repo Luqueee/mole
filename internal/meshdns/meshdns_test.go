@@ -87,3 +87,33 @@ func TestResolveIsAllOrNothingOnPortConflict(t *testing.T) {
 		t.Fatalf("after conflict cleared: rcode=%d answers=%d", rc, an)
 	}
 }
+
+type fakeRoutes map[string]bool
+
+func (f fakeRoutes) Lookup(name string) (string, bool) { return "", f[name] }
+
+// A route name is served by the Host proxy behind RouteIP: it must not allocate
+// a virtual IP or bind anything, so it works where 127.77.0.0/16 does not.
+func TestRouteNamesAnswerRouteIP(t *testing.T) {
+	m := New([]string{"mole.lan"}, []int{freePort(t)}, nil, proxy.Hooks{}, slog.New(slog.DiscardHandler))
+	m.SetRoutes(fakeRoutes{"a.mole.lan": true})
+
+	q := []byte{0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
+	for _, l := range []string{"a", "mole", "lan"} {
+		q = append(q, byte(len(l)))
+		q = append(q, l...)
+	}
+	q = binary.BigEndian.AppendUint16(append(q, 0), 1)
+	q = binary.BigEndian.AppendUint16(q, 1)
+
+	r := m.Answer(q)
+	if r[3]&0x0f != 0 || binary.BigEndian.Uint16(r[6:8]) != 1 {
+		t.Fatalf("rcode=%d answers=%d, want an answer", r[3]&0x0f, binary.BigEndian.Uint16(r[6:8]))
+	}
+	if ip := net.IP(r[len(r)-4:]); !ip.Equal(net.ParseIP(RouteIP)) {
+		t.Errorf("answered %v, want %s", ip, RouteIP)
+	}
+	if got := m.List(); len(got) != 0 {
+		t.Errorf("route name allocated a virtual IP: %+v", got)
+	}
+}

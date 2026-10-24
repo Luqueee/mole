@@ -79,6 +79,40 @@ export interface CLIStatus {
 }
 
 /**
+ * DNSState says whether the OS resolves the domain through mole.
+ */
+export interface DNSState {
+    "supported": boolean;
+    "installed": boolean;
+    "detail": string;
+}
+
+/**
+ * DomainInfo is what the Domains tab renders.
+ */
+export interface DomainInfo {
+    /**
+     * the primary remote: where routes go unless a node is named
+     */
+    "remote": string;
+    "domains": string[] | null;
+    "routes": RouteView[] | null;
+    "routePort": number;
+
+    /**
+     * the daemon answers: edits apply live
+     */
+    "running": boolean;
+
+    /**
+     * why the domain is a poor choice, or ""
+     */
+    "warning": string;
+    "dns": DNSState;
+    "error"?: string;
+}
+
+/**
  * Event is one finished forwarded connection (mirror of admin.Event).
  */
 export interface Event {
@@ -235,6 +269,20 @@ export interface NodeSpec {
      * Replace overwrites a node already registered under that name.
      */
     "replace": boolean;
+}
+
+/**
+ * RouteView is one route as the tab shows it.
+ */
+export interface RouteView {
+    "name": string;
+    "hosts": string[] | null;
+    "target": string;
+
+    /**
+     * where a browser reaches it right now
+     */
+    "url": string;
 }
 
 /**

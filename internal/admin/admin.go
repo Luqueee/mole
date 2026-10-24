@@ -21,6 +21,10 @@ import (
 // controller errors are operational failures and map to HTTP 500.
 var ErrConflict = errors.New("admin: port conflict")
 
+// ErrInvalid marks a controller error caused by a malformed request, such as
+// a bad route name; the handlers map it to HTTP 400.
+var ErrInvalid = errors.New("admin: invalid request")
+
 // Stats tracks runtime counters for the admin endpoint. Safe for
 // concurrent use.
 type Stats struct {
@@ -134,7 +138,31 @@ type Server struct {
 	portsCtl PortController // optional: live-mutate the discover-port set
 	pushCtl  PushController // optional: push (remote) forwards
 
+	routeCtl RouteController // optional: named routes
+
 	transferCtl TransferController // optional: file transfer
+}
+
+// RouteInfo describes one named route (a.mole.lan → a service on the remote).
+type RouteInfo struct {
+	Name   string   `json:"name"`
+	Hosts  []string `json:"hosts"`
+	Target string   `json:"target"`
+}
+
+// RouteController manages named routes. SetRoute returns an error wrapping
+// ErrInvalid for a bad name or target; removing an unknown route is not an
+// error.
+type RouteController interface {
+	SetRoute(name, target string) error
+	DeleteRoute(name string) error
+	ListRoutes() []RouteInfo
+}
+
+// WithRouteController enables /routes and lists routes in /status.
+func (s *Server) WithRouteController(ctl RouteController) *Server {
+	s.routeCtl = ctl
+	return s
 }
 
 // PortController is the live-mutation counterpart of WithPorts. When
@@ -204,6 +232,10 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /ports/push", s.handlePushAdd)
 		mux.HandleFunc("DELETE /ports/push/", s.handlePushDelete)
 	}
+	if s.routeCtl != nil {
+		mux.HandleFunc("POST /routes", s.handleRouteSet)
+		mux.HandleFunc("DELETE /routes/", s.handleRouteDelete)
+	}
 	if s.transferCtl != nil {
 		s.mountTransfer(mux)
 	}
@@ -233,6 +265,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 			merged[k] = v
 		}
 		merged["push"] = s.pushCtl.ListPush()
+		info = merged
+	}
+	if s.routeCtl != nil {
+		merged := make(map[string]any, len(info)+1)
+		for k, v := range info {
+			merged[k] = v
+		}
+		merged["routes"] = s.routeCtl.ListRoutes()
 		info = merged
 	}
 	if s.transferCtl != nil {
@@ -351,6 +391,46 @@ func (s *Server) handlePushAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write([]byte(`{"status":"added"}`))
+}
+
+type routeRequest struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+// handleRouteSet accepts { "name": "a", "target": "3000" }; it adds the route
+// or replaces the one with that name. 201 set, 400 invalid.
+func (s *Server) handleRouteSet(w http.ResponseWriter, r *http.Request) {
+	var req routeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.routeCtl.SetRoute(req.Name, req.Target); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrInvalid) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(`{"status":"set"}`))
+}
+
+// handleRouteDelete accepts DELETE /routes/{name}; idempotent.
+func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/routes/")
+	if name == "" {
+		http.Error(w, "missing route name in path", http.StatusBadRequest)
+		return
+	}
+	if err := s.routeCtl.DeleteRoute(name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"removed"}`))
 }
 
 // handlePushDelete accepts DELETE /ports/push/{local port}; idempotent.
