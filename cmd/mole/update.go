@@ -60,10 +60,10 @@ func runUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "    against this binary's own location.")
 		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("FLAGS", c))
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -version <ref>", c), "version to install (Windows: release tag; Unix: git ref)")
-		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -branch <name>", c), "build that branch (or tag) from source and install it (needs Go and git)")
+		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -branch <name>", c), "build that branch (or tag) from source and install it (needs git; Go is fetched when missing)")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -dry-run", c), "print the installer command instead of running it")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -no-verify", c), "skip the installer's post-install version check")
-		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'go' and 'curl'/'wget' on Unix, or PowerShell on Windows,", c))
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'git' and 'curl'/'wget' on Unix (Go is downloaded if missing), or PowerShell on Windows,", c))
 		fmt.Fprintf(os.Stderr, "  %s\n", cDim("plus network access to github.com.", c))
 		fmt.Fprintln(os.Stderr)
 	}
@@ -94,9 +94,10 @@ func runUpdate(args []string) int {
 		exe = resolved
 	}
 
-	// The Unix installer builds from source. The Windows installer uses a
-	// release archive and does not require Go unless MOLE_SRC is set.
-	if runtime.GOOS != "windows" || os.Getenv("MOLE_SRC") != "" || *branch != "" {
+	// The Unix installer builds from source and fetches Go itself when it is
+	// missing. The Windows installer uses a release archive and needs Go only
+	// for MOLE_SRC or a branch.
+	if runtime.GOOS == "windows" && (os.Getenv("MOLE_SRC") != "" || *branch != "") {
 		if _, err := exec.LookPath("go"); err != nil {
 			fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "'go' is not installed or not on PATH.")
 			fmt.Fprintln(os.Stderr, "        Install Go 1.26.4+ from https://go.dev/dl/ and re-run.")

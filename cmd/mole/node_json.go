@@ -23,7 +23,8 @@ type nodeInfo struct {
 	Implicit bool `json:"implicit,omitempty"`
 
 	// State is "ready" (its agent answered), "no-agent" (mole answers but is
-	// too old for the agent) or "unreachable".
+	// too old for the agent), "not-installed" (the node answers, mole is not
+	// there) or "unreachable".
 	State string `json:"state"`
 	Error string `json:"error,omitempty"`
 
@@ -71,6 +72,9 @@ func buildNodeInfo(name string, n config.NodeConfig, p probe, implicit bool) nod
 		ConnectMs: ms(p.Connect), RoundTripMs: ms(p.RoundTrip),
 	}
 	switch {
+	case p.NotInstalled:
+		info.State, info.Error = "not-installed", firstLine(p.Err.Error())
+		info.ConnectMs, info.RoundTripMs = ms(p.Connect), 0
 	case p.Err != nil:
 		info.State, info.Error = "unreachable", firstLine(p.Err.Error())
 		info.ConnectMs, info.RoundTripMs = 0, 0

@@ -137,7 +137,7 @@ export interface NodeInfo {
     "implicit": boolean;
 
     /**
-     * ready | no-agent | unreachable
+     * ready | no-agent | not-installed | unreachable
      */
     "state": string;
     "error": string;

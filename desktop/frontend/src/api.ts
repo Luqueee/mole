@@ -106,6 +106,7 @@ let mockNodeEntries: NodeEntry[] = [
   { name: "buildbox", target: "ci@10.0.4.21", sshPort: 2222, bin: "~/apps/mole", insecure: false, implicit: false },
   { name: "pi-garage", target: "pi@raspberrypi.local", sshPort: 0, bin: "", insecure: false, implicit: false },
   { name: "old-vps", target: "root@203.0.113.9", sshPort: 0, bin: "", insecure: true, implicit: false },
+  { name: "fresh-box", target: "dev@10.0.4.77", sshPort: 0, bin: "", insecure: false, implicit: false },
 ];
 const mockDaemon = (over: Partial<NodeDaemon>): NodeDaemon => ({
   running: true, uptime: "52h11m", activeConns: 3, totalConns: 9_418, failedDials: 12, ports: [3000, 5173, 8080], push: [{ local: 4000, remote: 4000, bind: "127.0.0.1", state: "active", error: "" }],
@@ -120,9 +121,11 @@ const mockProbe = (name: string): NodeInfo => {
     case "devlabs": return { ...base, state: "ready", version: "0.4.0", build: "main@97b20cb", os: "linux", arch: "amd64", hostname: "devlabs", agent: 1, connectMs: jitter(38), roundTripMs: jitter(4), daemon: mockDaemon({}) };
     case "buildbox": return { ...base, state: "ready", version: "0.4.0", build: "feat/nodes-ui@a1b2c3d", os: "linux", arch: "arm64", hostname: "buildbox-01", agent: 1, connectMs: jitter(120), roundTripMs: jitter(9), daemon: mockDaemon({ running: false, uptime: "", ports: [], push: [], activeConns: 0, totalConns: 0, failedDials: 0, receive: false, discoverPorts: [3000, 9000] }) };
     case "pi-garage": return { ...base, state: "no-agent", version: "0.3.0", connectMs: jitter(210) };
+    case "fresh-box": return { ...base, state: mockInstalled ? "ready" : "not-installed", error: mockInstalled ? "" : "mole is not installed there (or not in ~/.local/bin or /usr/local/bin): `mole node install NAME` installs it, or register the node with -bin PATH", version: mockInstalled ? "0.5.0" : "", os: mockInstalled ? "linux" : "", arch: mockInstalled ? "amd64" : "", hostname: "fresh-box", agent: mockInstalled ? 1 : 0, connectMs: jitter(70), roundTripMs: mockInstalled ? jitter(5) : 0, daemon: mockInstalled ? mockDaemon({ running: false, uptime: "", ports: [], push: [], activeConns: 0, totalConns: 0, failedDials: 0, receive: false, discoverPorts: [] }) : null };
     default: return { ...base, state: "unreachable", error: "dial tcp 203.0.113.9:22: i/o timeout" };
   }
 };
+let mockInstalled = false;
 const mockSleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let mockJobs: Record<number, { text: string; done: boolean; code: number }> = {};
 let mockJobId = 0;
@@ -152,6 +155,7 @@ export const api = {
   nodeAdd: async (spec: NodeSpec) => {
     if (!MOCK) return MoleService.AddNode(spec);
     await mockSleep(900);
+    if (spec.check && spec.name === "fresh") throw new Error(`cannot reach ${spec.target}: mole is not installed there (or not in ~/.local/bin or /usr/local/bin): \`mole node install NAME\` installs it, or register the node with -bin PATH`);
     if (spec.name === "fail") throw new Error(`cannot reach ${spec.target}: dial tcp: i/o timeout\n(use -no-check to register it anyway)`);
     mockNodeEntries = [...mockNodeEntries.filter((n) => n.name !== spec.name), { name: spec.name, target: spec.target, sshPort: spec.sshPort, bin: spec.bin, insecure: spec.insecure, implicit: false }];
   },
@@ -164,6 +168,11 @@ export const api = {
   nodeStart: async (name: string) => (MOCK ? mockSleep(800) : MoleService.NodeStart(name)),
   nodeStop: async (name: string) => (MOCK ? mockSleep(800) : MoleService.NodeStop(name)),
   nodeRestart: async (name: string) => (MOCK ? mockSleep(800) : MoleService.NodeRestart(name)),
+  jobInstall: async (name: string, branch: string): Promise<number> => {
+    if (!MOCK) return MoleService.StartNodeInstall(name, branch);
+    setTimeout(() => { mockInstalled = true; }, 4600);
+    return mockJob([[300, `installing mole on ${name} (${branch ? "branch " + branch : "latest main"})`], [500, "== Go is not installed"], [700, "== downloading Go 1.26.4 (linux/amd64)"], [1500, "== building mole from main (97b20cb)"], [1200, "installed ~/.local/bin/mole"], [200, `mole installed on ${name}: try \`mole node ping ${name}\``]]);
+  },
   jobStart: async (name: string, args: string[]): Promise<number> => {
     if (!MOCK) return MoleService.StartNodeJob(name, args);
     if (args[0] === "update") return mockJob([[300, `→ updating mole on ${name}`], [700, "cloning https://github.com/Luqueee/mole (main)"], [900, "go build ./cmd/mole"], [1400, "installed ~/.local/bin/mole"], [200, "mole v0.4.0 (main@97b20cb)"]]);

@@ -82,7 +82,7 @@ type NodeInfo struct {
 	Bin         string      `json:"bin"`
 	Insecure    bool        `json:"insecure"`
 	Implicit    bool        `json:"implicit"`
-	State       string      `json:"state"` // ready | no-agent | unreachable
+	State       string      `json:"state"` // ready | no-agent | not-installed | unreachable
 	Error       string      `json:"error"`
 	Version     string      `json:"version"`
 	Build       string      `json:"build"`
@@ -434,13 +434,34 @@ func (m *MoleService) StartNodeJob(name string, args []string) (uint64, error) {
 	if len(args) == 0 {
 		return 0, errors.New("no command")
 	}
+	return startJob(append([]string{"-n", name}, args...))
+}
+
+// StartNodeInstall installs mole on a node that lacks it (`mole node install`),
+// optionally building a branch. Follow it with GetNodeJob.
+func (m *MoleService) StartNodeInstall(name, branch string) (uint64, error) {
+	if err := checkNodeName(name); err != nil {
+		return 0, err
+	}
+	args := []string{"node", "install"}
+	if b := strings.TrimSpace(branch); b != "" {
+		if strings.HasPrefix(b, "-") {
+			return 0, fmt.Errorf("invalid branch %q", b)
+		}
+		args = append(args, "-branch", b)
+	}
+	return startJob(append(args, name))
+}
+
+// startJob runs the mole CLI in the background.
+func startJob(args []string) (uint64, error) {
 	bin, err := moleBin()
 	if err != nil {
 		return 0, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
 	job := &nodeJob{cancel: cancel}
-	cmd := exec.CommandContext(ctx, bin, append([]string{"-n", name}, args...)...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout, cmd.Stderr = job, job
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 
