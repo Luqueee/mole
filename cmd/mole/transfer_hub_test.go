@@ -43,6 +43,7 @@ type e2e struct {
 	remotePort  int
 	oldRemote   atomic.Bool // the remote's mole predates `recv`
 	logs        *syncBuf
+	notes       syncBuf // what the hub would have shown as notifications
 }
 
 func newE2E(t *testing.T, tc config.TransferConfig) *e2e {
@@ -117,6 +118,7 @@ func newE2E(t *testing.T, tc config.TransferConfig) *e2e {
 	e.remotePort = freeLoopbackPort(t)
 	e.hub = newTransferHub(log, "devlabs", "", tc, mgr, e.pf, e.localState)
 	e.hub.remotePort = e.remotePort
+	e.hub.notify = func(title, text string) { fmt.Fprintf(&e.notes, "%s|%s\n", title, text) }
 	t.Cleanup(e.hub.close)
 	mgr.OnReconnect(e.hub.onReconnect)
 	return e
@@ -316,6 +318,9 @@ func TestReceiveAsksBeforeSaving(t *testing.T) {
 
 	done := send("wanted.txt")
 	p := waitPending()
+	if n := e.notes.String(); !strings.Contains(n, "devlabs wants to send wanted.txt (4 B)") || !strings.Contains(n, "mole inbox accept") {
+		t.Fatalf("the user was not told: %q", n)
+	}
 	if p.Peer != "devlabs" || p.Total != 4 || len(p.Files) != 1 || p.Files[0].Name != "wanted.txt" {
 		t.Fatalf("offer: %+v", p)
 	}
@@ -532,5 +537,26 @@ func TestHumanSize(t *testing.T) {
 		if got := humanSize(in); got != want {
 			t.Errorf("humanSize(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestOfferSummary(t *testing.T) {
+	cases := []struct {
+		names []string
+		total int64
+		want  string
+	}{
+		{[]string{"a.txt"}, 5, "a.txt (5 B)"},
+		{[]string{"a", "b"}, 2048, "a, b (2.0 KiB)"},
+		{[]string{"a", "b", "c", "d"}, 3 << 20, "a, b and 2 more (3.0 MiB)"},
+	}
+	for _, c := range cases {
+		if got := offerSummary(c.names, c.total); got != c.want {
+			t.Errorf("offerSummary(%v) = %q, want %q", c.names, got, c.want)
+		}
+	}
+	long := offerSummary([]string{strings.Repeat("x", 300)}, 1)
+	if len([]rune(long)) > 120 {
+		t.Errorf("summary not truncated: %d runes", len([]rune(long)))
 	}
 }

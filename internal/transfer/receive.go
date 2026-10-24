@@ -111,14 +111,36 @@ func (r *Receiver) Handle(ctx context.Context, conn io.ReadWriter) error {
 	if len(names) > 1 {
 		summary = fmt.Sprintf("%s (+%d more)", summary, len(names)-1)
 	}
+	var senderMoved chan struct{} // closed once the sender sends again; nil if no approval was needed
 	if r.Approve != nil {
-		if err := r.Approve(ctx, Offer{Peer: r.peer(), To: h.To, Files: h.Files, Total: total}); err != nil {
-			r.Log.Add(Record{Dir: DirRecv, Peer: r.peer(), Name: summary, Size: total, Status: StatusRejected, Error: err.Error(), StartMs: time.Now().UnixMilli()})
-			return refuse(err.Error())
+		// The sender sends nothing until we answer, so any byte or error on
+		// the connection while an offer waits means it gave up: stop asking
+		// the user about a transfer nobody is waiting for.
+		actx, cancel := context.WithCancel(ctx)
+		senderMoved = make(chan struct{})
+		go func() {
+			defer close(senderMoved)
+			if _, err := br.Peek(1); err != nil {
+				cancel()
+			}
+		}()
+		err := r.Approve(actx, Offer{Peer: r.peer(), To: h.To, Files: h.Files, Total: total})
+		gone := actx.Err() != nil && ctx.Err() == nil
+		cancel()
+		if err != nil {
+			status, msg := StatusRejected, err.Error()
+			if gone {
+				status, msg = StatusFailed, "the sender disconnected before the transfer was accepted"
+			}
+			r.Log.Add(Record{Dir: DirRecv, Peer: r.peer(), Name: summary, Size: total, Status: status, Error: msg, StartMs: time.Now().UnixMilli()})
+			return refuse(msg)
 		}
 	}
 	if err := writeJSONLine(conn, reply{OK: true, Dir: dir}); err != nil {
 		return err
+	}
+	if senderMoved != nil {
+		<-senderMoved // the watcher reads from br too: let it finish before we do
 	}
 	for i, f := range h.Files {
 		if err := r.receiveOne(br, conn, dir, names[i], f); err != nil {
