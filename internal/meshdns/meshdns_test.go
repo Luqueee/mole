@@ -11,6 +11,19 @@ import (
 	"github.com/Luqueee/mole/internal/proxy"
 )
 
+// requireLoopbackRange skips the test where only 127.0.0.1 is loopback (macOS
+// and the BSDs). Split DNS hands out addresses from 127.77.0.0/16, which Linux
+// and Windows treat as loopback in full; there the feature cannot work, and a
+// failed bind says nothing about the code under test.
+func requireLoopbackRange(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.77.0.2:0")
+	if err != nil {
+		t.Skipf("127.77.0.0/16 is not usable as loopback on this system: %v", err)
+	}
+	ln.Close()
+}
+
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -37,6 +50,7 @@ func query(m *Mesh, name string) (rcode byte, answers uint16) {
 // another local process (a wildcard listener also covers 127.77.x.y):
 // clients would silently reach that process instead of the remote.
 func TestResolveIsAllOrNothingOnPortConflict(t *testing.T) {
+	requireLoopbackRange(t)
 	busy, err := net.Listen("tcp", "0.0.0.0:0") // wildcard, like docker-proxy
 	if err != nil {
 		t.Fatal(err)

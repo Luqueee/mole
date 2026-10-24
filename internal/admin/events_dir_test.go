@@ -52,7 +52,9 @@ func TestEventsCarryDirectionAndPort(t *testing.T) {
 		}
 		_, _ = c.Write([]byte("hi"))
 		_ = c.Close()
-		ln.Close()
+		// Not closed here: if Serve has not accepted the connection yet,
+		// closing the listener would drop it and its event would never come.
+		t.Cleanup(func() { ln.Close() })
 	}
 
 	var got []Event
