@@ -1,4 +1,4 @@
-import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult, type NodeList as RawNodeList, type NodeInfo as RawNodeInfo, type NodeDaemon as RawNodeDaemon, type NodeSpec, type NodeEntry, type NodeJobView, type NodeRunResult, type SSHHost } from "../bindings/github.com/Luqueee/mole/desktop";
+import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult, type NodeList as RawNodeList, type NodeInfo as RawNodeInfo, type NodeDaemon as RawNodeDaemon, type NodeSpec, type NodeEntry, type NodeJobView, type NodeRunResult, type SSHHost, type AppUpdate, type UpdateProgress } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import type { Active, Pending, Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
 
@@ -145,7 +145,20 @@ function mockJob(lines: [number, string][], code = 0): number {
   return id;
 }
 
+let mockUpdateAt = 0;
+const mockUpdate = (): AppUpdate => ({ current: "0.4.0", latest: "0.5.0", available: true, page: "https://github.com/Luqueee/mole/releases/tag/desktop-v0.5.0", asset: "mole.dmg", size: 62_000_000, installable: true, error: "", checkedMs: Date.now() });
+const mockProgress = (): UpdateProgress => {
+  if (!mockUpdateAt) return { phase: "idle", bytes: 0, total: 0, path: "", error: "" };
+  const f = Math.min((Date.now() - mockUpdateAt) / 4000, 1);
+  return f < 1 ? { phase: "downloading", bytes: Math.round(f * 62_000_000), total: 62_000_000, path: "", error: "" } : { phase: "opened", bytes: 62_000_000, total: 62_000_000, path: "/Users/me/Library/Caches/mole/updates/mole.dmg", error: "" };
+};
+
 export const api = {
+  appVersion: async (): Promise<string> => (MOCK ? "0.4.0" : MoleService.GetAppVersion()),
+  appCheck: async (force: boolean): Promise<AppUpdate> => (MOCK ? mockUpdate() : MoleService.CheckAppUpdate(force)),
+  appDownload: async () => (MOCK ? void (mockUpdateAt = Date.now()) : MoleService.DownloadAppUpdate()),
+  appProgress: async (): Promise<UpdateProgress> => (MOCK ? mockProgress() : MoleService.GetUpdateProgress()),
+  appPage: async (url: string) => (MOCK ? void window.open(url) : MoleService.OpenReleasePage(url)),
   nodes: async (): Promise<NodeList> =>
     MOCK ? { self: mockSelf, nodes: mockNodeEntries, cliReady: true, cliError: "" } : ((l) => ({ ...l, nodes: l.nodes ?? [] }))(await MoleService.GetNodes()),
   probe: async (name: string): Promise<NodeInfo> => {

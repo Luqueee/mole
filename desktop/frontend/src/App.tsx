@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Activity, Cable, Network, Terminal, ArrowUp, ArrowDown, FolderOpen, Upload, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
-import type { Status, CLIStatus, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
+import type { Status, CLIStatus, AppUpdate, UpdateProgress, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import type { Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
 import { api, MOCK, type Transfers } from "./api";
@@ -484,7 +484,7 @@ function TransfersPage({ s, tv, run }: { s: Status; tv: Transfers; run: Run }) {
   );
 }
 
-function SetupPage({ run }: { run: Run }) {
+function SetupPage({ run, up }: { run: Run; up: ReturnType<typeof useAppUpdate> }) {
   const [cli, setCli] = useState<CLIStatus | null>(null);
   const load = useCallback(() => api.cli().then(setCli).catch(() => {}), []);
   useEffect(() => void load(), [load]);
@@ -493,6 +493,18 @@ function SetupPage({ run }: { run: Run }) {
   const label = !cli?.installed ? "INSTALL" : cli.upToDate ? "REINSTALL" : "UPDATE";
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      <SectionHead title="APP" hint="THIS DESKTOP APP" />
+      <div className="flex items-center border-b border-line px-5 py-5">
+        <span className={`mr-4 size-2 ${up.u?.available ? "bg-hot" : up.u?.error ? "bg-faint" : "bg-live"}`} />
+        <div className="flex-1">
+          <div className="font-display text-3xl font-bold tracking-wide">{up.u ? (up.u.current === "dev" ? "DEV BUILD" : `v${up.u.current}`) : "…"}</div>
+          <div className="mt-2 text-xs text-dim select-text">
+            {up.u?.error ? up.u.error : up.u?.current === "dev" ? "built from source: it does not look for updates" : up.u?.available ? `v${up.u.latest} is available` : up.u ? "up to date" : "checking…"}
+          </div>
+        </div>
+        <button disabled={up.u?.current === "dev"} onClick={() => up.check(true).then(() => toast.success("checked"))} className="no-drag border border-line px-5 py-3 text-[11px] tracking-[0.2em] text-dim transition enabled:hover:bg-foreground enabled:hover:text-background disabled:opacity-30">CHECK NOW</button>
+      </div>
+
       <SectionHead title="CLI" hint="THE mole COMMAND FOR YOUR TERMINAL" />
       <div className="flex items-center border-b border-line px-5 py-5">
         <span className={`mr-4 size-2 ${state === "INSTALLED" ? "bg-live" : state === "UPDATE AVAILABLE" ? "bg-warn" : "bg-faint"}`} />
@@ -582,6 +594,76 @@ function LogsPage({ lines }: { lines: string[] }) {
   );
 }
 
+/* ───────── app updates ───────── */
+
+const seenKey = (v: string) => `mole.update.dismissed.${v}`;
+
+function useAppUpdate() {
+  const [u, setU] = useState<AppUpdate | null>(null);
+  const [p, setP] = useState<UpdateProgress | null>(null);
+  const check = useCallback(async (force = false) => {
+    try { setU(await api.appCheck(force)); } catch { /* offline */ }
+  }, []);
+  useEffect(() => {
+    void check();
+    const t = setInterval(() => void check(), 3 * 3600_000);
+    return () => clearInterval(t);
+  }, [check]);
+  const busy = p?.phase === "downloading" || p?.phase === "verifying";
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => api.appProgress().then(setP).catch(() => {}), 300);
+    return () => clearInterval(t);
+  }, [busy]);
+  const start = async () => {
+    try {
+      await api.appDownload();
+      setP(await api.appProgress());
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+  return { u, p, busy, check, start };
+}
+
+function UpdateBanner({ up }: { up: ReturnType<typeof useAppUpdate> }) {
+  const { u, p, busy, start } = up;
+  const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(seenKey(u?.latest ?? "")) === "1"; } catch { return false; } });
+  useEffect(() => { try { setDismissed(localStorage.getItem(seenKey(u?.latest ?? "")) === "1"); } catch { /* private mode */ } }, [u?.latest]);
+  if (!u?.available || (dismissed && !busy && p?.phase !== "opened" && p?.phase !== "failed")) return null;
+  const pct = p && p.total > 0 ? Math.min(100, Math.round((p.bytes * 100) / p.total)) : 0;
+  const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
+  const later = () => { try { localStorage.setItem(seenKey(u.latest), "1"); } catch { /* ignore */ } setDismissed(true); };
+  return (
+    <div className="no-drag relative shrink-0 border-b border-hot bg-hot/10 px-5 py-2.5">
+      <div className="flex items-center gap-4 text-xs">
+        <span className="size-2 shrink-0 animate-pulse bg-hot" />
+        <div className="min-w-0 flex-1">
+          {p?.phase === "opened" ? (
+            <span><span className="font-bold text-live">DOWNLOADED AND VERIFIED.</span> <span className="text-dim">The installer is open: finish it, then start mole again.</span></span>
+          ) : p?.phase === "failed" ? (
+            <span className="text-bad select-text">{p.error}</span>
+          ) : busy ? (
+            <span><span className="font-bold">{p?.phase === "verifying" ? "VERIFYING" : "DOWNLOADING"} v{u.latest}</span> <span className="text-dim tabular-nums">{mb(p?.bytes ?? 0)} / {mb(p?.total ?? 0)} · {pct}%</span></span>
+          ) : (
+            <span><span className="font-bold">MOLE v{u.latest} IS OUT</span> <span className="text-dim">you have v{u.current}</span></span>
+          )}
+        </div>
+        {!busy && p?.phase !== "opened" && (
+          u.installable ? (
+            <button onClick={start} className="border border-hot bg-hot px-4 py-1.5 text-[11px] font-bold tracking-[0.2em] text-background transition hover:brightness-110">{p?.phase === "failed" ? "TRY AGAIN" : `UPDATE · ${mb(u.size)}`}</button>
+          ) : (
+            <button onClick={() => api.appPage(u.page).catch((e) => toast.error(errMsg(e)))} className="border border-hot px-4 py-1.5 text-[11px] tracking-[0.2em] text-hot transition hover:bg-hot hover:text-background">OPEN RELEASE PAGE</button>
+          )
+        )}
+        {!busy && <button onClick={() => api.appPage(u.page).catch((e) => toast.error(errMsg(e)))} className="text-[10px] tracking-[0.2em] text-dim transition hover:text-foreground">WHAT'S NEW</button>}
+        {!busy && p?.phase !== "opened" && <button aria-label="Later" onClick={later} className="text-[10px] tracking-[0.2em] text-faint transition hover:text-foreground">LATER</button>}
+      </div>
+      {busy && <div className="mt-2 h-1 bg-line"><div className="h-full bg-hot transition-all" style={{ width: `${p?.phase === "verifying" ? 100 : pct}%` }} /></div>}
+    </div>
+  );
+}
+
 /* ───────── shell ───────── */
 
 const EMPTY: Status = { running: false, adminAddr: "", remote: "", stats: { uptime: "", active_conns: 0, total_conns: 0, failed_dials: 0 }, ports: [], info: {}, error: "" } as unknown as Status;
@@ -599,6 +681,7 @@ export default function App() {
   const rowSeq = useRef(0);
   const [supported, setSupported] = useState(true);
   const cursor = useRef<number | null>(null);
+  const appUpdate = useAppUpdate();
   const [nodeCount, setNodeCount] = useState(0);
   useEffect(() => {
     const load = () => api.nodes().then((l) => setNodeCount(l.nodes.length)).catch(() => {});
@@ -723,13 +806,14 @@ export default function App() {
         </nav>
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <UpdateBanner up={appUpdate} />
           {s.error && <div className="border-b border-bad bg-bad/10 px-5 py-2 text-[11px] text-bad">{s.error}</div>}
           {tab === "status" && <StatusPage s={s} hist={hist} trips={trips} conns={conns} supported={supported} />}
           {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} push={s.push ?? []} run={run} />}
           {tab === "nodes" && <NodesPage onGoSetup={() => setTab("setup")} />}
           {tab === "transfers" && <TransfersPage s={s} tv={tv} run={run} />}
           {tab === "logs" && <LogsPage lines={logs} />}
-          {tab === "setup" && <SetupPage run={run} />}
+          {tab === "setup" && <SetupPage run={run} up={appUpdate} />}
         </main>
       </div>
       <Toaster position="bottom-right" />
