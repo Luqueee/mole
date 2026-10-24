@@ -7,6 +7,7 @@ not in these scripts — this directory is intentionally small and dumb on purpo
 | ------------------ | ------------------------- | ------------------------------------------------------------- |
 | `install.sh`       | Linux, macOS, FreeBSD     | Build or clone, install, verify, print `mole init` hint.      |
 | `install.ps1`      | Windows                   | Builds from a clone or installs a verified release archive.  |
+| `release-archives.sh` | any (maintainers)      | Build the per-platform release archives and `SHA256SUMS`.     |
 | `uninstall.sh`     | Linux, macOS, FreeBSD     | Remove the binary; leave the config (`mole.yaml`) alone.     |
 | `uninstall.ps1`    | Windows                   | Same as `uninstall.sh`, PowerShell-flavoured.                 |
 
