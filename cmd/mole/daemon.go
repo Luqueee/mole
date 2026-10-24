@@ -51,6 +51,10 @@ func daemonize(upArgs []string) int {
 	}
 	defer lf.Close()
 
+	logStart := int64(0)
+	if st, err := lf.Stat(); err == nil {
+		logStart = st.Size()
+	}
 	cmd := exec.Command(exe, append([]string{"up"}, upArgs...)...)
 	cmd.Stdin = nil
 	cmd.Stdout = lf
@@ -64,19 +68,46 @@ func daemonize(upArgs []string) int {
 		fmt.Fprintln(os.Stderr, "error: failed to start background process:", err)
 		return 1
 	}
-	// Capture the PID before Release(), which resets Process.Pid to -1.
 	pid := cmd.Process.Pid
 	if err := writePid(pid); err != nil {
 		fmt.Fprintln(os.Stderr, "warn: could not write pidfile:", err)
 	}
-	// Detach: don't wait on the child.
-	_ = cmd.Process.Release()
+	// A child that dies at once (no remote configured, bad config, a port in
+	// use) must not be reported as started: wait a moment and say why.
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	select {
+	case <-exited:
+		_ = os.Remove(pidPath())
+		fmt.Fprintln(os.Stderr, "error: mole exited right after starting:")
+		fmt.Fprint(os.Stderr, newLogLines(logPath(), logStart))
+		return 1
+	case <-time.After(startupGrace):
+	}
 
 	fmt.Printf("mole started in background (pid %d)\n", pid)
 	fmt.Printf("  logs:   %s\n", logPath())
 	fmt.Printf("  status: mole status\n")
 	fmt.Printf("  stop:   mole down\n")
 	return 0
+}
+
+// startupGrace is how long a freshly started daemon must stay alive to count
+// as started.
+const startupGrace = 1500 * time.Millisecond
+
+// newLogLines returns what was appended to the log after offset, last lines
+// only, indented, for an error message.
+func newLogLines(path string, offset int64) string {
+	b, err := os.ReadFile(path)
+	if err != nil || int64(len(b)) <= offset {
+		return "  (nothing was logged)\n"
+	}
+	lines := strings.Split(strings.TrimRight(string(b[offset:]), "\n"), "\n")
+	if len(lines) > 8 {
+		lines = lines[len(lines)-8:]
+	}
+	return "  " + strings.Join(lines, "\n  ") + "\n"
 }
 
 // runDown stops a backgrounded mole by signalling the PID in the
