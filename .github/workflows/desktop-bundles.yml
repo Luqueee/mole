@@ -94,6 +94,12 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
+      # The app reads its version from this file to tell when a newer release exists.
+      - name: Stamp the app version
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: echo "${GITHUB_REF_NAME#desktop-v}" > appversion.txt
+
       # Embedded in the app so its Setup tab can install the CLI.
       - name: Build the mole CLI to embed
         run: wails3 task bundle:cli

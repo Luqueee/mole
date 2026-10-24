@@ -9,6 +9,26 @@ import * as admin$0 from "../internal/admin/models.js";
 import * as transfer$0 from "../internal/transfer/models.js";
 
 /**
+ * AppUpdate says whether a newer desktop release exists.
+ */
+export interface AppUpdate {
+    "current": string;
+    "latest": string;
+    "available": boolean;
+    "page": string;
+    "asset": string;
+    "size": number;
+
+    /**
+     * Installable is false when this platform has no asset, or the release
+     * carries no checksum to verify it against: the page is then all there is.
+     */
+    "installable": boolean;
+    "error": string;
+    "checkedMs": number;
+}
+
+/**
  * CLIStatus describes the CLI install for the Setup tab.
  */
 export interface CLIStatus {
@@ -293,4 +313,18 @@ export interface TransferView {
     "records": transfer$0.Record[] | null;
     "active": transfer$0.Active[] | null;
     "pending": transfer$0.Pending[] | null;
+}
+
+/**
+ * UpdateProgress is the state of the download started by DownloadAppUpdate.
+ */
+export interface UpdateProgress {
+    /**
+     * Phase is "idle", "downloading", "verifying", "opened" or "failed".
+     */
+    "phase": string;
+    "bytes": number;
+    "total": number;
+    "path": string;
+    "error": string;
 }

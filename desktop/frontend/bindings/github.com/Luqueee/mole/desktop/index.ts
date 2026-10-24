@@ -7,6 +7,7 @@ export {
 };
 
 export type {
+    AppUpdate,
     CLIStatus,
     Event,
     Events,
@@ -23,5 +24,6 @@ export type {
     Settings,
     Stats,
     Status,
-    TransferView
+    TransferView,
+    UpdateProgress
 } from "./models.js";

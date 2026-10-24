@@ -54,6 +54,32 @@ export function CancelNodeJob(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * CheckAppUpdate asks GitHub for the newest desktop release. The answer is
+ * kept for an hour unless force is set. A failed check is reported in Error,
+ * never as an error: being offline is normal.
+ */
+export function CheckAppUpdate(force: boolean): $CancellablePromise<$models.AppUpdate> {
+    return $Call.ByID(1048431896, force);
+}
+
+/**
+ * DownloadAppUpdate downloads the newest release's installer in the
+ * background, checks it against the digest GitHub lists for it, and opens it
+ * (the disk image on macOS, the installer on Windows, the package on Linux).
+ * The app does not replace itself: the system's own installer does.
+ */
+export function DownloadAppUpdate(): $CancellablePromise<void> {
+    return $Call.ByID(2292093272);
+}
+
+/**
+ * GetAppVersion is the running app's version ("dev" for a build from source).
+ */
+export function GetAppVersion(): $CancellablePromise<string> {
+    return $Call.ByID(4036352751);
+}
+
+/**
  * GetCLI reports whether the CLI is installed and whether it matches the
  * one embedded in this app.
  */
@@ -122,6 +148,13 @@ export function GetTransfers(since: number): $CancellablePromise<$models.Transfe
 }
 
 /**
+ * GetUpdateProgress reports the download in progress.
+ */
+export function GetUpdateProgress(): $CancellablePromise<$models.UpdateProgress> {
+    return $Call.ByID(739317824);
+}
+
+/**
  * InstallCLI writes the embedded CLI into the install directory, replacing
  * any previous copy there. A running daemon keeps its old binary until it is
  * restarted.
@@ -163,6 +196,13 @@ export function NodeStop(name: string): $CancellablePromise<void> {
  */
 export function OpenInbox(): $CancellablePromise<void> {
     return $Call.ByID(2427007018);
+}
+
+/**
+ * OpenReleasePage opens a release page in the browser.
+ */
+export function OpenReleasePage(url: string): $CancellablePromise<void> {
+    return $Call.ByID(690052920, url);
 }
 
 /**
