@@ -108,7 +108,8 @@ create a config interactively.
 | `mole node` | The other machines you manage: `node add NAME TARGET`, `node ls`, `node ping NAME`, `node rm NAME`. |
 | `mole -n NODE <command>` | Run any mole command on a node, as if typed there (pickers and Ctrl+C work). |
 | `mole doctor` | Diagnose config, SSH, push and split DNS with the fix for each problem: `doctor [name...]`. |
-| `mole dns` | Route configured `domains:` to the remote's DNS: `dns install`, `dns uninstall` (Linux, root). |
+| `mole domain` · `mole route` | Name remote services: `domain set NAME`, `route add NAME TARGET`, `route rm NAME`, `route ls`. See [Name remote services](#name-remote-services-proxy). |
+| `mole dns` | Make the OS resolve the configured `domains:` through mole: `dns install`, `dns uninstall` (Linux and macOS, root). |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
 | `mole clip` | Share clipboard images over a separate private HTTP connection: `clip serve`, `clip pull`. |
@@ -477,6 +478,55 @@ none or an older one (into `~/.cache/mole/go`, checked against the published
 checksum; `MOLE_NO_GO_DOWNLOAD=1` refuses to), so only `git` and `curl` or
 `wget` are needed there.
 
+### Name remote services (proxy)
+
+Give a service on the remote a name instead of a port: `web.dev.lan` instead of
+`localhost:3000`. One local proxy picks the service from the `Host` header, so
+many names share one port and several names may point at the same target.
+
+```bash
+mole domain set dev.lan                  # the names live under this domain
+mole route add web 3000                  # web.dev.lan   -> port 3000 on the remote
+mole route add api 10.0.0.5:8080         # api.dev.lan   -> a host the remote sees
+mole route add admin admin.corp          # admin.dev.lan -> a name only the remote resolves
+mole route add sec https://admin.corp    # same, over TLS
+mole route add db @dockers:5432          # db.dev.lan    -> port 5432 on the node "dockers"
+sudo mole dns install -config ~/.config/mole/config.yaml   # once: make the OS resolve it
+```
+
+The desktop app does all of it in the **Proxy** tab (domain, routes, a button per
+machine, HTTP/HTTPS, and the DNS install through the system password dialog).
+
+A **target** is where the remote reaches the service:
+
+| Target | Meaning |
+|---|---|
+| `3000` | port 3000 on the remote itself |
+| `host:8080` | a host the remote can see (names are resolved **by the remote**) |
+| `admin.corp` | a name, on port 80; `https://admin.corp` uses TLS on 443; `:PORT` overrides |
+| `@node:3000` · `@node/host:80` | the same, through another registered node (each node gets its own SSH tunnel, opened on first use) |
+
+How it works: a DNS stub answers `*.dev.lan` routes with `127.77.0.1`; the OS is
+pointed at the stub for that domain only (`sudo mole dns install`), and port 80
+of that one address is redirected to the proxy (`route_port`, default `7080`).
+Plain `localhost:80` is never captured. Without the install the proxy still
+works on `http://NAME.DOMAIN:ROUTE_PORT`, if the name resolves.
+
+- The service receives its own address as `Host` (dev servers such as Vite or
+  Ollama reject names they do not know); the name you typed travels in
+  `X-Forwarded-Host`.
+- `https://` targets are verified against the system roots: a service behind a
+  private CA answers `502` until that CA is trusted.
+- Any valid domain works (`.lan` and `.test` are the safe ones). `mole domain
+  set` warns about `.local` (mDNS), `.dev`/`.app` (browsers force HTTPS) and
+  public domains (they would stop reaching the real site from this machine).
+- Routes added with `mole route add` apply live; changing the domain or
+  `route_port` needs `mole restart` and `sudo mole dns install` again.
+- macOS: `dns install` writes `/etc/resolver/DOMAIN`, an `lo0` alias for
+  `127.77.0.1`, a `pf` redirect and a LaunchDaemon (`dev.mole.dns`) so it
+  survives reboots; `dns uninstall` removes them, leaving other resolver files
+  alone. Linux uses the `mole0` link and `nftables` described below.
+
 ### Resolve a domain on the remote (split DNS)
 
 To reach names that only the remote can resolve (e.g. `admin.kena.lan`) from
@@ -612,7 +662,9 @@ mole -n NODE <command> [args...]                 run a mole command on a node
 mole node   install NAME [-branch B]
 mole node   add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check] [-force] [-config PATH]
 mole node   ls [-json]|ping [-json] NAME|rm NAME [-config PATH]
-mole dns    install|uninstall [-config PATH]      (Linux, needs root)
+mole domain set NAME | show [-config PATH]
+mole route  add NAME TARGET | rm NAME | ls [-config PATH]
+mole dns    install|uninstall -config PATH        (Linux and macOS, needs root)
 mole doctor [-config PATH] [-timeout 10s] [name...]
 mole config edit [-config PATH] [-editor CMD]
 mole init   [flags]
@@ -643,6 +695,8 @@ mole version · mole help
 | `nodes`          | map    | `{}`                 | Other machines to manage (`remote`, optional `ssh_port`, `bin`, `insecure`); see [Manage other machines](#manage-other-machines-nodes) |
 | `domains`        | string[] | `[]`               | DNS suffixes (e.g. `kena.lan`) resolved **on the remote**; needs `sudo mole dns install` |
 | `domain_ports`   | int[]  | `[80,443]`           | Ports forwarded for every name under `domains` (1–45535) |
+| `routes`         | map    | `{}`                 | Named services: `NAME: TARGET` (`3000`, `host:port`, `admin.corp`, `https://…`, `@node:port`); see [Name remote services](#name-remote-services-proxy) |
+| `route_port`     | int    | `7080`               | Local port of the route proxy (1024–65535); `dns install` redirects port 80 to it |
 
 Fallback `discover_ports`:
 
@@ -692,8 +746,10 @@ SSH auth is native per platform:
   exposing them beyond that needs `GatewayPorts` on the remote — mole never
   enables it. A bind failure is reported once and shown as `failed` in
   `mole push list` / `mole status`; it is retried after each reconnect.
-- **`domains:` is Linux-only** (systemd-resolved + nftables, one `sudo mole dns
-  install` per machine). Browsers with their own DNS-over-HTTPS bypass it.
+- **Forwarding by name (`domains:` without a route) is Linux-only**
+  (systemd-resolved + nftables, one `sudo mole dns install` per machine);
+  named **routes** also work on macOS. Browsers with their own DNS-over-HTTPS
+  bypass both.
   Every configured domain port must be free of conflicts on the virtual IPs;
   a name whose port can't be bound answers `SERVFAIL` rather than being
   published half-working.
