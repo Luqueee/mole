@@ -57,6 +57,7 @@ func dnsQuery(t *testing.T, addr, name string, qtype uint16) (rcode int, answers
 // Names under the domain get a virtual IP, and connecting to it is forwarded
 // through real SSH *by name* (the server sees the hostname, not an IP).
 func TestMeshResolvesOnRemote(t *testing.T) {
+	requireLoopbackRange(t)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer, _ := ssh.NewSignerFromKey(priv)
@@ -123,4 +124,17 @@ func dialPing(ip string, port int) string {
 		return ""
 	}
 	return string(b)
+}
+
+// requireLoopbackRange skips the test where only 127.0.0.1 is loopback (macOS
+// and the BSDs). Split DNS hands out addresses from 127.77.0.0/16, which Linux
+// and Windows treat as loopback in full; there the feature cannot work, and a
+// failed bind says nothing about the code under test.
+func requireLoopbackRange(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.77.0.2:0")
+	if err != nil {
+		t.Skipf("127.77.0.0/16 is not usable as loopback on this system: %v", err)
+	}
+	ln.Close()
 }

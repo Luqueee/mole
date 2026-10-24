@@ -196,6 +196,7 @@ func (p probeWith) Dial(n, a string) (net.Conn, error) { return p.dial(n, a) }
 // A completed TCP handshake with mole's listener must not be reported as a
 // working tunnel: the listener accepts before dialling the destination.
 func TestDoctorPortDoesNotOverclaim(t *testing.T) {
+	requireLoopbackRange(t)
 	refused := &ssh.OpenChannelError{Reason: ssh.ConnectionFailed, Message: "connection refused"}
 	hold := func(string, string) (net.Conn, error) { c, _ := net.Pipe(); return c, nil }
 	fail503 := func(string, string) (net.Conn, error) { return nil, refused }
