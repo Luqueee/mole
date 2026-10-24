@@ -55,7 +55,11 @@ install_ref() { # install_ref <ref|""> <dest>
 }
 
 echo "== a branch"
-install_ref try/install-me "$TMP/bin-branch/mole" >"$TMP/out-branch.txt" 2>&1 || true
+if install_ref try/install-me "$TMP/bin-branch/mole" >"$TMP/out-branch.txt" 2>&1; then
+	check "the installer exits 0 after installing" true
+else
+	check "the installer exits 0 after installing" false
+fi
 check "the binary is installed" test -x "$TMP/bin-branch/mole"
 check "mole version names the branch and commit" version_has "$TMP/bin-branch/mole" "(try/install-me@$WANT)"
 
@@ -92,6 +96,32 @@ git -C "$TMP/clone" checkout -q -b local-work
 (cd "$TMP/clone" && env INSTALL_DIR="$TMP/bin-clone/mole" NO_COLOR=1 bash scripts/install.sh --no-verify) >"$TMP/out-clone.txt" 2>&1 || true
 check "a clone's binary names its own branch" \
 	version_has "$TMP/bin-clone/mole" "(local-work@$(git -C "$TMP/clone" rev-parse --short=7 HEAD))"
+
+echo "== mole update -branch replaces the running binary with the branch"
+# The installers are fetched from MOLE_RAW_URL/refs/heads/<branch>/scripts/.
+mkdir -p "$TMP/raw/refs/heads/try/install-me/scripts"
+cp "$ROOT/scripts/install.sh" "$TMP/raw/refs/heads/try/install-me/scripts/install.sh"
+(cd "$ROOT" && go build -o "$TMP/self/mole" ./cmd/mole)
+check "the binary starts without a branch label" bash -c '! "$1" version | grep -qF "try/install-me"' _ "$TMP/self/mole"
+update_env=(MOLE_RAW_URL="file://$TMP/raw" MOLE_REPO="$TMP/origin.git" NO_COLOR=1)
+if env "${update_env[@]}" "$TMP/self/mole" update -branch try/install-me -no-verify >"$TMP/out-update.txt" 2>&1; then
+	check "mole update -branch exits 0" true
+else
+	check "mole update -branch exits 0" false
+fi
+check "it is now the branch build" version_has "$TMP/self/mole" "(try/install-me@$WANT)"
+
+echo "== mole update -branch with a branch that does not exist"
+cp "$TMP/self/mole" "$TMP/self/mole.before"
+if env "${update_env[@]}" "$TMP/self/mole" update -branch no/such-branch -no-verify >"$TMP/out-update-missing.txt" 2>&1; then
+	check "it fails" false
+else
+	check "it fails" true
+fi
+check "and does not claim to have updated" bash -c '! grep -qF "updated successfully" "$1"' _ "$TMP/out-update-missing.txt"
+check "the running binary was left alone" cmp -s "$TMP/self/mole" "$TMP/self/mole.before"
+check "-branch with -version is refused" bash -c '! "$1" update -branch a -version v0.1.1 -dry-run' _ "$TMP/self/mole"
+check "a dry run shows the branch and installer" bash -c '"$1" update -branch feat/x -dry-run | grep -qF "refs/heads/feat/x/scripts/install.sh"' _ "$TMP/self/mole"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then

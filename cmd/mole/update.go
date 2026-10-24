@@ -24,10 +24,22 @@ import (
 	"strings"
 )
 
-const (
-	installShURL = "https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh"
-	installPsURL = "https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1"
-)
+// defaultRawURL is where the installers are fetched from; MOLE_RAW_URL points
+// elsewhere (a fork, or a local directory through file://, for tests).
+const defaultRawURL = "https://raw.githubusercontent.com/Luqueee/mole"
+
+// installerURL is the URL of an installer script: the one on main, or, for a
+// branch, the one that branch carries (a branch can change the installer too).
+func installerURL(script, branch string) string {
+	base := strings.TrimRight(os.Getenv("MOLE_RAW_URL"), "/")
+	if base == "" {
+		base = defaultRawURL
+	}
+	if branch != "" {
+		return base + "/refs/heads/" + branch + "/scripts/" + script
+	}
+	return base + "/main/scripts/" + script
+}
 
 func runUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
@@ -161,8 +173,8 @@ func buildUpdateCommand(dest, ref, branch string, noVerify bool) (*exec.Cmd, err
 		// same one-liner documented in the README, run via a nested
 		// PowerShell so args like -NoVerify are honoured.
 		script := fmt.Sprintf(
-			"& ([scriptblock]::Create((irm %s))) %s",
-			installPsURL, verify,
+			"$ErrorActionPreference = 'Stop'; & ([scriptblock]::Create((irm %s))) %s",
+			installerURL("install.ps1", branch), verify,
 		)
 		ps, err := powershellPath()
 		if err != nil {
@@ -176,10 +188,13 @@ func buildUpdateCommand(dest, ref, branch string, noVerify bool) (*exec.Cmd, err
 		}
 		shArgs := ""
 		if noVerify {
-			shArgs = " -s -- --no-verify"
+			shArgs = " --no-verify"
 		}
-		// e.g. curl -fsSL <url> | sh -s -- --no-verify
-		script := fmt.Sprintf("%s %s | sh%s", fetch, installShURL, shArgs)
+		// Download to a file and run that: piped into sh, a failed download
+		// (a branch that does not exist) would hand sh an empty script, which
+		// "succeeds".
+		script := fmt.Sprintf(`tmp="$(mktemp)" && %s && sh "$tmp"%s; rc=$?; rm -f "$tmp"; exit $rc`,
+			fetch(installerURL("install.sh", branch), `"$tmp"`), shArgs)
 		cmd = exec.Command("sh", "-c", script)
 	}
 
@@ -205,16 +220,16 @@ func updateEnv(dest, ref, branch string) []string {
 	return env
 }
 
-// fetchCommand returns a downloader invocation that writes to stdout,
-// preferring curl and falling back to wget.
-func fetchCommand() (string, error) {
+// fetchCommand returns a function that renders a command downloading a URL
+// into a file, using curl or else wget.
+func fetchCommand() (func(url, out string) string, error) {
 	if _, err := exec.LookPath("curl"); err == nil {
-		return "curl -fsSL", nil
+		return func(url, out string) string { return fmt.Sprintf("curl -fsSL -o %s '%s'", out, url) }, nil
 	}
 	if _, err := exec.LookPath("wget"); err == nil {
-		return "wget -qO-", nil
+		return func(url, out string) string { return fmt.Sprintf("wget -qO %s '%s'", out, url) }, nil
 	}
-	return "", fmt.Errorf("neither 'curl' nor 'wget' found on PATH; cannot download the installer")
+	return nil, fmt.Errorf("neither 'curl' nor 'wget' found on PATH; cannot download the installer")
 }
 
 func powershellPath() (string, error) {
