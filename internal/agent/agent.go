@@ -52,6 +52,7 @@ type Response struct {
 type Hello struct {
 	Agent    int      `json:"agent"` // ProtocolVersion
 	Version  string   `json:"version"`
+	Build    string   `json:"build,omitempty"` // where the binary was built from, e.g. "feat/x@a1b2c3d"
 	OS       string   `json:"os"`
 	Arch     string   `json:"arch"`
 	Hostname string   `json:"hostname"`

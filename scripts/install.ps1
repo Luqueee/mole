@@ -13,6 +13,8 @@
 #
 # Environment variables:
 #   MOLE_VERSION    release tag to install (default: latest release)
+#   MOLE_BRANCH     git branch or tag to download and build with Go, to try
+#                   something that is not released (needs Go; overrides the rest)
 #   MOLE_SRC        path to an existing local clone to build with Go
 #   INSTALL_DIR     absolute path for the installed binary
 #                   (overrides -InstallDir and -Prefix)
@@ -87,6 +89,38 @@ function Find-LocalSource {
     return $null
 }
 
+# Download the source of a branch (or tag) of the repository and return the
+# directory it was unpacked into. The commit is resolved first and the archive
+# fetched by that commit, so what is built is exactly what the label says.
+function Get-BranchSource {
+    param([string]$ref)
+    if ($ref -notmatch '^[A-Za-z0-9._/@+-]+$' -or $ref.StartsWith('-') -or $ref.Contains('..')) {
+        Die "invalid MOLE_BRANCH '$ref' (letters, digits and . _ / @ + - only)"
+    }
+    $headers = @{ 'User-Agent' = 'mole-installer' }
+    # A token raises the API's rate limit (CI runners share addresses).
+    if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+    try {
+        $info = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/Luqueee/mole/commits/$ref"
+    } catch {
+        Die "ref '$ref' not found in Luqueee/mole"
+    }
+    $sha = [string]$info.sha
+    if ($sha -notmatch '^[0-9a-f]{40}$') { Die "could not resolve '$ref' to a commit" }
+    $script:installTmpRoot = Join-Path $env:TEMP "mole-install-$(New-Guid)"
+    New-Item -ItemType Directory -Path $script:installTmpRoot -Force | Out-Null
+    $zip = Join-Path $script:installTmpRoot 'source.zip'
+    Step "downloading $ref ($($sha.Substring(0, 7)))"
+    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "https://codeload.github.com/Luqueee/mole/zip/$sha" -OutFile $zip
+    $unpacked = Join-Path $script:installTmpRoot 'source'
+    Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
+    $root = Get-ChildItem -LiteralPath $unpacked -Directory | Select-Object -First 1
+    if (-not $root -or -not (Test-MoleRepo $root.FullName)) { Die "the archive of '$ref' is not a mole source tree" }
+    $script:buildRef = $ref
+    $script:buildCommit = $sha.Substring(0, 7)
+    return $root.FullName
+}
+
 function Show-Help {
     # Try to read the header comment block at the top of this script.
     # If we're being executed from a real file (e.g. `.\install.ps1
@@ -117,17 +151,34 @@ if ($Help) { Show-Help; exit 0 }
 # 1. Acquire binary
 # ---------------------------------------------------------------------------
 
-$projectRoot = Find-LocalSource
+$script:buildRef = ''
+$script:buildCommit = ''
+if ($env:MOLE_BRANCH) {
+    $projectRoot = Get-BranchSource $env:MOLE_BRANCH
+} else {
+    $projectRoot = Find-LocalSource
+}
 if ($projectRoot) {
     $goBin = $env:GO
     if (-not $goBin) { $goBin = (Get-Command go -ErrorAction SilentlyContinue).Source }
-    if (-not $goBin) { Die "'go' is required to install from a local clone. Install Go or run the one-liner outside the clone." }
+    if (-not $goBin) { Die "'go' is required to install from source (a clone, or MOLE_BRANCH). Install Go or run the one-liner for a release." }
+    # A local clone says which branch and commit it is; a downloaded branch already did.
+    if (-not $script:buildCommit -and (Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $projectRoot '.git'))) {
+        $commit = (& git -C $projectRoot rev-parse --short=7 HEAD 2>$null)
+        $branch = (& git -C $projectRoot rev-parse --abbrev-ref HEAD 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $commit -match '^[0-9a-f]{7}$') {
+            $script:buildCommit = $commit
+            if ($branch -and $branch -ne 'HEAD' -and $branch -match '^[A-Za-z0-9._/@+-]+$') { $script:buildRef = $branch }
+            if (& git -C $projectRoot status --porcelain --untracked-files=no 2>$null) { $script:buildCommit += '+dirty' }
+        }
+    }
     $buildDir = Join-Path $projectRoot 'dist'
     New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
     $binary = Join-Path $buildDir 'mole.exe'
     Step "building mole from $projectRoot"
+    $ldflags = "-X main.buildRef=$($script:buildRef) -X main.buildCommit=$($script:buildCommit)"
     Push-Location $projectRoot
-    try { & $goBin build -trimpath -o $binary ./cmd/mole } finally { Pop-Location }
+    try { & $goBin build -trimpath -ldflags $ldflags -o $binary ./cmd/mole } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binary)) { Die 'go build failed' }
 } else {
     $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }

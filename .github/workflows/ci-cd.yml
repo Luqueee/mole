@@ -35,6 +35,9 @@ jobs:
           go test -race -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
 
+      - name: Installer builds the ref it is asked for
+        run: ./scripts/test-install-branch.sh
+
   clip-darwin:
     name: macOS clipboard checks
     runs-on: macos-latest
@@ -72,10 +75,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # pwsh only reports the exit status of the last command of a script, so
+      # each one is checked: a failing `go test` used to pass this job.
       - name: Test and vet
+        shell: pwsh
         run: |
           go test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install from source
         shell: pwsh
@@ -83,6 +91,20 @@ jobs:
           $env:INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'mole.exe'
           ./scripts/install.ps1
           & $env:INSTALL_DIR version
+
+      - name: Install a branch
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # The branch under test, so what it carries (the build stamp) is what is checked.
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          $env:MOLE_BRANCH = $env:BRANCH
+          $env:INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'mole-branch.exe'
+          ./scripts/install.ps1
+          $v = (& $env:INSTALL_DIR version) -join ' '
+          Write-Host $v
+          if ($v -notmatch [regex]::Escape($env:BRANCH) + '@[0-9a-f]{7}') { throw "the branch build does not say where it came from: $v" }
 
   landing:
     name: Landing checks

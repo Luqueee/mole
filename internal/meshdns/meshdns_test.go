@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -51,6 +52,11 @@ func query(m *Mesh, name string) (rcode byte, answers uint16) {
 // clients would silently reach that process instead of the remote.
 func TestResolveIsAllOrNothingOnPortConflict(t *testing.T) {
 	requireLoopbackRange(t)
+	if runtime.GOOS == "windows" {
+		// There a listener on 127.77.x.y coexists with a wildcard one and wins
+		// for its own address, so the conflict this guards against cannot happen.
+		t.Skip("a wildcard listener does not conflict with a specific one on Windows")
+	}
 	busy, err := net.Listen("tcp", "0.0.0.0:0") // wildcard, like docker-proxy
 	if err != nil {
 		t.Fatal(err)

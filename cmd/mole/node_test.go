@@ -235,7 +235,8 @@ func TestProbeNodeWithAgent(t *testing.T) {
 	if p.Status.Running || p.Status.Nodes != 1 {
 		t.Fatalf("status (the test node has no daemon): %+v", p.Status)
 	}
-	if p.Connect <= 0 || p.RoundTrip <= 0 {
+	// Not "> 0": Windows' clock is coarse enough to measure a fast round trip as 0.
+	if p.Connect < 0 || p.RoundTrip < 0 {
 		t.Fatalf("timings: %v %v", p.Connect, p.RoundTrip)
 	}
 }

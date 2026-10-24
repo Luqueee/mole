@@ -10,6 +10,15 @@ not in these scripts — this directory is intentionally small and dumb on purpo
 | `uninstall.sh`     | Linux, macOS, FreeBSD     | Remove the binary; leave the config (`mole.yaml`) alone.     |
 | `uninstall.ps1`    | Windows                   | Same as `uninstall.sh`, PowerShell-flavoured.                 |
 
+Environment (both installers): `MOLE_VERSION` picks a git ref on Unix (a branch
+or tag; a ref that does not exist is an error) and a release tag on Windows;
+`MOLE_BRANCH` (Windows) downloads a branch and builds it; `MOLE_REPO` (Unix)
+clones from another remote; `INSTALL_DIR` is the full path of the binary. Builds
+are stamped with the ref and commit, which `mole version` prints.
+
+`test-install-branch.sh` checks the Unix installer and `mole update -branch`
+offline, against a throwaway repository.
+
 ## Why no `init`/`init.sh` here
 
 There used to be a `scripts/init` that asked for the remote, ports, and where

@@ -98,8 +98,7 @@ func main() {
 	case "init":
 		os.Exit(runInit(args))
 	case "version":
-		color := cliColor(os.Stdout)
-		fmt.Printf("%s %s\n", cBold(cMagenta("mole", color), color), cDim("v"+version, color))
+		fmt.Println(versionLine(cliColor(os.Stdout)))
 	case "help", "-h", "--help":
 		printUsage()
 	default:

@@ -32,7 +32,7 @@ import (
 // a per-test path.
 func TestClipRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("TMPDIR", dir)
+	setTempDir(t, dir)
 
 	// "Mac" side: clip.Server with a per-test cache path.
 	mac := clip.NewWithCachePath(silentLogger(), filepath.Join(dir, "mac-cache.png"))
@@ -139,4 +139,13 @@ func TestClipBindScope(t *testing.T) {
 // the test output clean.
 func silentLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// setTempDir redirects os.TempDir() for the test: TMPDIR on Unix, TMP and TEMP
+// on Windows.
+func setTempDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("TMPDIR", dir)
+	t.Setenv("TMP", dir)
+	t.Setenv("TEMP", dir)
 }
