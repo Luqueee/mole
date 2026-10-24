@@ -40,7 +40,7 @@ func TestClient_Pull_RoundTripsBytesToFile(t *testing.T) {
 	// Redirect the client's temp dir to a per-test location so we
 	// don't litter the real /tmp.
 	dir := t.TempDir()
-	t.Setenv("TMPDIR", dir)
+	setTempDir(t, dir)
 
 	c := NewClient(ts.URL, discardLogger())
 	path, err := c.Pull(context.Background())
@@ -238,7 +238,7 @@ func (h *watchRaceHandler) publishSecond() {
 }
 
 func TestClient_Watch_DoesNotSkipImagePublishedDuringPull(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	setTempDir(t, t.TempDir())
 	h := &watchRaceHandler{
 		mtime:           time.Unix(1_700_000_000, 0).UTC(),
 		images:          [][]byte{{0x01, 0x02}, {0x03, 0x04}},
@@ -321,4 +321,13 @@ func TestClient_Watch_NoNewImage_Quiet(t *testing.T) {
 // the test output clean.
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// setTempDir redirects os.TempDir() for the test: TMPDIR on Unix, TMP and TEMP
+// on Windows.
+func setTempDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("TMPDIR", dir)
+	t.Setenv("TMP", dir)
+	t.Setenv("TEMP", dir)
 }

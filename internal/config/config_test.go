@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -365,7 +366,7 @@ func TestLoad_RejectsUnknownTopLevelKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "auto_discoverd") {
 		t.Fatalf("Load() error = %v, want unknown key name", err)
 	}
-	if !strings.Contains(err.Error(), path) {
+	if !strings.Contains(err.Error(), strconv.Quote(path)) {
 		t.Fatalf("Load() error = %v, want config path", err)
 	}
 }
@@ -401,7 +402,7 @@ func TestLoad_RejectsTrailingYAMLDocument(t *testing.T) {
 	if !strings.Contains(err.Error(), "multiple YAML documents") {
 		t.Fatalf("Load() error = %v, want multiple-document error", err)
 	}
-	if !strings.Contains(err.Error(), path) {
+	if !strings.Contains(err.Error(), strconv.Quote(path)) {
 		t.Fatalf("Load() error = %v, want config path", err)
 	}
 }
@@ -418,7 +419,7 @@ func TestLoad_RejectsMalformedTrailingYAMLDocument(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load() accepted a malformed trailing YAML document")
 	}
-	if !strings.Contains(err.Error(), path) {
+	if !strings.Contains(err.Error(), strconv.Quote(path)) {
 		t.Fatalf("Load() error = %v, want config path", err)
 	}
 }
@@ -578,17 +579,18 @@ func TestTransferConfig(t *testing.T) {
 	}
 
 	// Save touches only the transfer block and keeps the rest of the file.
+	abs := filepath.Join(dir, "srv", "inbox")
 	cfg.Transfer.Receive = false
-	cfg.Transfer.Inbox = "/srv/inbox"
+	cfg.Transfer.Inbox = abs
 	if err := Save(path, cfg, "transfer"); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
-	if !strings.Contains(string(raw), "# keep me") || !strings.Contains(string(raw), "/srv/inbox") || strings.Contains(string(raw), "receive: true") {
+	if !strings.Contains(string(raw), "# keep me") || !strings.Contains(string(raw), "inbox") || strings.Contains(string(raw), "receive: true") {
 		t.Fatalf("saved file:\n%s", raw)
 	}
 	again, err := Load(path)
-	if err != nil || again.Transfer.Inbox != "/srv/inbox" || again.Transfer.Receive || again.Remote != "devlabs" {
+	if err != nil || again.Transfer.Inbox != abs || again.Transfer.Receive || again.Remote != "devlabs" {
 		t.Fatalf("reload: %+v %v", again, err)
 	}
 

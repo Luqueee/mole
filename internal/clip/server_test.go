@@ -63,6 +63,9 @@ func TestServerRepeatedOversizedUploadsReleaseFiles(t *testing.T) {
 }
 
 func TestServerConcurrentPutGetHeadersMatchBody(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot rename over a file another request has open; the clip server runs on macOS and Linux")
+	}
 	_, ts := newTestServer(t)
 	first := bytes.Repeat([]byte{'a'}, 101)
 	second := bytes.Repeat([]byte{'b'}, 503)

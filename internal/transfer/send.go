@@ -115,6 +115,14 @@ func Send(ctx context.Context, conn io.ReadWriteCloser, files []File, opt SendOp
 			if ok && !rp.OK {
 				return &RemoteError{Msg: rp.Error}
 			}
+		case rerr := <-readErr:
+			// The peer was not mole and left before we finished writing (a
+			// mole too old to know `recv` prints its usage and exits): what
+			// it printed is the explanation, not the broken pipe.
+			var bad *BadReplyError
+			if errors.As(rerr, &bad) {
+				return bad
+			}
 		case <-time.After(500 * time.Millisecond):
 		}
 		return werr
