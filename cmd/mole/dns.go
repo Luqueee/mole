@@ -29,11 +29,13 @@ const (
 )
 
 // dnsNftRules renders the nft ruleset redirecting virtual-IP traffic on each
-// domain port to its shifted listener. It is idempotent: any previous
-// "mole" table is replaced atomically.
-func dnsNftRules(ports []int) string {
+// domain port to its shifted listener, and the route IP's port 80 to the Host
+// proxy on routePort. It is idempotent: any previous "mole" table is replaced
+// atomically.
+func dnsNftRules(ports []int, routePort int) string {
 	var b strings.Builder
 	b.WriteString("table ip mole\ndelete table ip mole\ntable ip mole {\n\tchain out {\n\t\ttype nat hook output priority -100; policy accept;\n")
+	fmt.Fprintf(&b, "\t\tip daddr %s tcp dport 80 dnat to 127.0.0.1:%d\n", meshdns.RouteIP, routePort)
 	for _, p := range ports {
 		fmt.Fprintf(&b, "\t\tip daddr 127.77.0.0/16 tcp dport %d dnat to :%d\n", p, meshdns.BindPort(p))
 	}
@@ -83,10 +85,12 @@ func runDNS(args []string) int {
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `Usage: sudo mole dns install|uninstall [-config path]
 
-install   route the config's domains: to mole's DNS stub via a dedicated
-          dummy link (mole0) and redirect their ports with nftables;
-          re-run after changing domains: or domain_ports:
-uninstall remove the link, the nft table and the boot unit`)
+install   route the config's domains: to mole's DNS stub. Linux: a dedicated
+          dummy link (mole0) and nftables. macOS: /etc/resolver, an lo0 alias,
+          a pf redirect of port 80 and a LaunchDaemon (named routes only).
+          Re-run after changing domains:, domain_ports: or route_port:
+          (pass -config PATH: sudo may not see your config)
+uninstall remove all of it`)
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -95,13 +99,16 @@ uninstall remove the link, the nft table and the boot unit`)
 		fs.Usage()
 		return 2
 	}
-	if runtime.GOOS != "linux" {
-		fmt.Fprintln(os.Stderr, "mole dns: only Linux with systemd-resolved is supported")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		fmt.Fprintln(os.Stderr, "mole dns: only Linux (systemd-resolved) and macOS are supported")
 		return 1
 	}
 	if os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "mole dns: must run as root (sudo mole dns "+fs.Arg(0)+")")
+		fmt.Fprintln(os.Stderr, "mole dns: must run as root (sudo mole dns "+fs.Arg(0)+" -config PATH)")
 		return 1
+	}
+	if runtime.GOOS == "darwin" {
+		return runDNSMac(fs.Arg(0), *configPath)
 	}
 	if fs.Arg(0) == "uninstall" {
 		_, statErr := os.Stat(dnsUnitPath)
@@ -145,7 +152,7 @@ uninstall remove the link, the nft table and the boot unit`)
 		fmt.Fprintln(os.Stderr, "mole dns: nft (nftables) not found; install nftables")
 		return 1
 	}
-	if err := os.WriteFile(dnsNftPath, []byte(dnsNftRules(cfg.DomainPortsOrDefault())), 0o644); err != nil {
+	if err := os.WriteFile(dnsNftPath, []byte(dnsNftRules(cfg.DomainPortsOrDefault(), cfg.RoutePortOrDefault())), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "mole dns:", err)
 		return 1
 	}
