@@ -39,6 +39,7 @@ dev servers as they start.
 | ♻️ **Auto-reconnect** | Transparent reconnect on tunnel drop, with periodic health checks. |
 | 🔑 **Native auth** | ssh-agent first (Unix socket / Windows named pipe), then `~/.ssh/id_*` keys. |
 | 📨 **Send files** | `mole send` puts files in the other machine's inbox, from either side, over the same SSH connection; a picker lists the folder when you name nothing. |
+| 🕸️ **Manage other machines** | Register nodes with `mole node add`, then run any mole command on one with `mole -n NODE <command>`: its ports, pushes, inbox, status, update. Any machine can manage any other it can reach over SSH. |
 | 🌙 **Background daemon** | `mole up -d` detaches; `mole down` stops it; `mole status` and `mole logs` introspect it. |
 | 🎨 **Beautiful logs** | `mole logs` renders the daemon log with colour level badges, a green `FORWARD` badge, and `(×N)` collapsing of repeats. |
 | 📦 **Single binary** | No separate runtime or `node_modules`; daemon mode uses the same executable. |
@@ -104,6 +105,8 @@ create a config interactively.
 | `mole push` · `mole unpush` | Expose a local port on the remote (`ssh -R`): `push LOCAL[:REMOTE]`, `push list`, `unpush LOCAL`. |
 | `mole send` (`ftp`) | Send files to the other machine's inbox; no arguments opens a file picker: `send [-to SUBFOLDER] [files...]`. |
 | `mole inbox` | Where received files land, and who may send: `inbox`, `path`, `set DIR`, `receive on\|off`, `mode ask\|auto`, `pending`, `accept`, `reject`. |
+| `mole node` | The other machines you manage: `node add NAME TARGET`, `node ls`, `node ping NAME`, `node rm NAME`. |
+| `mole -n NODE <command>` | Run any mole command on a node, as if typed there (pickers and Ctrl+C work). |
 | `mole doctor` | Diagnose config, SSH, push and split DNS with the fix for each problem: `doctor [name...]`. |
 | `mole dns` | Route configured `domains:` to the remote's DNS: `dns install`, `dns uninstall` (Linux, root). |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
@@ -395,6 +398,44 @@ that try to leave the inbox (`../x`, absolute paths, symlinked folders) are
 refused, and received files keep only the owner's permissions. Set the remote's
 own inbox with `mole inbox set DIR` on the remote.
 
+### Manage other machines (nodes)
+
+Every machine can manage the others it can reach over SSH: there is no fixed
+"orchestrator". Register a node once, then run any mole command on it from
+here:
+
+```bash
+mole node add devlabs devlabs          # NAME, then user@host[:port] or an ssh alias
+mole node ls                           # who answers, which mole they run, daemon state
+mole -n devlabs ports add 3000         # edit devlabs' own config and apply it live
+mole -n devlabs push 8080
+mole -n devlabs inbox mode auto
+mole -n devlabs status
+mole -n devlabs send                   # the file picker opens on devlabs, in your terminal
+mole -n devlabs update                 # update mole on devlabs
+```
+
+The command runs there exactly as if you had typed it on that machine: its
+config, its daemon, its inbox. It needs a `mole` on the node (a node without
+`agent` support, i.e. older than 0.4, still works with `-n`, it is just listed
+as "no agent"). Arguments are quoted, so they reach the node verbatim, and the
+node's exit code is yours. Authentication is SSH's: whoever can open a shell
+there can configure it, nobody else.
+
+```yaml
+nodes:
+  devlabs:
+    remote: devlabs            # user@host[:port] or an ssh alias
+    ssh_port: 22               # optional
+    bin: ~/.local/bin/mole     # optional: where mole is on the node (default: mole)
+    insecure: false            # optional, UNSAFE: skip host key verification
+```
+
+Nothing changes for existing setups: with no `nodes:`, mole behaves as before,
+and the config's own `remote:` also works as a node name (`mole -n <remote> ...`).
+Nodes are kept in the user-global config (`mole node add` writes it when no
+config exists), so any project sees them.
+
 ### Resolve a domain on the remote (split DNS)
 
 To reach names that only the remote can resolve (e.g. `admin.kena.lan`) from
@@ -526,6 +567,9 @@ mole push   list|ls [-config PATH]
 mole unpush [-config PATH] LOCAL
 mole send   [-config PATH] [-to SUBFOLDER] [-a] [-direct] [files...]    (alias: ftp)
 mole inbox  [path | set DIR | receive on|off | mode ask|auto | pending | accept [ID|all] | reject [ID|all]] [-config PATH]
+mole -n NODE <command> [args...]                 run a mole command on a node
+mole node   add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check] [-config PATH]
+mole node   ls|ping NAME|rm NAME [-config PATH]
 mole dns    install|uninstall [-config PATH]      (Linux, needs root)
 mole doctor [-config PATH] [-timeout 10s] [name...]
 mole config edit [-config PATH] [-editor CMD]
@@ -554,6 +598,7 @@ mole version · mole help
 | `clip_interval_ms` | int  | —                    | Clipboard poll interval for `clip serve -watch`    |
 | `push`           | rule[] | `[]`                 | Local services exposed on the remote (`local`, optional `remote`, optional `bind`; default bind `127.0.0.1`) |
 | `transfer`       | object | see [Send files](#send-files-between-the-two-machines) | `inbox`, `receive`, `accept`, `port`, `max_size_mb` |
+| `nodes`          | map    | `{}`                 | Other machines to manage (`remote`, optional `ssh_port`, `bin`, `insecure`); see [Manage other machines](#manage-other-machines-nodes) |
 | `domains`        | string[] | `[]`               | DNS suffixes (e.g. `kena.lan`) resolved **on the remote**; needs `sudo mole dns install` |
 | `domain_ports`   | int[]  | `[80,443]`           | Ports forwarded for every name under `domains` (1–45535) |
 

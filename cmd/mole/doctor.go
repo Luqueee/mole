@@ -665,8 +665,6 @@ func firstField(s string) string {
 	return ""
 }
 
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
 func shortErr(err error) string {
 	var op *net.OpError
 	if errors.As(err, &op) && op.Err != nil {

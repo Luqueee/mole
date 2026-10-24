@@ -606,3 +606,103 @@ func TestTransferConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestNodes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mole.yaml")
+	body := "remote: mac-alias\nssh_port: 2200\n# keep me\nnodes:\n  devlabs:\n    remote: devlabs\n  build-1:\n    remote: ci@10.0.0.7\n    ssh_port: 2222\n    bin: /opt/mole/bin/mole\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.NodeNames(); !reflect.DeepEqual(got, []string{"build-1", "devlabs"}) {
+		t.Fatalf("names: %v", got)
+	}
+	n, ok := cfg.Node("build-1")
+	if !ok || n.Remote != "ci@10.0.0.7" || n.SSHPort != 2222 || n.BinOrDefault() != "/opt/mole/bin/mole" {
+		t.Fatalf("build-1: %+v %v", n, ok)
+	}
+	if n, _ := cfg.Node("devlabs"); n.BinOrDefault() != "mole" {
+		t.Fatalf("default bin: %q", n.BinOrDefault())
+	}
+	// The config's own remote is reachable by its literal value, with its settings.
+	if n, ok := cfg.Node("mac-alias"); !ok || n.Remote != "mac-alias" || n.SSHPort != 2200 {
+		t.Fatalf("default remote as a node: %+v %v", n, ok)
+	}
+	if _, ok := cfg.Node("typo"); ok {
+		t.Fatal("an unknown name must not resolve")
+	}
+
+	// Saving the nodes keeps the rest of the file.
+	cfg.Nodes["lab"] = NodeConfig{Remote: "lab.example.com", Insecure: true}
+	if err := Save(path, cfg, "nodes"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "# keep me") || !strings.Contains(string(raw), "lab.example.com") {
+		t.Fatalf("saved file:\n%s", raw)
+	}
+	again, err := Load(path)
+	if err != nil || len(again.Nodes) != 3 || again.Nodes["lab"].Insecure != true || again.Remote != "mac-alias" {
+		t.Fatalf("reload: %+v %v", again, err)
+	}
+	delete(again.Nodes, "lab")
+	delete(again.Nodes, "build-1")
+	delete(again.Nodes, "devlabs")
+	if err := Save(path, again, "nodes"); err != nil {
+		t.Fatal(err)
+	}
+	if last, err := Load(path); err != nil || len(last.Nodes) != 0 {
+		t.Fatalf("after removing every node: %+v %v", last.Nodes, err)
+	}
+
+	// A config without nodes behaves as before.
+	if def := Default(); len(def.Nodes) != 0 {
+		t.Fatal("default config has nodes")
+	}
+	for name, bad := range map[string]string{
+		"empty remote":  "nodes:\n  a:\n    remote: \"\"\n",
+		"upper case":    "nodes:\n  Dev:\n    remote: x\n",
+		"leading dash":  "nodes:\n  -dev:\n    remote: x\n",
+		"with a space":  "nodes:\n  \"my node\":\n    remote: x\n",
+		"bad port":      "nodes:\n  a:\n    remote: x\n    ssh_port: 70000\n",
+		"unknown key":   "nodes:\n  a:\n    remote: x\n    nope: 1\n",
+		"too long name": "nodes:\n  " + strings.Repeat("a", 40) + ":\n    remote: x\n",
+	} {
+		p := filepath.Join(dir, "bad.yaml")
+		os.WriteFile(p, []byte(bad), 0o644)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestSaveIntoAnEmptyOrCommentOnlyFile(t *testing.T) {
+	for name, body := range map[string]string{"empty": "", "blank lines": "\n\n", "comments only": "# my notes\n# more\n"} {
+		path := filepath.Join(t.TempDir(), "mole.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg := Default()
+		cfg.Nodes = map[string]NodeConfig{"devlabs": {Remote: "devlabs"}}
+		if err := Save(path, cfg, "nodes"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got, err := Load(path)
+		if err != nil || got.Nodes["devlabs"].Remote != "devlabs" {
+			t.Fatalf("%s: reload %+v %v", name, got.Nodes, err)
+		}
+		if raw, _ := os.ReadFile(path); name == "comments only" && !strings.Contains(string(raw), "# my notes") {
+			t.Fatalf("the comments were lost:\n%s", raw)
+		}
+	}
+	// A file that holds something that is not a mapping is still refused.
+	path := filepath.Join(t.TempDir(), "list.yaml")
+	os.WriteFile(path, []byte("- a\n- b\n"), 0o644)
+	if err := Save(path, Default(), "nodes"); err == nil {
+		t.Fatal("a list at the top level was overwritten")
+	}
+}
