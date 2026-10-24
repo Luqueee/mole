@@ -10,7 +10,9 @@ export type {
     CLIStatus,
     Event,
     Events,
+    SendResult,
     Settings,
     Stats,
-    Status
+    Status,
+    TransferView
 } from "./models.js";

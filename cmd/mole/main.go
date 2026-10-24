@@ -70,6 +70,12 @@ func main() {
 		os.Exit(runPush(args))
 	case "unpush":
 		os.Exit(runUnpush(args))
+	case "send", "ftp":
+		os.Exit(runSend(args))
+	case "inbox":
+		os.Exit(runInbox(args))
+	case "recv":
+		os.Exit(runRecv(args))
 	case "dns":
 		os.Exit(runDNS(args))
 	case "doctor":
@@ -112,6 +118,8 @@ func printUsage() {
 		{"doctor", "Diagnose config, SSH, push and split DNS (doctor [name...])"},
 		{"dns", "Route configured domains to the remote (dns install|uninstall; Linux)"},
 		{"unpush", "Remove a push forward"},
+		{"send", "Send files to the other machine's inbox (picker when no files; alias: ftp)"},
+		{"inbox", "Where received files land; accept incoming transfers (inbox -h)"},
 		{"init", "Generate a mole.yaml (interactive; run once per machine)"},
 		{"config", "Open the active mole.yaml in $VISUAL / $EDITOR (see `mole config -h`)"},
 		{"version", "Print version and exit"},
@@ -235,6 +243,12 @@ Either -remote or a config file with 'remote:' is required.`)
 	defer pushFwd.closeAll()
 	mgr.OnReconnect(pushFwd.reopenAll)
 
+	// File transfer: sending to the remote's inbox always works; receiving
+	// from the remote needs transfer.receive (see `mole inbox receive on`).
+	hub := newTransferHub(log, cfg.Remote, resolvedPath, cfg.Transfer, mgr, pushFwd, config.StateDir())
+	defer hub.close()
+	mgr.OnReconnect(hub.onReconnect)
+
 	// Watch SSH connection and auto-reconnect.
 	go mgr.Watch(ctx, 10*time.Second)
 
@@ -262,6 +276,7 @@ Either -remote or a config file with 'remote:' is required.`)
 	defer fwd.closeAll()
 
 	pushFwd.start(cfg.Push)
+	go hub.enableAtStart()
 
 	// Split-DNS: names under cfg.Domains resolve to virtual IPs and are
 	// forwarded by name, so the remote does the real DNS resolution.
@@ -329,7 +344,8 @@ Either -remote or a config file with 'remote:' is required.`)
 		srv := admin.New(stats, info).
 			WithPorts(fwd.ports).
 			WithPortController(fwd).
-			WithPushController(pushFwd)
+			WithPushController(pushFwd).
+			WithTransferController(hub)
 		adminSrv = &http.Server{
 			Addr:              cfg.AdminAddr,
 			Handler:           srv.Handler(),

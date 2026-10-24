@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Activity, Cable, Terminal, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
+import { Activity, Cable, Terminal, ArrowUp, ArrowDown, FolderOpen, Upload, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
 import type { Status, CLIStatus, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
-import { api, MOCK } from "./api";
+import type { Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
+import { api, MOCK, type Transfers } from "./api";
 
-type Tab = "status" | "ports" | "logs" | "setup";
+type Tab = "status" | "ports" | "transfers" | "logs" | "setup";
 const NAV: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: "status", label: "STATUS", icon: Activity },
   { id: "ports", label: "PORTS", icon: Cable },
+  { id: "transfers", label: "TRANSFERS", icon: ArrowUp },
   { id: "logs", label: "LOGS", icon: ScrollText },
   { id: "setup", label: "SETUP", icon: Terminal },
 ];
@@ -330,6 +332,156 @@ function PortsPage({ discover, forwarded, push, run }: { discover: number[]; for
 }
 
 
+const fmtSize = (n: number) => {
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+  return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
+};
+const fmtAgo = (ms: number) => {
+  const d = Math.max(Date.now() - ms, 0) / 1000;
+  if (d < 60) return "just now";
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 172800) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
+};
+const STATUS_TONE: Record<string, string> = { ok: "text-live", failed: "text-bad", rejected: "text-warn" };
+
+function TransfersPage({ s, tv, run }: { s: Status; tv: Transfers; run: Run }) {
+  const t = (s.info?.transfer ?? {}) as { receive?: boolean; accept?: string; inbox?: string; remote_error?: string };
+  const [folder, setFolder] = useState("");
+  const [busy, setBusy] = useState(false);
+  const sendPaths = async (paths: string[]) => {
+    if (!paths.length) return;
+    setBusy(true);
+    try {
+      const res = await api.send(paths, folder.trim());
+      for (const r of res) {
+        if (r.error) toast.error(`${r.name}: ${r.error}`);
+        else toast.success(`${r.name} → ${r.dir}/${r.saved}`);
+      }
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const choose = async () => {
+    try {
+      await sendPaths(await api.pick());
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+  const receive = MOCK ? api.mockReceive() : !!t.receive;
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {!tv.supported && !MOCK && (
+        <div className="border-b border-warn bg-warn/10 px-5 py-3 text-xs text-warn">
+          The running daemon does not know file transfer. Update the CLI (SETUP) and press RESTART.
+        </div>
+      )}
+
+      <SectionHead title="INBOX" hint="WHERE FILES SENT TO THIS MACHINE LAND" />
+      <div className="flex items-center gap-4 border-b border-line px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-display text-xl font-bold select-text" title={t.inbox}>{t.inbox || "~/mole-inbox"}</div>
+          <div className="mt-1 text-[11px] text-dim">
+            {receive ? <span className="text-live">RECEIVING FROM THE REMOTE</span> : <span className="text-faint">NOT RECEIVING FROM THE REMOTE</span>}
+            {receive && <span className="text-faint"> · {t.accept === "auto" ? "SAVED AUTOMATICALLY" : "ASKS FIRST"}</span>}
+          </div>
+          {t.remote_error && <div className="mt-1 text-[11px] text-bad select-text">remote: {t.remote_error}</div>}
+        </div>
+        <button onClick={() => run("opened", api.openInbox)} className="no-drag flex items-center gap-2 border border-line px-4 py-2 text-[11px] tracking-[0.2em] transition hover:bg-foreground hover:text-background">
+          <FolderOpen size={13} /> OPEN
+        </button>
+        <button
+          onClick={() => run(receive ? "stopped receiving" : "receiving files", () => api.setReceive(!receive))}
+          className={`no-drag border px-4 py-2 text-[11px] tracking-[0.2em] transition ${receive ? "border-live text-live hover:bg-live hover:text-background" : "border-line text-dim hover:bg-foreground hover:text-background"}`}
+        >
+          RECEIVE {receive ? "ON" : "OFF"}
+        </button>
+      </div>
+
+      {tv.pending.length > 0 && (
+        <>
+          <SectionHead title="WAITING FOR YOU" hint="INCOMING FROM THE REMOTE" />
+          {tv.pending.map((p) => (
+            <div key={p.id} className="rise flex items-center gap-4 border-b border-line bg-warn/[0.04] px-5 py-4">
+              <ArrowDown size={18} className="text-warn" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-bold select-text">
+                  {(p.files ?? []).map((f) => f.name).join(", ")}
+                </div>
+                <div className="mt-1 text-[11px] text-dim">
+                  {p.peer.toUpperCase()} · {(p.files ?? []).length} FILE{(p.files ?? []).length === 1 ? "" : "S"} · {fmtSize(p.total)}
+                  {p.to ? ` · INTO ${p.to}/` : ""}
+                </div>
+              </div>
+              <button onClick={() => run("accepted", () => api.decide(p.id, true))} className="no-drag bg-live px-5 py-2 font-display text-xs font-bold tracking-[0.2em] text-background transition hover:brightness-110">
+                ACCEPT
+              </button>
+              <button onClick={() => run("rejected", () => api.decide(p.id, false))} className="no-drag border border-bad px-5 py-2 text-xs tracking-[0.2em] text-bad transition hover:bg-bad hover:text-background">
+                REJECT
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+
+      <SectionHead title="SEND" hint="TO THE REMOTE'S INBOX" />
+      <div className="flex items-stretch border-b border-line">
+        <input
+          value={folder}
+          onChange={(e) => { setFolder(e.target.value); api.setFolder(e.target.value); }}
+          placeholder="SUB-FOLDER (OPTIONAL)"
+          className="no-drag w-72 bg-transparent px-5 py-4 text-xs tracking-[0.15em] text-foreground outline-none placeholder:text-faint select-text"
+        />
+        <div data-file-drop-target className="drop-zone flex flex-1 items-center justify-center gap-3 border-l border-dashed border-line px-5 py-4 text-[11px] tracking-[0.25em] text-dim transition">
+          <Upload size={16} className="text-hot" />
+          DROP FILES HERE
+        </div>
+        <button disabled={busy} onClick={choose} className="no-drag bg-hot px-8 font-display text-sm font-bold tracking-[0.2em] text-background transition enabled:hover:brightness-110 enabled:active:translate-y-px disabled:opacity-40">
+          {busy ? "SENDING…" : "CHOOSE FILES"}
+        </button>
+      </div>
+
+      {tv.active.map((a) => {
+        const pct = a.size > 0 ? Math.min(100, Math.round((a.bytes * 100) / a.size)) : 100;
+        return (
+          <div key={a.id} className="rise border-b border-line px-5 py-3">
+            <div className="flex items-center gap-3 text-xs">
+              {a.dir === "send" ? <ArrowUp size={14} className="text-hot" /> : <ArrowDown size={14} className="text-live" />}
+              <span className="min-w-0 flex-1 truncate font-bold">{a.name}</span>
+              <span className="text-dim tabular-nums">{fmtSize(a.bytes)} / {fmtSize(a.size)}</span>
+              <span className="w-10 text-right tabular-nums text-foreground">{pct}%</span>
+            </div>
+            <div className="mt-2 h-1 bg-line">
+              <div className={`h-full transition-all ${a.dir === "send" ? "bg-hot" : "bg-live"}`} style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })}
+
+      <SectionHead title="HISTORY" hint="SINCE THE DAEMON STARTED" />
+      {[...tv.records].reverse().map((r: TRecord) => (
+        <div key={r.id} className="rise border-b border-line px-5 py-3">
+          <div className="flex items-center gap-3 text-xs">
+            {r.dir === "send" ? <ArrowUp size={14} className="text-hot" /> : <ArrowDown size={14} className="text-live" />}
+            <span className="min-w-0 flex-1 truncate font-bold select-text">{r.saved && r.saved !== r.name ? `${r.name} → ${r.saved}` : r.name}</span>
+            <span className="text-dim tabular-nums">{fmtSize(r.size)}</span>
+            <span className={`w-20 text-right text-[10px] tracking-[0.2em] ${STATUS_TONE[r.status] ?? "text-dim"}`}>{r.status.toUpperCase()}</span>
+            <span className="w-20 text-right text-[10px] text-faint">{fmtAgo(r.start_ms)}</span>
+          </div>
+          {r.error && <div className="mt-1 pl-7 text-[11px] text-bad select-text">{r.error}</div>}
+        </div>
+      ))}
+      {tv.records.length === 0 && tv.active.length === 0 && <div className="p-8 text-xs tracking-[0.3em] text-faint">NOTHING TRANSFERRED YET</div>}
+    </div>
+  );
+}
+
 function SetupPage({ run }: { run: Run }) {
   const [cli, setCli] = useState<CLIStatus | null>(null);
   const load = useCallback(() => api.cli().then(setCli).catch(() => {}), []);
@@ -445,6 +597,17 @@ export default function App() {
   const rowSeq = useRef(0);
   const [supported, setSupported] = useState(true);
   const cursor = useRef<number | null>(null);
+  const [tv, setTv] = useState<Transfers>({ supported: false, last: 0, records: [], active: [], pending: [] });
+  const refreshTransfers = useCallback(async () => {
+    try {
+      setTv(await api.transfers(0));
+    } catch { /* daemon down: keep the last view */ }
+  }, []);
+  useEffect(() => {
+    refreshTransfers();
+    const t = setInterval(refreshTransfers, 1000);
+    return () => clearInterval(t);
+  }, [refreshTransfers]);
   const refresh = useCallback(async () => {
     try {
       const st = await api.status();
@@ -500,6 +663,7 @@ export default function App() {
       await fn();
       toast.success(label);
       refresh();
+      refreshTransfers();
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -530,12 +694,15 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1">
         {/* rail */}
-        <nav className="no-drag flex w-44 shrink-0 flex-col border-r border-line">
+        <nav className="no-drag flex w-52 shrink-0 flex-col border-r border-line">
           {NAV.map((n, i) => (
             <button key={n.id} onClick={() => setTab(n.id)} className={`flex items-center gap-3 border-b border-line px-5 py-5 text-left text-xs tracking-[0.25em] transition ${tab === n.id ? "bg-hot text-background" : "text-dim hover:bg-white/[0.04] hover:text-foreground"}`}>
               <span className="text-[10px] opacity-60">0{i + 1}</span>
               <n.icon size={15} />
               {n.label}
+              {n.id === "transfers" && tv.pending.length > 0 && (
+                <span className="ml-auto bg-warn px-1.5 py-0.5 text-[10px] font-bold text-background">{tv.pending.length}</span>
+              )}
             </button>
           ))}
           <div className="mt-auto border-t border-line p-5 text-[10px] leading-5 tracking-[0.2em] text-faint">
@@ -547,6 +714,7 @@ export default function App() {
           {s.error && <div className="border-b border-bad bg-bad/10 px-5 py-2 text-[11px] text-bad">{s.error}</div>}
           {tab === "status" && <StatusPage s={s} hist={hist} trips={trips} conns={conns} supported={supported} />}
           {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} push={s.push ?? []} run={run} />}
+          {tab === "transfers" && <TransfersPage s={s} tv={tv} run={run} />}
           {tab === "logs" && <LogsPage lines={logs} />}
           {tab === "setup" && <SetupPage run={run} />}
         </main>

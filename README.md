@@ -38,6 +38,7 @@ dev servers as they start.
 | 🛡️ **Exclude list** | System/reserved ports (22, 25, 53, 111, 631) are skipped by default; fully configurable. |
 | ♻️ **Auto-reconnect** | Transparent reconnect on tunnel drop, with periodic health checks. |
 | 🔑 **Native auth** | ssh-agent first (Unix socket / Windows named pipe), then `~/.ssh/id_*` keys. |
+| 📨 **Send files** | `mole send` puts files in the other machine's inbox, from either side, over the same SSH connection; a picker lists the folder when you name nothing. |
 | 🌙 **Background daemon** | `mole up -d` detaches; `mole down` stops it; `mole status` and `mole logs` introspect it. |
 | 🎨 **Beautiful logs** | `mole logs` renders the daemon log with colour level badges, a green `FORWARD` badge, and `(×N)` collapsing of repeats. |
 | 📦 **Single binary** | No separate runtime or `node_modules`; daemon mode uses the same executable. |
@@ -101,6 +102,8 @@ create a config interactively.
 | `mole logs` | Show the daemon log, colourised; `-f` to follow, `clean` to truncate it. |
 | `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
 | `mole push` · `mole unpush` | Expose a local port on the remote (`ssh -R`): `push LOCAL[:REMOTE]`, `push list`, `unpush LOCAL`. |
+| `mole send` (`ftp`) | Send files to the other machine's inbox; no arguments opens a file picker: `send [-to SUBFOLDER] [files...]`. |
+| `mole inbox` | Where received files land, and who may send: `inbox`, `path`, `set DIR`, `receive on\|off`, `mode ask\|auto`, `pending`, `accept`, `reject`. |
 | `mole doctor` | Diagnose config, SSH, push and split DNS with the fix for each problem: `doctor [name...]`. |
 | `mole dns` | Route configured `domains:` to the remote's DNS: `dns install`, `dns uninstall` (Linux, root). |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
@@ -331,6 +334,67 @@ Like `mole ports`, changes are saved to the config and applied live if the
 daemon is running. Push forwards are always explicit — never auto-discovered.
 They are re-opened automatically after an SSH reconnect.
 
+### Send files between the two machines
+
+Each machine has an **inbox**, the folder where files sent to it land
+(`~/mole-inbox` by default). `mole send` puts files in the *other* machine's
+inbox; you never type a destination path, only (optionally) a sub-folder of it.
+
+```bash
+mole send report.pdf              # to the remote's inbox
+mole send a.txt b.txt -to docs    # into <remote inbox>/docs
+mole send                         # no files: pick them from this folder
+mole ftp build.tar.gz             # ftp is an alias (it is not the FTP protocol)
+```
+
+With no files, in a terminal, a multi-select lists the regular files of the
+current folder (`space` selects, `ctrl+a` all, `/` filters, `enter` sends; `-a`
+includes hidden files). Directories are not supported yet.
+
+**Local to remote** needs nothing to be enabled: run it where `mole up` runs. The
+daemon opens an SSH session on the remote that runs `mole recv --stdio`, so SSH
+itself is the authentication and nothing is exposed. `mole` must be installed on
+the remote, and recent enough to know `recv`.
+
+**Remote to local** is opt-in, because it lets a process on the remote write
+into this machine:
+
+```bash
+mole inbox receive on        # on the machine that runs mole up
+mole send report.pdf         # on the remote: lands in the local inbox
+```
+
+The daemon listens on a loopback port and exposes it on the remote through a
+hidden push forward (`transfer.port`, default 9977; it does not appear in
+`mole push list`). A random token, readable only by your user on both machines,
+must accompany every transfer, so other users on the remote cannot use the port.
+
+Incoming transfers **wait for your answer** unless you set `mole inbox mode auto`:
+
+```bash
+mole inbox pending           # who is sending what
+mole inbox accept            # or: accept 3, accept all, reject ...
+```
+
+The desktop app has a **Transfers** tab for all of this, with drag and drop, a
+file chooser, progress, history, and accept/reject buttons; the tray notes
+transfers that are waiting.
+
+```yaml
+transfer:
+  inbox: ~/mole-inbox   # where files sent to THIS machine land (absolute or ~/)
+  receive: false        # accept files sent from the remote
+  accept: ask           # ask | auto
+  port: 9977            # loopback port for remote-to-local transfers
+  max_size_mb: 0        # cap on one incoming transfer (0 = none)
+```
+
+Files are checked with SHA-256, written under a temporary name and only then
+renamed, and never overwrite: a name that exists becomes `name (1).ext`. Names
+that try to leave the inbox (`../x`, absolute paths, symlinked folders) are
+refused, and received files keep only the owner's permissions. Set the remote's
+own inbox with `mole inbox set DIR` on the remote.
+
 ### Resolve a domain on the remote (split DNS)
 
 To reach names that only the remote can resolve (e.g. `admin.kena.lan`) from
@@ -460,6 +524,8 @@ mole ports  list|ls [-config PATH]
 mole push   [-config PATH] [-bind ADDR] LOCAL[:REMOTE]
 mole push   list|ls [-config PATH]
 mole unpush [-config PATH] LOCAL
+mole send   [-config PATH] [-to SUBFOLDER] [-a] [-direct] [files...]    (alias: ftp)
+mole inbox  [path | set DIR | receive on|off | mode ask|auto | pending | accept [ID|all] | reject [ID|all]] [-config PATH]
 mole dns    install|uninstall [-config PATH]      (Linux, needs root)
 mole doctor [-config PATH] [-timeout 10s] [name...]
 mole config edit [-config PATH] [-editor CMD]
@@ -487,6 +553,7 @@ mole version · mole help
 | `clip_listen`    | string | `127.0.0.1:7777`     | Bind address; use a private Tailscale/WireGuard IP for remote access |
 | `clip_interval_ms` | int  | —                    | Clipboard poll interval for `clip serve -watch`    |
 | `push`           | rule[] | `[]`                 | Local services exposed on the remote (`local`, optional `remote`, optional `bind`; default bind `127.0.0.1`) |
+| `transfer`       | object | see [Send files](#send-files-between-the-two-machines) | `inbox`, `receive`, `accept`, `port`, `max_size_mb` |
 | `domains`        | string[] | `[]`               | DNS suffixes (e.g. `kena.lan`) resolved **on the remote**; needs `sudo mole dns install` |
 | `domain_ports`   | int[]  | `[80,443]`           | Ports forwarded for every name under `domains` (1–45535) |
 

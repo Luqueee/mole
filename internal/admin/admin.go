@@ -133,6 +133,8 @@ type Server struct {
 	portsFn  func() []int
 	portsCtl PortController // optional: live-mutate the discover-port set
 	pushCtl  PushController // optional: push (remote) forwards
+
+	transferCtl TransferController // optional: file transfer
 }
 
 // PortController is the live-mutation counterpart of WithPorts. When
@@ -202,6 +204,9 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /ports/push", s.handlePushAdd)
 		mux.HandleFunc("DELETE /ports/push/", s.handlePushDelete)
 	}
+	if s.transferCtl != nil {
+		s.mountTransfer(mux)
+	}
 	return mux
 }
 
@@ -228,6 +233,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 			merged[k] = v
 		}
 		merged["push"] = s.pushCtl.ListPush()
+		info = merged
+	}
+	if s.transferCtl != nil {
+		merged := make(map[string]any, len(info)+1)
+		for k, v := range info {
+			merged[k] = v
+		}
+		merged["transfer"] = s.transferCtl.Info()
 		info = merged
 	}
 	out := map[string]any{

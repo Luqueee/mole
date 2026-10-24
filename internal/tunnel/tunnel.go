@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -370,6 +371,125 @@ func (m *Manager) Run(cmd string) ([]byte, error) {
 	defer sess.Close()
 	return sess.CombinedOutput(cmd)
 }
+
+// newSession opens an SSH session, reconnecting once if the transport is
+// dead (the same recovery Run does).
+func (m *Manager) newSession() (*ssh.Session, error) {
+	m.mu.RLock()
+	client := m.client
+	m.mu.RUnlock()
+	if client == nil {
+		c, err := m.reconnect(nil)
+		if err != nil {
+			return nil, err
+		}
+		client = c
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		client, reconnectErr := m.reconnect(client)
+		if reconnectErr != nil {
+			return nil, fmt.Errorf("reconnect: %w (original: %v)", reconnectErr, err)
+		}
+		return client.NewSession()
+	}
+	return sess, nil
+}
+
+// tailBuffer keeps the last few KiB written to it: enough of a remote
+// command's stderr to explain a failure without growing without bound.
+type tailBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+const tailBufferMax = 4 << 10
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	if over := len(b.buf) - tailBufferMax; over > 0 {
+		b.buf = append(b.buf[:0], b.buf[over:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
+}
+
+// Stream is a command running on the remote over an SSH session, with its
+// stdin and stdout exposed as one duplex byte stream.
+type Stream struct {
+	sess      *ssh.Session
+	stdin     io.WriteCloser
+	stdout    io.Reader
+	stderr    *tailBuffer
+	done      chan struct{}
+	err       error // exit status; valid once done is closed
+	closeOnce sync.Once
+}
+
+// Stream starts cmd on the remote and returns its stdio as a stream. The
+// caller must Close it.
+func (m *Manager) Stream(cmd string) (*Stream, error) {
+	sess, err := m.newSession()
+	if err != nil {
+		return nil, err
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		sess.Close()
+		return nil, err
+	}
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		sess.Close()
+		return nil, err
+	}
+	st := &Stream{sess: sess, stdin: stdin, stdout: stdout, stderr: &tailBuffer{}, done: make(chan struct{})}
+	sess.Stderr = st.stderr
+	if err := sess.Start(cmd); err != nil {
+		sess.Close()
+		return nil, err
+	}
+	go func() {
+		st.err = sess.Wait()
+		close(st.done)
+	}()
+	return st, nil
+}
+
+// Read reads the command's stdout.
+func (s *Stream) Read(p []byte) (int, error) { return s.stdout.Read(p) }
+
+// Write writes to the command's stdin.
+func (s *Stream) Write(p []byte) (int, error) { return s.stdin.Write(p) }
+
+// CloseWrite signals end of input to the command.
+func (s *Stream) CloseWrite() error { return s.stdin.Close() }
+
+// Close ends the session.
+func (s *Stream) Close() error {
+	var err error
+	s.closeOnce.Do(func() { err = s.sess.Close() })
+	return err
+}
+
+// Done is closed when the command has exited.
+func (s *Stream) Done() <-chan struct{} { return s.done }
+
+// Wait blocks until the command exits and returns its exit status as an error.
+func (s *Stream) Wait() error {
+	<-s.done
+	return s.err
+}
+
+// Stderr returns the tail of the command's stderr.
+func (s *Stream) Stderr() string { return strings.TrimSpace(s.stderr.String()) }
 
 // Watch periodically verifies the SSH connection and reconnects if it
 // has died. Runs until ctx is cancelled. Reconnection goes through the

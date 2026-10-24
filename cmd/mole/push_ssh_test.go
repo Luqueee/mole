@@ -37,6 +37,32 @@ type sshTestServer struct {
 	stall bool
 	// ignoreCancel accepts tcpip-forward but never answers its cancellation.
 	ignoreCancel bool
+	// exec, when set, runs "exec" session requests: ch carries the command's
+	// stdin/stdout (and ch.Stderr() its stderr); the result is its exit status.
+	exec func(cmd string, ch ssh.Channel) uint32
+}
+
+func (s *sshTestServer) session(nc ssh.NewChannel) {
+	ch, reqs, err := nc.Accept()
+	if err != nil {
+		return
+	}
+	for r := range reqs {
+		if r.Type != "exec" {
+			if r.WantReply {
+				_ = r.Reply(false, nil)
+			}
+			continue
+		}
+		var p struct{ Command string }
+		_ = ssh.Unmarshal(r.Payload, &p)
+		_ = r.Reply(true, nil)
+		go func() {
+			status := s.exec(p.Command, ch)
+			_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+			_ = ch.Close()
+		}()
+	}
 }
 
 func newSSHTestServer(t *testing.T, clientKey ssh.PublicKey) *sshTestServer {
@@ -128,6 +154,10 @@ func (s *sshTestServer) handle(raw net.Conn) {
 		for nc := range chans {
 			if nc.ChannelType() == "direct-tcpip" {
 				go s.direct(nc)
+				continue
+			}
+			if nc.ChannelType() == "session" && s.exec != nil {
+				go s.session(nc)
 				continue
 			}
 			ch, r, err := nc.Accept()

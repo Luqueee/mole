@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
@@ -60,6 +61,13 @@ func main() {
 		},
 		BackgroundColour: application.NewRGB(10, 10, 10),
 		URL:              "/",
+		// Files dropped on the Transfers tab's drop zone are sent to the remote.
+		EnableFileDrop: true,
+	})
+	win.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		if files := e.Context().DroppedFiles(); len(files) > 0 {
+			go svc.sendDropped(files)
+		}
 	})
 
 	setupTray(app, win, svc)

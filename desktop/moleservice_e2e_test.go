@@ -149,7 +149,11 @@ func TestServicePushEndToEnd(t *testing.T) {
 	}
 	// Build with the real toolchain environment, before HOME is redirected.
 	bin := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", filepath.Join(bin, "mole"), "github.com/Luqueee/mole/cmd/mole").CombinedOutput(); err != nil {
+	// From the repository root: cmd/mole belongs to the root module, whose
+	// dependencies the desktop module does not (and should not) track.
+	build := exec.Command("go", "build", "-o", filepath.Join(bin, "mole"), "./cmd/mole")
+	build.Dir = ".."
+	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build mole: %v\n%s", err, out)
 	}
 	home := t.TempDir()

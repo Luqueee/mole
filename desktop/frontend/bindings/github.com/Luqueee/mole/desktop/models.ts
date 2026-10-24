@@ -4,6 +4,9 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as admin$0 from "../internal/admin/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as transfer$0 from "../internal/transfer/models.js";
 
 /**
  * CLIStatus describes the CLI install for the Setup tab.
@@ -84,6 +87,16 @@ export interface Events {
 }
 
 /**
+ * SendResult is the outcome of sending one file.
+ */
+export interface SendResult {
+    "name": string;
+    "saved": string;
+    "dir": string;
+    "error"?: string;
+}
+
+/**
  * Settings is the editable subset of the mole config.
  */
 export interface Settings {
@@ -118,4 +131,16 @@ export interface Status {
     "push": admin$0.PushInfo[] | null;
     "info": { [_ in string]?: any } | null;
     "error"?: string;
+}
+
+/**
+ * TransferView is what the Transfers tab renders. Supported is false when
+ * the daemon predates file transfer.
+ */
+export interface TransferView {
+    "supported": boolean;
+    "last": number;
+    "records": transfer$0.Record[] | null;
+    "active": transfer$0.Active[] | null;
+    "pending": transfer$0.Pending[] | null;
 }
