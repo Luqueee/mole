@@ -470,6 +470,12 @@ its ports and push forwards, updating mole there (or installing a branch to try
 it), and a console that runs `mole -n NODE ...`. `mole node ls -json` and
 `mole node ping -json NAME` print what the tab shows, for scripts. Re-register
 a node with `mole node add -force NAME TARGET`.
+A node that has no mole yet is offered one: `mole node install NAME [-branch B]`
+(or the tab's INSTALL button, which also appears when adding a node) runs the
+installer on it over SSH. The installer itself downloads Go when the machine has
+none or an older one (into `~/.cache/mole/go`, checked against the published
+checksum; `MOLE_NO_GO_DOWNLOAD=1` refuses to), so only `git` and `curl` or
+`wget` are needed there.
 
 ### Resolve a domain on the remote (split DNS)
 
@@ -603,6 +609,7 @@ mole unpush [-config PATH] LOCAL
 mole send   [-config PATH] [-to SUBFOLDER] [-a] [-direct] [files...]    (alias: ftp)
 mole inbox  [path | set DIR | receive on|off | mode ask|auto | pending | accept [ID|all] | reject [ID|all]] [-config PATH]
 mole -n NODE <command> [args...]                 run a mole command on a node
+mole node   install NAME [-branch B]
 mole node   add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check] [-force] [-config PATH]
 mole node   ls [-json]|ping [-json] NAME|rm NAME [-config PATH]
 mole dns    install|uninstall [-config PATH]      (Linux, needs root)

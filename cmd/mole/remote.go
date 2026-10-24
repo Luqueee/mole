@@ -79,7 +79,11 @@ func splitNodeFlag(args []string) (node string, rest []string, found bool, err e
 
 // loadNodeConfig loads the config that holds the node registry.
 func loadNodeConfig() (*config.Config, error) {
-	return config.Load(resolveConfigPathReadOnly(""))
+	return loadNodeConfigAt("")
+}
+
+func loadNodeConfigAt(path string) (*config.Config, error) {
+	return config.Load(resolveConfigPathReadOnly(path))
 }
 
 // lookupNode resolves name or explains what the choices are.

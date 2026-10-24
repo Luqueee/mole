@@ -9,7 +9,7 @@ const validPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
 
 /* ───────── state vocabulary ───────── */
 
-type View = "checking" | "ready" | "no-agent" | "unreachable";
+type View = "checking" | "ready" | "no-agent" | "not-installed" | "unreachable";
 type Probe = { info: NodeInfo | null; loading: boolean; at: number };
 type Probes = Record<string, Probe | undefined>;
 
@@ -17,6 +17,7 @@ const TONE: Record<View, { text: string; bg: string; border: string; color: stri
   checking: { text: "text-faint", bg: "bg-faint", border: "border-faint", color: "var(--ink-faint)", label: "CHECKING" },
   ready: { text: "text-live", bg: "bg-live", border: "border-live", color: "var(--live)", label: "READY" },
   "no-agent": { text: "text-warn", bg: "bg-warn", border: "border-warn", color: "var(--warn)", label: "NO AGENT" },
+  "not-installed": { text: "text-warn", bg: "bg-warn", border: "border-warn", color: "var(--warn)", label: "NO MOLE" },
   unreachable: { text: "text-bad", bg: "bg-bad", border: "border-bad", color: "var(--bad)", label: "UNREACHABLE" },
 };
 const viewOf = (p?: Probe): View => (p?.info ? (p.info.state as View) : "checking");
@@ -59,13 +60,13 @@ function useJob() {
     return () => { alive.current = false; };
   }, []);
 
-  const run = useCallback(async (name: string, args: string[], opts: { header?: string; keep?: boolean } = {}) => {
+  const run = useCallback(async (name: string, args: string[], opts: { header?: string; keep?: boolean; start?: () => Promise<number> } = {}) => {
     setRunning(true);
     setCode(null);
     setText((t) => (opts.keep ? t + (t && !t.endsWith("\n") ? "\n" : "") : "") + (opts.header ? opts.header + "\n" : ""));
     let exit = -1;
     try {
-      const jid = await api.jobStart(name, args);
+      const jid = await (opts.start ? opts.start() : api.jobStart(name, args));
       id.current = jid;
       let from = 0;
       for (;;) {
@@ -203,7 +204,7 @@ function MeshMap({ self, nodes, probes, selected, onSelect, onAdd }: { self: Nod
             const path = `M${cx},${cy} L${p.x},${p.y}`;
             return (
               <g key={name} opacity={selected && !sel ? 0.55 : 1}>
-                <line x1={cx} y1={cy} x2={p.x} y2={p.y} stroke={color} strokeWidth={sel ? 2 : 1} opacity={v === "ready" ? 0.55 : 0.8} strokeDasharray={v === "ready" ? undefined : v === "no-agent" ? "8 5" : v === "unreachable" ? "2 7" : "3 5"} className={v === "checking" ? "blink" : undefined} />
+                <line x1={cx} y1={cy} x2={p.x} y2={p.y} stroke={color} strokeWidth={sel ? 2 : 1} opacity={v === "ready" ? 0.55 : 0.8} strokeDasharray={v === "ready" ? undefined : v === "no-agent" || v === "not-installed" ? "8 5" : v === "unreachable" ? "2 7" : "3 5"} className={v === "checking" ? "blink" : undefined} />
                 {v === "ready" && (
                   <>
                     <rect width="9" height="3" x="-4.5" y="-1.5" fill="var(--accent-hot)" style={{ filter: "drop-shadow(0 0 4px var(--accent-hot))" }}>
@@ -284,7 +285,7 @@ function MeshMap({ self, nodes, probes, selected, onSelect, onAdd }: { self: Nod
 
 /* ───────── add / edit ───────── */
 
-function NodeForm({ initial, existing, onDone, onCancel }: { initial?: NodeEntry; existing: string[]; onDone: (name: string) => void; onCancel: () => void }) {
+function NodeForm({ initial, existing, onDone, onCancel }: { initial?: NodeEntry; existing: string[]; onDone: (name: string, install?: boolean) => void; onCancel: () => void }) {
   const editing = !!initial;
   const [name, setName] = useState(initial?.name ?? "");
   const [target, setTarget] = useState(initial?.target ?? "");
@@ -307,16 +308,21 @@ function NodeForm({ initial, existing, onDone, onCancel }: { initial?: NodeEntry
   const portNum = port === "" ? 0 : Number(port);
   const valid = nameOk && !nameTaken && target.trim() !== "" && (port === "" || validPort(portNum));
 
-  const submit = async () => {
+  const [noMole, setNoMole] = useState(false);
+  const submit = async (installAfter = false) => {
     if (!valid || busy) return;
     setBusy(true);
     setError("");
+    setNoMole(false);
     try {
-      await api.nodeAdd({ name, target: target.trim(), sshPort: portNum, bin: bin.trim(), insecure, check, replace: editing });
+      await api.nodeAdd({ name, target: target.trim(), sshPort: portNum, bin: bin.trim(), insecure, check: check && !installAfter, replace: editing });
       toast.success(editing ? `${name} updated` : `${name} added`);
-      onDone(name);
+      onDone(name, installAfter);
     } catch (e) {
-      setError(errMsg(e));
+      const msg = errMsg(e);
+      setError(msg);
+      // The machine answers but has no mole: offer to put it there.
+      setNoMole(!editing && /not installed/i.test(msg));
     } finally {
       setBusy(false);
     }
@@ -381,7 +387,16 @@ function NodeForm({ initial, existing, onDone, onCancel }: { initial?: NodeEntry
         )}
       </div>
 
-      {error && <div className="mx-5 mb-3 whitespace-pre-wrap border border-bad bg-bad/10 px-3 py-2 text-[11px] text-bad select-text">{error}</div>}
+      {error && !noMole && <div className="mx-5 mb-3 whitespace-pre-wrap border border-bad bg-bad/10 px-3 py-2 text-[11px] text-bad select-text">{error}</div>}
+      {noMole && (
+        <div className="mx-5 mb-3 flex items-center gap-4 border border-warn bg-warn/10 px-4 py-3">
+          <div className="flex-1">
+            <div className="text-[10px] tracking-[0.3em] text-warn">MOLE IS NOT INSTALLED ON THAT MACHINE</div>
+            <div className="mt-1 text-xs text-dim">It answers over SSH. Add it and install mole there now? It is built on the machine, and Go is downloaded if it has none.</div>
+          </div>
+          <Btn tone="hot" disabled={busy} onClick={() => void submit(true)} className="shrink-0"><Download size={13} /> ADD AND INSTALL MOLE</Btn>
+        </div>
+      )}
 
       <div className="flex items-center gap-4 border-t border-line px-5 py-3">
         <button onClick={() => setCheck((c) => !c)} className="no-drag flex items-center gap-2 text-[11px] tracking-[0.15em] text-dim transition hover:text-foreground">
@@ -391,7 +406,7 @@ function NodeForm({ initial, existing, onDone, onCancel }: { initial?: NodeEntry
         <span className="text-[10px] text-faint">{check ? "refuses a node that does not answer" : "registers it without contacting it"}</span>
         <div className="ml-auto flex gap-2">
           <Btn onClick={onCancel}>CANCEL</Btn>
-          <Btn tone="hot" disabled={!valid || busy} onClick={submit} className="min-w-36">
+          <Btn tone="hot" disabled={!valid || busy} onClick={() => void submit()} className="min-w-36">
             {busy ? (check ? "CONTACTING…" : "SAVING…") : editing ? "SAVE" : "ADD NODE"}
           </Btn>
         </div>
@@ -404,7 +419,7 @@ function NodeForm({ initial, existing, onDone, onCancel }: { initial?: NodeEntry
 
 const QUICK = ["status", "ports list", "logs", "doctor", "inbox", "version"];
 
-function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved }: { entry: NodeEntry; probe?: Probe; selfVersion: string; reprobe: () => Promise<void>; onEdit: () => void; onRemoved: () => void }) {
+function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved, autoInstall, onAutoInstalled }: { entry: NodeEntry; probe?: Probe; selfVersion: string; reprobe: () => Promise<void>; onEdit: () => void; onRemoved: () => void; autoInstall?: boolean; onAutoInstalled?: () => void }) {
   const info = probe?.info ?? null;
   const name = entry.name;
   const d = info?.daemon ?? null;
@@ -429,6 +444,23 @@ function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved }: {
       void reprobe();
     }
   };
+
+  const runInstall = async () => {
+    const b = branch.trim();
+    if (b && !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b)) return toast.error("That is not a branch name");
+    const code = await update.run(name, [], { header: `$ mole node install ${name}${b ? ` -branch ${b}` : ""}`, start: () => api.jobInstall(name, b) });
+    if (code === 0) toast.success(`mole installed on ${name}`);
+    else if (code !== -1) toast.error(`the install failed on ${name} (exit ${code})`);
+    void reprobe();
+  };
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (!autoInstall || autoRan.current) return;
+    autoRan.current = true;
+    onAutoInstalled?.();
+    void runInstall();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoInstall]);
 
   const runUpdate = async () => {
     const b = branch.trim();
@@ -487,13 +519,29 @@ function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved }: {
         </div>
       )}
 
+      {info?.state === "not-installed" && (
+        <Block title="INSTALL MOLE" hint="THE NODE ANSWERS, BUT HAS NO MOLE" right={update.running ? <Btn tone="bad" onClick={update.cancel}><X size={11} /> CANCEL</Btn> : undefined}>
+          <div className="text-xs leading-5 text-dim">
+            mole is built on that machine by the official installer, over SSH. It needs <span className="text-foreground">git</span> and <span className="text-foreground">curl</span> or <span className="text-foreground">wget</span> there; if Go is missing, the installer downloads it (checked against its published checksum) into <span className="text-foreground">~/.cache/mole/go</span>, without touching the system.
+          </div>
+          <div className="mt-3 flex items-stretch gap-3">
+            <div className="no-drag flex flex-1 items-center border border-line">
+              <span className="px-3 text-[10px] tracking-[0.25em] text-faint">BRANCH</span>
+              <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="latest main  ·  or a branch to try" className="min-w-0 flex-1 bg-transparent py-2.5 pr-3 text-xs text-foreground outline-none placeholder:text-faint select-text" />
+            </div>
+            <Btn tone="hot" disabled={update.running} onClick={runInstall} className="min-w-44"><Download size={13} /> {update.running ? "INSTALLING…" : "INSTALL MOLE"}</Btn>
+          </div>
+          {(update.text || update.running) && <div className="mt-3"><Term text={update.text} running={update.running} /></div>}
+        </Block>
+      )}
+
       {needsUpdate && (
         <div className="border border-warn bg-warn/10 px-4 py-3 text-xs text-warn">
           Its mole{info?.version ? ` (v${info.version})` : ""} answers, but is too old to be managed from here. Update it below and its details will appear.
         </div>
       )}
 
-      {info && info.state !== "unreachable" && (
+      {info && info.state !== "unreachable" && info.state !== "not-installed" && (
         <Block title="IDENTITY" hint={info.state === "ready" ? "REPORTED BY THE NODE'S AGENT" : "LIMITED: NO AGENT"}>
           <div className="grid grid-cols-4 gap-x-6 gap-y-4">
             <Fact k="HOST" v={info.hostname} />
@@ -595,7 +643,7 @@ function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved }: {
         </>
       )}
 
-      {info && info.state !== "unreachable" && (
+      {info && info.state !== "unreachable" && info.state !== "not-installed" && (
         <Block
           title="UPDATE"
           hint="BUILD MOLE ON THE NODE"
@@ -619,7 +667,7 @@ function NodeDetail({ entry, probe, selfVersion, reprobe, onEdit, onRemoved }: {
         </Block>
       )}
 
-      {info && info.state !== "unreachable" && (
+      {info && info.state !== "unreachable" && info.state !== "not-installed" && (
         <Block title="CONSOLE" hint={`mole -n ${name} …`} right={cons.text ? <button onClick={cons.clear} className="no-drag text-[10px] tracking-[0.2em] text-faint transition hover:text-foreground">CLEAR</button> : undefined}>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {QUICK.map((q) => (
@@ -672,6 +720,7 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
   const [probes, setProbes] = useState<Probes>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<{ edit?: NodeEntry } | null>(null);
+  const [installing, setInstalling] = useState<string | null>(null);
   const [selfVersion, setSelfVersion] = useState("");
   const seq = useRef<Record<string, number>>({});
   const names = useRef<string[]>([]);
@@ -736,10 +785,10 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
   }, [key, probe]);
 
   const counts = useMemo(() => {
-    const c = { ready: 0, noAgent: 0, down: 0, checking: 0 };
+    const c = { ready: 0, noAgent: 0, noMole: 0, down: 0, checking: 0 };
     for (const n of list.nodes) {
       const v = viewOf(probes[n.name]);
-      if (v === "ready") c.ready++; else if (v === "no-agent") c.noAgent++; else if (v === "unreachable") c.down++; else c.checking++;
+      if (v === "ready") c.ready++; else if (v === "no-agent") c.noAgent++; else if (v === "not-installed") c.noMole++; else if (v === "unreachable") c.down++; else c.checking++;
     }
     return c;
   }, [list.nodes, probes]);
@@ -772,6 +821,7 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
           <span className="flex items-center gap-4 text-faint">
             {counts.ready > 0 && <span className="text-live">{counts.ready} READY</span>}
             {counts.noAgent > 0 && <span className="text-warn">{counts.noAgent} NO AGENT</span>}
+            {counts.noMole > 0 && <span className="text-warn">{counts.noMole} NEED MOLE</span>}
             {counts.down > 0 && <span className="text-bad">{counts.down} DOWN</span>}
             {counts.checking > 0 && <span>{counts.checking} CHECKING…</span>}
           </span>
@@ -786,7 +836,7 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
           key="new"
           existing={existing}
           onCancel={() => setForm(null)}
-          onDone={(name) => { setForm(null); void loadList().then(() => { setSelected(name); void probe(name); }); }}
+          onDone={(name, install) => { setForm(null); if (install) setInstalling(name); void loadList().then(() => { setSelected(name); if (!install) void probe(name); }); }}
         />
       )}
 
@@ -834,6 +884,8 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
                 selfVersion={selfVersion}
                 reprobe={() => probe(n.name)}
                 onEdit={() => openForm(n)}
+                autoInstall={installing === n.name}
+                onAutoInstalled={() => setInstalling(null)}
                 onRemoved={() => { setSelected(null); setProbes((p) => { const { [n.name]: _gone, ...rest } = p; return rest; }); void loadList(); }}
               />
             )}

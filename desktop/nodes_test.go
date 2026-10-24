@@ -319,3 +319,26 @@ Host=eq
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestNodeInstallJob(t *testing.T) {
+	stubMole(t, `printf '%s ' "$@"; echo`)
+	m := NewMoleService()
+	id, err := m.StartNodeInstall("devlabs", "feat/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, v := waitJob(t, m, id)
+	if v.Code != 0 || strings.TrimSpace(out) != "node install -branch feat/x devlabs" {
+		t.Fatalf("out=%q %+v", out, v)
+	}
+	id, _ = m.StartNodeInstall("devlabs", "")
+	if out, _ := waitJob(t, m, id); strings.TrimSpace(out) != "node install devlabs" {
+		t.Fatalf("out=%q", out)
+	}
+	if _, err := m.StartNodeInstall("devlabs", "--evil"); err == nil {
+		t.Fatal("a flag as a branch was accepted")
+	}
+	if _, err := m.StartNodeInstall("-x", ""); err == nil {
+		t.Fatal("a flag as a node was accepted")
+	}
+}

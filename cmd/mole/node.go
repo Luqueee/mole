@@ -39,6 +39,7 @@ Commands:
   ping NAME         time a round trip to a node
                     (ls and ping take -json: one machine-readable document, which
                     the desktop app reads)
+  install NAME      install mole on a node that lacks it (flag: -branch NAME)
   rm NAME           forget a node
 
 Flags (every command):
@@ -58,6 +59,7 @@ func runNode(args []string) int {
 	insecure := fs.Bool("insecure", false, "skip host key verification for the node (add; UNSAFE)")
 	noCheck := fs.Bool("no-check", false, "register without contacting the node (add)")
 	force := fs.Bool("force", false, "replace a node that is already registered (add)")
+	branch := fs.String("branch", "", "git branch (or tag) to build on the node (install)")
 	jsonOut := fs.Bool("json", false, "print JSON (ls, ping)")
 	fs.Usage = func() { printNodeUsage(os.Stderr) }
 	rest, err := parseInterspersed(fs, args)
@@ -79,6 +81,12 @@ func runNode(args []string) int {
 			return 2
 		}
 		return nodePing(*configPath, rest[0], *jsonOut)
+	case "install":
+		if len(rest) != 1 {
+			fmt.Fprintln(os.Stderr, "Usage: mole node install NAME [-branch NAME]")
+			return 2
+		}
+		return nodeInstall(*configPath, rest[0], *branch)
 	case "rm", "remove":
 		if len(rest) != 1 {
 			fmt.Fprintln(os.Stderr, "Usage: mole node rm NAME")
@@ -93,13 +101,15 @@ func runNode(args []string) int {
 
 // probe is what contacting a node found out.
 type probe struct {
-	Hello     agent.Hello
-	Status    agent.Status
-	HasAgent  bool
-	Version   string // from `mole version` when the node has no agent
-	Err       error  // the node could not be reached
-	Connect   time.Duration
-	RoundTrip time.Duration
+	Hello    agent.Hello
+	Status   agent.Status
+	HasAgent bool
+	Version  string // from `mole version` when the node has no agent
+	Err      error  // the node could not be reached
+	// NotInstalled: the node answers, but has no mole (`mole node install`).
+	NotInstalled bool
+	Connect      time.Duration
+	RoundTrip    time.Duration
 }
 
 // probeNode connects to a node and asks its agent who it is; a node without
@@ -139,7 +149,8 @@ func probeNode(ctx context.Context, cfg *config.Config, n config.NodeConfig) pro
 		case code == 0:
 			p.Version = parseVersionOutput(out.String())
 		case code == 127: // the shell's "command not found"
-			p.Err = errors.New("mole is not installed there (or not in ~/.local/bin or /usr/local/bin): register the node with -bin PATH")
+			p.NotInstalled = true
+			p.Err = errors.New("mole is not installed there (or not in ~/.local/bin or /usr/local/bin): `mole node install NAME` installs it, or register the node with -bin PATH")
 		case msg != "":
 			p.Err = fmt.Errorf("mole is not usable there: %s", firstLine(msg))
 		default:
@@ -223,7 +234,11 @@ func nodeAdd(configPath, name string, n config.NodeConfig, noCheck, force bool) 
 		p := probeNode(ctx, cfg, n)
 		switch {
 		case p.Err != nil:
-			fmt.Fprintf(os.Stderr, "mole node: cannot reach %s: %v\n(use -no-check to register it anyway)\n", n.Remote, p.Err)
+			hint := "(use -no-check to register it anyway)"
+			if p.NotInstalled {
+				hint = "(register it with -no-check, then run: mole node install " + name + ")"
+			}
+			fmt.Fprintf(os.Stderr, "mole node: cannot reach %s: %v\n%s\n", n.Remote, p.Err, hint)
 			return 1
 		case p.HasAgent:
 			fmt.Printf("%s %s: mole %s on %s (%s/%s)\n", cGreen("✓", color), name, p.Hello.Version, p.Hello.Hostname, p.Hello.OS, p.Hello.Arch)

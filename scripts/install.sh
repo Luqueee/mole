@@ -4,7 +4,9 @@
 # What this script does:
 #   1. Locates the source: uses the local repo if it is one, otherwise
 #      clones https://github.com/Luqueee/mole into a temp dir.
-#   2. Builds the binary with `go build -trimpath`.
+#   2. Builds the binary with `go build -trimpath`. If Go is missing or too
+#      old, downloads the version the source needs into ~/.cache/mole/go
+#      (MOLE_NO_GO_DOWNLOAD=1 refuses to).
 #   3. Copies it to the right place (root → /usr/local/bin, otherwise
 #      $HOME/.local/bin). Override with --prefix or INSTALL_DIR.
 #   4. Verifies with `mole version`.
@@ -112,7 +114,9 @@ install mole (Unix: Linux, macOS, FreeBSD).
 What this script does:
   1. Locates the source: uses the local repo if it is one, otherwise
      clones https://github.com/Luqueee/mole into a temp dir.
-  2. Builds the binary with `go build -trimpath`.
+  2. Builds the binary with `go build -trimpath`. If Go is missing or too
+     old, it downloads the version the source needs (checked against go.dev's
+     checksum) into ~/.cache/mole/go; MOLE_NO_GO_DOWNLOAD=1 refuses to.
   3. Copies it to the right place (root -> /usr/local/bin, otherwise
      $HOME/.local/bin). Override with --prefix or INSTALL_DIR.
   4. Verifies with `mole version`.
@@ -254,8 +258,114 @@ step "using source: $PROJECT_ROOT"
 # Step 2: build
 # ---------------------------------------------------------------------------
 
+# The Go version the source asks for (the `go` line of go.mod).
+go_wanted() {
+	awk '$1 == "go" { print $2; exit }' "$PROJECT_ROOT/go.mod" 2>/dev/null
+}
+
+# version_ge A B: dotted version A is at least B (1.26.4 >= 1.26, 1.25.0 < 1.26.4).
+version_ge() {
+	awk -v a="$1" -v b="$2" 'BEGIN {
+		na = split(a, x, "."); nb = split(b, y, ".")
+		for (i = 1; i <= 3; i++) {
+			p = (i <= na) ? x[i] + 0 : 0; q = (i <= nb) ? y[i] + 0 : 0
+			if (p != q) exit (p > q) ? 0 : 1
+		}
+		exit 0
+	}'
+}
+
+fetch_to() { # fetch_to URL FILE
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$1" -o "$2"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -qO "$2" "$1"
+	else
+		return 1
+	fi
+}
+
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{ print $1 }'
+	else
+		shasum -a 256 "$1" | awk '{ print $1 }'
+	fi
+}
+
+# download_go VERSION: fetch the official Go toolchain into a cache under the
+# user's home (nothing system-wide is touched) and print the path of its `go`.
+# The archive is checked against the digest published next to it.
+download_go() {
+	local ver="$1" os arch cache dest tmp base file want got
+	case "$(uname -s)" in
+	Linux) os=linux ;;
+	Darwin) os=darwin ;;
+	FreeBSD) os=freebsd ;;
+	*) die "cannot fetch Go for $(uname -s): install Go $ver+ from https://go.dev/dl/ and re-run" ;;
+	esac
+	case "$(uname -m)" in
+	x86_64|amd64) arch=amd64 ;;
+	aarch64|arm64) arch=arm64 ;;
+	armv6*|armv7*) arch=armv6l ;;
+	i386|i686) arch=386 ;;
+	*) die "cannot fetch Go for $(uname -m): install Go $ver+ from https://go.dev/dl/ and re-run" ;;
+	esac
+	cache="${XDG_CACHE_HOME:-$HOME/.cache}/mole/go"
+	dest="$cache/$ver"
+	if [ -x "$dest/go/bin/go" ]; then
+		echo "$dest/go/bin/go"
+		return 0
+	fi
+	base="${MOLE_GO_URL:-https://dl.google.com/go}"
+	file="go$ver.$os-$arch.tar.gz"
+	mkdir -p "$cache"
+	tmp="$(mktemp -d "$cache/.dl.XXXXXX")"
+	step "downloading Go $ver ($os/$arch) into $dest" >&2
+	fetch_to "$base/$file" "$tmp/$file" || { rm -rf "$tmp"; die "could not download $base/$file (set MOLE_NO_GO_DOWNLOAD=1 and install Go yourself, or MOLE_GO_URL to a mirror)"; }
+	want="$(fetch_to "$base/$file.sha256" "$tmp/sum" && tr -d ' \n\r' <"$tmp/sum" || true)"
+	got="$(sha256_of "$tmp/$file")"
+	case "$want" in
+	*[!0-9a-f]*|"") rm -rf "$tmp"; die "could not read the published checksum of $file; refusing to run an unverified Go" ;;
+	esac
+	if [ "$want" != "$got" ]; then
+		rm -rf "$tmp"
+		die "the Go archive does not match its published checksum (got $got, want $want)"
+	fi
+	mkdir -p "$tmp/x"
+	tar -xzf "$tmp/$file" -C "$tmp/x" || { rm -rf "$tmp"; die "could not unpack $file"; }
+	[ -x "$tmp/x/go/bin/go" ] || { rm -rf "$tmp"; die "the Go archive has no go/bin/go"; }
+	rm -rf "$dest"
+	mkdir -p "$dest"
+	mv "$tmp/x/go" "$dest/go"
+	rm -rf "$tmp"
+	echo "$dest/go/bin/go"
+}
+
+# Pick the Go to build with: the one on PATH when it is new enough, else a
+# private copy of the version go.mod asks for (so `curl | sh` works on a
+# machine without Go, or with an older one).
 GO_BIN="${GO:-$(command -v go || true)}"
-[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go 1.26.4+ from https://go.dev/dl/ and re-run."
+GO_WANT="$(go_wanted)"
+GO_HAVE=""
+# Asked from inside the source, so a Go that can fetch the toolchain go.mod
+# names by itself (1.21+) counts as new enough.
+[ -n "$GO_BIN" ] && GO_HAVE="$(cd "$PROJECT_ROOT" && "$GO_BIN" env GOVERSION 2>/dev/null | sed 's/^go//' || true)"
+if [ -z "${GO:-}" ] && [ -n "$GO_WANT" ] && { [ -z "$GO_HAVE" ] || ! version_ge "$GO_HAVE" "$GO_WANT"; }; then
+	if [ -n "${MOLE_NO_GO_DOWNLOAD:-}" ]; then
+		die "Go $GO_WANT+ is required (found ${GO_HAVE:-none}); install it from https://go.dev/dl/ and re-run"
+	fi
+	if [ -n "$GO_HAVE" ]; then
+		step "Go $GO_HAVE is older than the $GO_WANT this source needs"
+	else
+		step "Go is not installed"
+	fi
+	GO_BIN="$(download_go "$GO_WANT")"
+	# The private toolchain is exactly the one wanted: never go looking for another.
+	export GOTOOLCHAIN=local
+	ok "using $GO_BIN"
+fi
+[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go ${GO_WANT:-1.26.4}+ from https://go.dev/dl/ and re-run."
 
 # Say where the binary comes from, so `mole version` shows the branch and
 # commit that was installed (stamped with -ldflags; empty without git).

@@ -258,6 +258,14 @@ export function Start(): $CancellablePromise<void> {
 }
 
 /**
+ * StartNodeInstall installs mole on a node that lacks it (`mole node install`),
+ * optionally building a branch. Follow it with GetNodeJob.
+ */
+export function StartNodeInstall(name: string, branch: string): $CancellablePromise<number> {
+    return $Call.ByID(3922810981, name, branch);
+}
+
+/**
  * StartNodeJob runs `mole -n NAME <args>` in the background and returns an
  * id for GetNodeJob. It has no terminal: a command that asks for one fails.
  */

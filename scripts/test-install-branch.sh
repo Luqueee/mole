@@ -132,6 +132,58 @@ check "the running binary was left alone" cmp -s "$TMP/self/mole" "$TMP/self/mol
 check "-branch with -version is refused" bash -c '! "$1" update -branch a -version v0.1.1 -dry-run' _ "$TMP/self/mole"
 check "a dry run shows the branch and installer" bash -c '"$1" update -branch feat/x -dry-run | grep -qF "refs/heads/feat/x/scripts/install.sh"' _ "$TMP/self/mole"
 
+echo "== Go too old or missing: the installer fetches the one the source needs"
+WANT_GO="$(awk '$1 == "go" { print $2; exit }' "$ROOT/go.mod")"
+REAL_GO="$(command -v go)"
+case "$(uname -s)" in Linux) GOOS_=linux ;; Darwin) GOOS_=darwin ;; *) GOOS_=freebsd ;; esac
+case "$(uname -m)" in x86_64|amd64) GOARCH_=amd64 ;; aarch64|arm64) GOARCH_=arm64 ;; *) GOARCH_=$(uname -m) ;; esac
+# A stand-in Go "mirror": an archive whose go/bin/go runs the real one (letting it
+# pick the toolchain go.mod names, as the real downloaded Go would be), with its digest.
+mkdir -p "$TMP/gomirror" "$TMP/gosrc/go/bin"
+printf '#!/bin/sh\necho "$0" >> "%s/fetched-go-used"\nGOTOOLCHAIN=auto exec "%s" "$@"\n' "$TMP" "$REAL_GO" >"$TMP/gosrc/go/bin/go"
+chmod 755 "$TMP/gosrc/go/bin/go"
+GOFILE="go$WANT_GO.$GOOS_-$GOARCH_.tar.gz"
+tar -C "$TMP/gosrc" -czf "$TMP/gomirror/$GOFILE" go
+if command -v sha256sum >/dev/null 2>&1; then sha256sum "$TMP/gomirror/$GOFILE" | awk '{print $1}' >"$TMP/gomirror/$GOFILE.sha256"; else shasum -a 256 "$TMP/gomirror/$GOFILE" | awk '{print $1}' >"$TMP/gomirror/$GOFILE.sha256"; fi
+# An outdated Go first on PATH.
+mkdir -p "$TMP/oldgo"
+printf '#!/bin/sh\n[ "$1 $2" = "env GOVERSION" ] && { echo go1.20.0; exit 0; }\nexit 1\n' >"$TMP/oldgo/go"
+chmod 755 "$TMP/oldgo/go"
+godl() { # godl <dest> [extra env...]
+	local dest="$1"
+	shift
+	env PATH="$TMP/oldgo:$PATH" XDG_CACHE_HOME="$TMP/cache" MOLE_GO_URL="file://$TMP/gomirror" MOLE_REPO="$TMP/origin.git" \
+		MOLE_VERSION=try/install-me INSTALL_DIR="$dest" NO_COLOR=1 "$@" bash "$ROOT/scripts/install.sh" --no-verify
+}
+if godl "$TMP/bin-godl/mole" >"$TMP/out-godl.txt" 2>&1; then
+	check "an old Go is replaced by the downloaded one" true
+else
+	check "an old Go is replaced by the downloaded one" false
+fi
+check "the build used the downloaded Go" test -s "$TMP/fetched-go-used"
+check "mole built with it" version_has "$TMP/bin-godl/mole" "(try/install-me@$WANT)"
+check "it was cached for next time" test -x "$TMP/cache/mole/go/$WANT_GO/go/bin/go"
+rm -f "$TMP/fetched-go-used"
+godl "$TMP/bin-godl2/mole" >"$TMP/out-godl2.txt" 2>&1 || true
+check "the cached Go is reused, not downloaded again" bash -c '! grep -q downloading "$1"' _ "$TMP/out-godl2.txt"
+echo "== a tampered Go archive is refused"
+echo 0000000000000000000000000000000000000000000000000000000000000000 >"$TMP/gomirror/$GOFILE.sha256"
+rm -rf "$TMP/cache"
+if godl "$TMP/bin-godl3/mole" >"$TMP/out-godl3.txt" 2>&1; then
+	check "a checksum mismatch fails the install" false
+else
+	check "a checksum mismatch fails the install" true
+fi
+check "nothing was installed" test ! -e "$TMP/bin-godl3/mole"
+check "nothing was cached" test ! -e "$TMP/cache/mole/go/$WANT_GO"
+echo "== MOLE_NO_GO_DOWNLOAD refuses to download"
+if godl "$TMP/bin-godl4/mole" MOLE_NO_GO_DOWNLOAD=1 >"$TMP/out-godl4.txt" 2>&1; then
+	check "it fails instead of downloading" false
+else
+	check "it fails instead of downloading" true
+fi
+check "and says what is needed" grep -q "is required" "$TMP/out-godl4.txt"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then
 	echo "--- installer output of the runs above:" >&2
