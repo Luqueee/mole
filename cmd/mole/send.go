@@ -291,7 +291,7 @@ func sendDirect(ctx context.Context, cfg *config.Config, files []transfer.File, 
 	var ui *progressUI
 	lastFile := -1
 	waiting := time.AfterFunc(1500*time.Millisecond, func() {
-		fmt.Fprintln(os.Stderr, "  waiting for the other side to accept the transfer...")
+		fmt.Fprintln(os.Stderr, "  waiting for the other side to accept it (there: `mole inbox accept`, or the app's Transfers tab)...")
 	})
 	defer waiting.Stop()
 	start := time.Now()

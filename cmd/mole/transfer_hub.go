@@ -51,6 +51,8 @@ type transferHub struct {
 	gate     *transfer.Gate
 
 	recvCmd, tokenCmd string
+	// notify tells the user something needs an answer (osNotify by default).
+	notify func(title, text string)
 	// remotePort is where the receiver shows up on the remote; 0 means the
 	// same port as the local listener (tests set it, since both "machines"
 	// share one loopback there).
@@ -77,7 +79,7 @@ func newTransferHub(log *slog.Logger, remote, cfgPath string, cfg config.Transfe
 	h := &transferHub{
 		log: log, remote: remote, cfgPath: cfgPath, cfg: cfg, ssh: ssh, push: push, stateDir: stateDir,
 		tlog: transfer.NewLog(), gate: transfer.NewGate(),
-		recvCmd: remoteRecvCmd, tokenCmd: remoteSetTokenCmd,
+		recvCmd: remoteRecvCmd, tokenCmd: remoteSetTokenCmd, notify: osNotify,
 	}
 	if st, err := os.Stat(cfgPath); err == nil {
 		h.cfgMTime = st.ModTime()
@@ -234,6 +236,11 @@ func (h *transferHub) startReceiver() error {
 	if cfg.AcceptMode() == "ask" {
 		rcv.Approve = func(ctx context.Context, o transfer.Offer) error {
 			h.log.Info("incoming transfer waiting for approval", "peer", o.Peer, "files", len(o.Files), "bytes", o.Total, "accept_with", "mole inbox accept")
+			names := make([]string, len(o.Files))
+			for i, f := range o.Files {
+				names[i] = f.Name
+			}
+			h.notify("mole", o.Peer+" wants to send "+offerSummary(names, o.Total)+". Accept it with `mole inbox accept` or in the app.")
 			return h.gate.Approve(ctx, o)
 		}
 	}

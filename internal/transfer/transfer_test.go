@@ -234,6 +234,72 @@ func TestApproveRefusalAndOffer(t *testing.T) {
 	}
 }
 
+func TestOfferIsDroppedWhenTheSenderLeaves(t *testing.T) {
+	r := newReceiver(t)
+	gate := NewGate()
+	r.Approve = gate.Approve
+	cl, sv := tcpPair(t)
+	herr := make(chan error, 1)
+	go func() { herr <- r.Handle(context.Background(), sv); sv.Close() }()
+	if err := writeJSONLine(cl, hello{V: 1, Files: []FileInfo{{Name: "gone.txt", Size: 3}}}); err != nil {
+		t.Fatal(err)
+	}
+	eventually := func(what string, ok func() bool) {
+		t.Helper()
+		for i := 0; i < 300; i++ {
+			if ok() {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s", what)
+	}
+	eventually("the offer to be listed", func() bool { return len(gate.List()) == 1 })
+	cl.Close() // Ctrl+C on the sender
+	eventually("the offer to disappear", func() bool { return len(gate.List()) == 0 })
+	select {
+	case err := <-herr:
+		if err == nil || !strings.Contains(err.Error(), "disconnected") {
+			t.Fatalf("handle returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Handle kept waiting for an answer nobody wants")
+	}
+	recs, _, _ := r.Log.Since(0)
+	if len(recs) != 1 || recs[0].Status != StatusFailed || !strings.Contains(recs[0].Error, "disconnected") {
+		t.Fatalf("log: %+v", recs)
+	}
+}
+
+func TestAcceptedOfferStillTransfers(t *testing.T) {
+	// The watcher that notices a departing sender must not eat the file.
+	r := newReceiver(t)
+	gate := NewGate()
+	r.Approve = gate.Approve
+	cl, sv := tcpPair(t)
+	go func() { r.Handle(context.Background(), sv); sv.Close() }()
+	done := make(chan error, 1)
+	var res []Result
+	go func() {
+		var err error
+		res, err = Send(context.Background(), cl, []File{memFile("kept.bin", randBytes(t, 3<<20), 0o644, 0)}, SendOptions{})
+		done <- err
+	}()
+	for i := 0; i < 300 && len(gate.List()) == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(150 * time.Millisecond) // the offer sits unanswered for a while
+	if err := gate.Decide(gate.List()[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil || len(res) != 1 || res[0].Bytes != 3<<20 {
+		t.Fatalf("send: %+v %v", res, err)
+	}
+	if st, err := os.Stat(filepath.Join(r.Inbox, "kept.bin")); err != nil || st.Size() != 3<<20 {
+		t.Fatalf("file: %v %v", st, err)
+	}
+}
+
 func TestMaxBytes(t *testing.T) {
 	r := newReceiver(t)
 	r.MaxBytes = 10
