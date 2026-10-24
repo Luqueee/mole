@@ -275,6 +275,13 @@ Either -remote or a config file with 'remote:' is required.`)
 	for _, p := range cfg.ExcludePorts {
 		exclude[p] = true
 	}
+	// A remote service on the admin API's own port must not be forwarded onto
+	// it: the sweep below runs before the admin server binds, so the forward
+	// would win the port and every client of the admin API (the desktop app,
+	// `mole status`) would be talking to the remote service instead.
+	if p, ok := loopbackPort(cfg.AdminAddr); ok {
+		exclude[p] = true
+	}
 
 	// The forwarder owns the per-port listeners and can add new ones at
 	// runtime, which is what makes periodic auto-discovery work.
@@ -387,6 +394,20 @@ Either -remote or a config file with 'remote:' is required.`)
 		_ = adminSrv.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// loopbackPort returns the port of a listen address that occupies the
+// loopback port forwards bind (127.0.0.1:9999, localhost:9999, 0.0.0.0:9999).
+func loopbackPort(addr string) (int, bool) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, false
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !(ip.IsLoopback() || ip.IsUnspecified())) {
+		return 0, false
+	}
+	p, err := strconv.Atoi(port)
+	return p, err == nil && p > 0 && p <= 65535
 }
 
 // forwarder owns the set of active local listeners, one per forwarded

@@ -33,10 +33,24 @@ export function AddDiscoverPort(port: number): $CancellablePromise<void> {
 }
 
 /**
+ * AddNode registers a node.
+ */
+export function AddNode(spec: $models.NodeSpec): $CancellablePromise<void> {
+    return $Call.ByID(1874697321, spec);
+}
+
+/**
  * AddPush exposes a local port on the remote (ssh -R), live when the daemon is up.
  */
 export function AddPush(local: number, remote: number): $CancellablePromise<void> {
     return $Call.ByID(408367857, local, remote);
+}
+
+/**
+ * CancelNodeJob stops a running job.
+ */
+export function CancelNodeJob(id: number): $CancellablePromise<void> {
+    return $Call.ByID(1372225943, id);
 }
 
 /**
@@ -60,6 +74,28 @@ export function GetEvents(since: number): $CancellablePromise<$models.Events> {
  */
 export function GetLogs(n: number): $CancellablePromise<string[] | null> {
     return $Call.ByID(288713117, n);
+}
+
+/**
+ * GetNodeJob returns a job's output from the byte offset from.
+ */
+export function GetNodeJob(id: number, $from: number): $CancellablePromise<$models.NodeJobView> {
+    return $Call.ByID(2283428917, id, $from);
+}
+
+/**
+ * GetNodes lists the registered nodes from the config, without contacting any.
+ */
+export function GetNodes(): $CancellablePromise<$models.NodeList> {
+    return $Call.ByID(37531267);
+}
+
+/**
+ * GetSSHHosts lists the concrete hosts of ~/.ssh/config (wildcard patterns
+ * are skipped), to suggest as nodes.
+ */
+export function GetSSHHosts(): $CancellablePromise<$models.SSHHost[] | null> {
+    return $Call.ByID(2702782975);
 }
 
 /**
@@ -94,6 +130,34 @@ export function InstallCLI(): $CancellablePromise<void> {
     return $Call.ByID(2356803037);
 }
 
+export function NodeAddPort(name: string, port: number): $CancellablePromise<void> {
+    return $Call.ByID(1591021702, name, port);
+}
+
+export function NodeAddPush(name: string, local: number, remote: number): $CancellablePromise<void> {
+    return $Call.ByID(1826318013, name, local, remote);
+}
+
+export function NodeRemovePort(name: string, port: number): $CancellablePromise<void> {
+    return $Call.ByID(2087287357, name, port);
+}
+
+export function NodeRemovePush(name: string, local: number): $CancellablePromise<void> {
+    return $Call.ByID(2788527602, name, local);
+}
+
+export function NodeRestart(name: string): $CancellablePromise<void> {
+    return $Call.ByID(1306687689, name);
+}
+
+export function NodeStart(name: string): $CancellablePromise<void> {
+    return $Call.ByID(846895734, name);
+}
+
+export function NodeStop(name: string): $CancellablePromise<void> {
+    return $Call.ByID(3243084702, name);
+}
+
 /**
  * OpenInbox shows the inbox folder in the system file manager.
  */
@@ -110,10 +174,25 @@ export function PickFiles(): $CancellablePromise<string[] | null> {
 }
 
 /**
+ * ProbeNode contacts one node (connection, agent hello and status). An
+ * unreachable node is a result, not an error.
+ */
+export function ProbeNode(name: string): $CancellablePromise<$models.NodeInfo> {
+    return $Call.ByID(2468847072, name);
+}
+
+/**
  * RemoveDiscoverPort removes a discovery candidate.
  */
 export function RemoveDiscoverPort(port: number): $CancellablePromise<void> {
     return $Call.ByID(4233456690, port);
+}
+
+/**
+ * RemoveNode forgets a registered node.
+ */
+export function RemoveNode(name: string): $CancellablePromise<void> {
+    return $Call.ByID(668916426, name);
 }
 
 /**
@@ -132,6 +211,14 @@ export function ResolveTransfer(id: number, accept: boolean): $CancellablePromis
 
 export function Restart(): $CancellablePromise<void> {
     return $Call.ByID(693861389);
+}
+
+/**
+ * RunOnNode runs `mole <args>` on a node and waits for it (for quick
+ * commands: adding a port, starting its daemon). Long ones use StartNodeJob.
+ */
+export function RunOnNode(name: string, args: string[] | null): $CancellablePromise<$models.NodeRunResult> {
+    return $Call.ByID(1491327106, name, args);
 }
 
 /**
@@ -157,8 +244,25 @@ export function SetSendFolder(to: string): $CancellablePromise<void> {
     return $Call.ByID(559321852, to);
 }
 
+/**
+ * SplitCommand splits a typed command line into arguments: words separated
+ * by spaces, with '...' and "..." grouping and backslash escaping one
+ * character. No variable or glob expansion happens; the words go to mole as is.
+ */
+export function SplitCommand(line: string): $CancellablePromise<string[] | null> {
+    return $Call.ByID(3976907675, line);
+}
+
 export function Start(): $CancellablePromise<void> {
     return $Call.ByID(3620390306);
+}
+
+/**
+ * StartNodeJob runs `mole -n NAME <args>` in the background and returns an
+ * id for GetNodeJob. It has no terminal: a command that asks for one fails.
+ */
+export function StartNodeJob(name: string, args: string[] | null): $CancellablePromise<number> {
+    return $Call.ByID(2563483601, name, args);
 }
 
 export function Stop(): $CancellablePromise<void> {

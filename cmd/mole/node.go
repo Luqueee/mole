@@ -1,8 +1,8 @@
 // mole node — the other machines this one can manage.
 //
 //	mole node add NAME TARGET     register a node (TARGET: user@host[:port] or an ssh alias)
-//	mole node ls                  every node, whether it answers, and what it runs
-//	mole node ping NAME           time a round trip to a node
+//	mole node ls [-json]          every node, whether it answers, and what it runs
+//	mole node ping [-json] NAME   time a round trip to a node
 //	mole node rm NAME             forget a node
 //
 // Run a command on a node with `mole -n NAME <command>`.
@@ -34,9 +34,11 @@ with: mole -n NAME <command>   (e.g. mole -n devlabs ports add 3000)
 
 Commands:
   add NAME TARGET   register a node; TARGET is user@host[:port] or an ssh alias
-                    flags: -ssh-port N  -bin PATH  -insecure  -no-check
+                    flags: -ssh-port N  -bin PATH  -insecure  -no-check  -force
   ls                every node, whether it answers, its version and daemon
   ping NAME         time a round trip to a node
+                    (ls and ping take -json: one machine-readable document, which
+                    the desktop app reads)
   rm NAME           forget a node
 
 Flags (every command):
@@ -55,6 +57,8 @@ func runNode(args []string) int {
 	bin := fs.String("bin", "", "path of mole on the node (add)")
 	insecure := fs.Bool("insecure", false, "skip host key verification for the node (add; UNSAFE)")
 	noCheck := fs.Bool("no-check", false, "register without contacting the node (add)")
+	force := fs.Bool("force", false, "replace a node that is already registered (add)")
+	jsonOut := fs.Bool("json", false, "print JSON (ls, ping)")
 	fs.Usage = func() { printNodeUsage(os.Stderr) }
 	rest, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -63,18 +67,18 @@ func runNode(args []string) int {
 	switch cmd {
 	case "add":
 		if len(rest) != 2 {
-			fmt.Fprintln(os.Stderr, "Usage: mole node add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check]")
+			fmt.Fprintln(os.Stderr, "Usage: mole node add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check] [-force]")
 			return 2
 		}
-		return nodeAdd(*configPath, rest[0], config.NodeConfig{Remote: rest[1], SSHPort: *sshPort, Bin: *bin, Insecure: *insecure}, *noCheck)
+		return nodeAdd(*configPath, rest[0], config.NodeConfig{Remote: rest[1], SSHPort: *sshPort, Bin: *bin, Insecure: *insecure}, *noCheck, *force)
 	case "ls", "list":
-		return nodeList(*configPath)
+		return nodeList(*configPath, *jsonOut)
 	case "ping":
 		if len(rest) != 1 {
 			fmt.Fprintln(os.Stderr, "Usage: mole node ping NAME")
 			return 2
 		}
-		return nodePing(*configPath, rest[0])
+		return nodePing(*configPath, rest[0], *jsonOut)
 	case "rm", "remove":
 		if len(rest) != 1 {
 			fmt.Fprintln(os.Stderr, "Usage: mole node rm NAME")
@@ -194,7 +198,7 @@ func firstLine(s string) string {
 	return line
 }
 
-func nodeAdd(configPath, name string, n config.NodeConfig, noCheck bool) int {
+func nodeAdd(configPath, name string, n config.NodeConfig, noCheck, force bool) int {
 	if err := config.ValidNodeName(name); err != nil {
 		fmt.Fprintln(os.Stderr, "mole node:", err)
 		return 2
@@ -208,8 +212,8 @@ func nodeAdd(configPath, name string, n config.NodeConfig, noCheck bool) int {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return 1
 	}
-	if _, exists := cfg.Nodes[name]; exists {
-		fmt.Fprintf(os.Stderr, "mole node: %s is already registered (mole node rm %s first)\n", name, name)
+	if _, exists := cfg.Nodes[name]; exists && !force {
+		fmt.Fprintf(os.Stderr, "mole node: %s is already registered (mole node rm %s first, or add -force)\n", name, name)
 		return 1
 	}
 	color := cliColor(os.Stdout)
@@ -265,7 +269,7 @@ func nodeRemove(configPath, name string) int {
 	return 0
 }
 
-func nodePing(configPath, name string) int {
+func nodePing(configPath, name string, asJSON bool) int {
 	cfg, err := config.Load(resolveConfigPathReadOnly(configPath))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
@@ -279,6 +283,9 @@ func nodePing(configPath, name string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	p := probeNode(ctx, cfg, n)
+	if asJSON { // an unreachable node is an answer, not a failure
+		return printJSON(buildNodeInfo(name, n, p, !cfg.IsRegistered(name)))
+	}
 	if p.Err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", name, p.Err)
 		return 1
@@ -317,7 +324,7 @@ func daemonSummary(s agent.Status) string {
 	return fmt.Sprintf("%s · %d ports · %d push", out, len(admin.Info.Ports), len(admin.Info.Push))
 }
 
-func nodeList(configPath string) int {
+func nodeList(configPath string, asJSON bool) int {
 	cfg, err := config.Load(resolveConfigPathReadOnly(configPath))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
@@ -340,6 +347,9 @@ func nodeList(configPath string) int {
 		}
 	}
 	if len(rows) == 0 {
+		if asJSON {
+			return printJSON([]nodeInfo{})
+		}
 		fmt.Println("no nodes yet: mole node add NAME TARGET")
 		return 0
 	}
@@ -355,8 +365,16 @@ func nodeList(configPath string) int {
 	}
 	wg.Wait()
 
-	color := cliColor(os.Stdout)
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
+	if asJSON {
+		infos := make([]nodeInfo, 0, len(rows))
+		for _, r := range rows {
+			name := strings.TrimSuffix(r.name, " *")
+			infos = append(infos, buildNodeInfo(name, r.node, r.p, !cfg.IsRegistered(name)))
+		}
+		return printJSON(infos)
+	}
+	color := cliColor(os.Stdout)
 	fmt.Printf("%-14s %-24s %-12s %-9s %-13s %s\n", "NAME", "TARGET", "STATE", "VERSION", "OS/ARCH", "DAEMON")
 	for _, r := range rows {
 		state, ver, osarch, daemon := "", "", "", ""

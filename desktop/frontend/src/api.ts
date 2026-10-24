@@ -1,9 +1,19 @@
-import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult } from "../bindings/github.com/Luqueee/mole/desktop";
+import { MoleService, type Status, type Events, type CLIStatus, type TransferView, type SendResult, type NodeList as RawNodeList, type NodeInfo as RawNodeInfo, type NodeDaemon as RawNodeDaemon, type NodeSpec, type NodeEntry, type NodeJobView, type NodeRunResult, type SSHHost } from "../bindings/github.com/Luqueee/mole/desktop";
+import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import type { Active, Pending, Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
 
 // TransferView with the nulls Go emits for empty slices turned into lists.
 export type Transfers = { supported: boolean; last: number; records: TRecord[]; active: Active[]; pending: Pending[] };
 const normalize = (v: TransferView): Transfers => ({ supported: v.supported, last: v.last, records: v.records ?? [], active: v.active ?? [], pending: v.pending ?? [] });
+
+// Nodes with the nulls Go emits for empty slices turned into lists.
+export type NodeDaemon = Omit<RawNodeDaemon, "ports" | "push" | "discoverPorts" | "excludePorts"> & { ports: number[]; push: PushInfo[]; discoverPorts: number[]; excludePorts: number[] };
+export type NodeInfo = Omit<RawNodeInfo, "daemon"> & { daemon: NodeDaemon | null };
+export type NodeList = Omit<RawNodeList, "nodes"> & { nodes: NodeEntry[] };
+const normalizeNodeInfo = (i: RawNodeInfo): NodeInfo => ({
+  ...i,
+  daemon: i.daemon ? { ...i.daemon, ports: i.daemon.ports ?? [], push: i.daemon.push ?? [], discoverPorts: i.daemon.discoverPorts ?? [], excludePorts: i.daemon.excludePorts ?? [] } : null,
+});
 
 // Browser-only design mode (?mock): the Wails runtime is absent, so the UI
 // is fed synthetic data. The desktop app never takes this path.
@@ -88,7 +98,86 @@ function mockCliStatus(): CLIStatus {
   return { bundled: true, installed: mockCli, path: mockCli ? "/Users/me/.local/bin/mole" : "", version: mockCli ? "v0.2.0" : "", upToDate: mockCli, installDir: "/Users/me/.local/bin", dirOnPath: false, pathSet: mockPathSet, profile: "/Users/me/.zshrc" } as CLIStatus;
 }
 
+// ───────── nodes (mock) ─────────
+
+const mockSelf = { hostname: "adria-mbp", os: "darwin", arch: "arm64" };
+let mockNodeEntries: NodeEntry[] = [
+  { name: "devlabs", target: "adria@devlabs.internal", sshPort: 0, bin: "", insecure: false, implicit: false },
+  { name: "buildbox", target: "ci@10.0.4.21", sshPort: 2222, bin: "~/apps/mole", insecure: false, implicit: false },
+  { name: "pi-garage", target: "pi@raspberrypi.local", sshPort: 0, bin: "", insecure: false, implicit: false },
+  { name: "old-vps", target: "root@203.0.113.9", sshPort: 0, bin: "", insecure: true, implicit: false },
+];
+const mockDaemon = (over: Partial<NodeDaemon>): NodeDaemon => ({
+  running: true, uptime: "52h11m", activeConns: 3, totalConns: 9_418, failedDials: 12, ports: [3000, 5173, 8080], push: [{ local: 4000, remote: 4000, bind: "127.0.0.1", state: "active", error: "" }],
+  remote: "adria-mbp", adminAddr: "127.0.0.1:9999", configPath: "/home/adria/.config/mole/config.yaml", inbox: "/home/adria/mole-inbox", receive: true, accept: "auto", nodes: 2,
+  autoDiscover: true, discoverPorts: [3000, 5173, 8080, 9229], excludePorts: [22, 25, 53], ...over,
+});
+const mockProbe = (name: string): NodeInfo => {
+  const e = mockNodeEntries.find((n) => n.name === name);
+  const base = { name, target: e?.target ?? name, sshPort: e?.sshPort ?? 0, bin: e?.bin ?? "", insecure: e?.insecure ?? false, implicit: e?.implicit ?? false, error: "", agent: 0, connectMs: 0, roundTripMs: 0, build: "", version: "", os: "", arch: "", hostname: "", cliOutdated: false, daemon: null };
+  const jitter = (a: number) => Math.round((a + Math.random() * a * 0.25) * 10) / 10;
+  switch (name) {
+    case "devlabs": return { ...base, state: "ready", version: "0.4.0", build: "main@97b20cb", os: "linux", arch: "amd64", hostname: "devlabs", agent: 1, connectMs: jitter(38), roundTripMs: jitter(4), daemon: mockDaemon({}) };
+    case "buildbox": return { ...base, state: "ready", version: "0.4.0", build: "feat/nodes-ui@a1b2c3d", os: "linux", arch: "arm64", hostname: "buildbox-01", agent: 1, connectMs: jitter(120), roundTripMs: jitter(9), daemon: mockDaemon({ running: false, uptime: "", ports: [], push: [], activeConns: 0, totalConns: 0, failedDials: 0, receive: false, discoverPorts: [3000, 9000] }) };
+    case "pi-garage": return { ...base, state: "no-agent", version: "0.3.0", connectMs: jitter(210) };
+    default: return { ...base, state: "unreachable", error: "dial tcp 203.0.113.9:22: i/o timeout" };
+  }
+};
+const mockSleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let mockJobs: Record<number, { text: string; done: boolean; code: number }> = {};
+let mockJobId = 0;
+function mockJob(lines: [number, string][], code = 0): number {
+  const id = ++mockJobId;
+  mockJobs[id] = { text: "", done: false, code: 0 };
+  let at = 0;
+  lines.forEach(([ms, line], i) => {
+    at += ms;
+    setTimeout(() => {
+      const j = mockJobs[id];
+      if (!j || j.done) return;
+      j.text += line + "\n";
+      if (i === lines.length - 1) { j.done = true; j.code = code; }
+    }, at);
+  });
+  return id;
+}
+
 export const api = {
+  nodes: async (): Promise<NodeList> =>
+    MOCK ? { self: mockSelf, nodes: mockNodeEntries, cliReady: true, cliError: "" } : ((l) => ({ ...l, nodes: l.nodes ?? [] }))(await MoleService.GetNodes()),
+  probe: async (name: string): Promise<NodeInfo> => {
+    if (MOCK) { await mockSleep(300 + Math.random() * 900); return mockProbe(name); }
+    return normalizeNodeInfo(await MoleService.ProbeNode(name));
+  },
+  nodeAdd: async (spec: NodeSpec) => {
+    if (!MOCK) return MoleService.AddNode(spec);
+    await mockSleep(900);
+    if (spec.name === "fail") throw new Error(`cannot reach ${spec.target}: dial tcp: i/o timeout\n(use -no-check to register it anyway)`);
+    mockNodeEntries = [...mockNodeEntries.filter((n) => n.name !== spec.name), { name: spec.name, target: spec.target, sshPort: spec.sshPort, bin: spec.bin, insecure: spec.insecure, implicit: false }];
+  },
+  nodeRemove: async (name: string) => (MOCK ? void (mockNodeEntries = mockNodeEntries.filter((n) => n.name !== name)) : MoleService.RemoveNode(name)),
+  nodeRun: async (name: string, args: string[]): Promise<NodeRunResult> => (MOCK ? (await mockSleep(500), { output: `ran: mole -n ${name} ${args.join(" ")}`, code: 0 }) : MoleService.RunOnNode(name, args)),
+  nodePortAdd: async (name: string, port: number) => (MOCK ? mockSleep(400) : MoleService.NodeAddPort(name, port)),
+  nodePortRemove: async (name: string, port: number) => (MOCK ? mockSleep(400) : MoleService.NodeRemovePort(name, port)),
+  nodePushAdd: async (name: string, local: number, remote: number) => (MOCK ? mockSleep(400) : MoleService.NodeAddPush(name, local, remote)),
+  nodePushRemove: async (name: string, local: number) => (MOCK ? mockSleep(400) : MoleService.NodeRemovePush(name, local)),
+  nodeStart: async (name: string) => (MOCK ? mockSleep(800) : MoleService.NodeStart(name)),
+  nodeStop: async (name: string) => (MOCK ? mockSleep(800) : MoleService.NodeStop(name)),
+  nodeRestart: async (name: string) => (MOCK ? mockSleep(800) : MoleService.NodeRestart(name)),
+  jobStart: async (name: string, args: string[]): Promise<number> => {
+    if (!MOCK) return MoleService.StartNodeJob(name, args);
+    if (args[0] === "update") return mockJob([[300, `→ updating mole on ${name}`], [700, "cloning https://github.com/Luqueee/mole (main)"], [900, "go build ./cmd/mole"], [1400, "installed ~/.local/bin/mole"], [200, "mole v0.4.0 (main@97b20cb)"]]);
+    return mockJob([[300, `mole v0.4.0 · ${name}`], [200, args.join(" ")], [300, "ok"]]);
+  },
+  job: async (id: number, from: number): Promise<NodeJobView> => {
+    if (!MOCK) return MoleService.GetNodeJob(id, from);
+    const j = mockJobs[id];
+    if (!j) return { found: false, output: "", next: 0, done: true, code: 0, error: "" };
+    return { found: true, output: j.text.slice(from), next: j.text.length, done: j.done, code: j.code, error: "" };
+  },
+  jobCancel: async (id: number) => (MOCK ? void (mockJobs[id] && (mockJobs[id].done = true, mockJobs[id].code = -1)) : MoleService.CancelNodeJob(id)),
+  splitCommand: async (line: string): Promise<string[]> => (MOCK ? line.trim().split(/\s+/).filter(Boolean) : ((await MoleService.SplitCommand(line)) ?? [])),
+  sshHosts: async (): Promise<SSHHost[]> => (MOCK ? [{ alias: "devlabs", hostName: "devlabs.internal", user: "adria", port: 0 }, { alias: "staging", hostName: "staging.example.com", user: "deploy", port: 2200 }, { alias: "nas", hostName: "192.168.1.20", user: "admin", port: 0 }, { alias: "buildbox", hostName: "10.0.4.21", user: "ci", port: 2222 }] : ((await MoleService.GetSSHHosts()) ?? [])),
   transfers: async (since: number): Promise<Transfers> => normalize(MOCK ? mockTransfers() : await MoleService.GetTransfers(since)),
   pick: async (): Promise<string[]> => (MOCK ? [] : ((await MoleService.PickFiles()) ?? [])),
   send: async (paths: string[], to: string): Promise<SendResult[]> => (MOCK ? paths.map((name) => ({ name, saved: name, dir: "/home/dev/mole-inbox" })) : ((await MoleService.SendFiles(paths, to)) ?? [])),

@@ -195,3 +195,16 @@ func freeLoopbackPort(t *testing.T) int {
 	}
 	return port
 }
+
+func TestLoopbackPort(t *testing.T) {
+	for addr, want := range map[string]int{"127.0.0.1:9999": 9999, "localhost:8080": 8080, "[::1]:7000": 7000, "0.0.0.0:9999": 9999} {
+		if p, ok := loopbackPort(addr); !ok || p != want {
+			t.Errorf("loopbackPort(%q) = %d, %v", addr, p, ok)
+		}
+	}
+	for _, addr := range []string{"", "9999", "10.0.0.5:9999", "example.com:80", "127.0.0.1:0", "127.0.0.1:x"} {
+		if _, ok := loopbackPort(addr); ok {
+			t.Errorf("loopbackPort(%q) accepted", addr)
+		}
+	}
+}
