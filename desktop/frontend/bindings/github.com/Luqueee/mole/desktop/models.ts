@@ -87,6 +87,156 @@ export interface Events {
 }
 
 /**
+ * NodeDaemon is what a node reports about its configuration and its daemon.
+ */
+export interface NodeDaemon {
+    "running": boolean;
+    "uptime": string;
+    "activeConns": number;
+    "totalConns": number;
+    "failedDials": number;
+    "ports": number[] | null;
+    "push": admin$0.PushInfo[] | null;
+    "remote": string;
+    "adminAddr": string;
+    "configPath": string;
+    "inbox": string;
+    "receive": boolean;
+    "accept": string;
+    "nodes": number;
+    "autoDiscover": boolean;
+    "discoverPorts": number[] | null;
+    "excludePorts": number[] | null;
+}
+
+/**
+ * NodeEntry is a node as the config knows it. Nothing here needs the network.
+ */
+export interface NodeEntry {
+    "name": string;
+    "target": string;
+    "sshPort": number;
+    "bin": string;
+    "insecure": boolean;
+
+    /**
+     * Implicit is the config's own `remote:`: usable as a node without being registered.
+     */
+    "implicit": boolean;
+}
+
+/**
+ * NodeInfo is the result of contacting one node.
+ */
+export interface NodeInfo {
+    "name": string;
+    "target": string;
+    "sshPort": number;
+    "bin": string;
+    "insecure": boolean;
+    "implicit": boolean;
+
+    /**
+     * ready | no-agent | unreachable
+     */
+    "state": string;
+    "error": string;
+    "version": string;
+    "build": string;
+    "os": string;
+    "arch": string;
+    "hostname": string;
+    "agent": number;
+    "connectMs": number;
+    "roundTripMs": number;
+    "daemon": NodeDaemon | null;
+
+    /**
+     * CLIOutdated: the local CLI could not even be asked (see NodeList.CLIError).
+     */
+    "cliOutdated": boolean;
+}
+
+/**
+ * NodeJobView is a job's progress. Output holds what was written after the
+ * byte offset the caller asked from; Next is where to continue.
+ */
+export interface NodeJobView {
+    "found": boolean;
+    "output": string;
+    "next": number;
+    "done": boolean;
+    "code": number;
+    "error": string;
+}
+
+/**
+ * NodeList is what the Nodes tab starts from.
+ */
+export interface NodeList {
+    "self": SelfInfo;
+    "nodes": NodeEntry[] | null;
+
+    /**
+     * CLIReady is false when the installed mole CLI predates nodes.
+     */
+    "cliReady": boolean;
+
+    /**
+     * CLIError says why the CLI could not be asked (not installed, too old).
+     */
+    "cliError"?: string;
+}
+
+/**
+ * NodeRunResult is the outcome of a command run on a node.
+ */
+export interface NodeRunResult {
+    "output": string;
+    "code": number;
+}
+
+/**
+ * NodeSpec is a node to register.
+ */
+export interface NodeSpec {
+    "name": string;
+    "target": string;
+    "sshPort": number;
+    "bin": string;
+    "insecure": boolean;
+
+    /**
+     * Check contacts the node first and refuses one that does not answer.
+     */
+    "check": boolean;
+
+    /**
+     * Replace overwrites a node already registered under that name.
+     */
+    "replace": boolean;
+}
+
+/**
+ * SSHHost is a host alias from the user's ssh config.
+ */
+export interface SSHHost {
+    "alias": string;
+    "hostName": string;
+    "user": string;
+    "port": number;
+}
+
+/**
+ * SelfInfo describes this machine, the hub of the map.
+ */
+export interface SelfInfo {
+    "hostname": string;
+    "os": string;
+    "arch": string;
+}
+
+/**
  * SendResult is the outcome of sending one file.
  */
 export interface SendResult {

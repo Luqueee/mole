@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Activity, Cable, Terminal, ArrowUp, ArrowDown, FolderOpen, Upload, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
+import { Activity, Cable, Network, Terminal, ArrowUp, ArrowDown, FolderOpen, Upload, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
 import type { Status, CLIStatus, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import type { Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
 import { api, MOCK, type Transfers } from "./api";
+import NodesPage from "./Nodes";
 
-type Tab = "status" | "ports" | "transfers" | "logs" | "setup";
+type Tab = "status" | "ports" | "nodes" | "transfers" | "logs" | "setup";
 const NAV: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: "status", label: "STATUS", icon: Activity },
   { id: "ports", label: "PORTS", icon: Cable },
+  { id: "nodes", label: "NODES", icon: Network },
   { id: "transfers", label: "TRANSFERS", icon: ArrowUp },
   { id: "logs", label: "LOGS", icon: ScrollText },
   { id: "setup", label: "SETUP", icon: Terminal },
@@ -597,6 +599,13 @@ export default function App() {
   const rowSeq = useRef(0);
   const [supported, setSupported] = useState(true);
   const cursor = useRef<number | null>(null);
+  const [nodeCount, setNodeCount] = useState(0);
+  useEffect(() => {
+    const load = () => api.nodes().then((l) => setNodeCount(l.nodes.length)).catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, []);
   const [tv, setTv] = useState<Transfers>({ supported: false, last: 0, records: [], active: [], pending: [] });
   const refreshTransfers = useCallback(async () => {
     try {
@@ -700,6 +709,9 @@ export default function App() {
               <span className="text-[10px] opacity-60">0{i + 1}</span>
               <n.icon size={15} />
               {n.label}
+              {n.id === "nodes" && nodeCount > 0 && (
+                <span className={`ml-auto border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${tab === "nodes" ? "border-background/60" : "border-line text-dim"}`}>{nodeCount}</span>
+              )}
               {n.id === "transfers" && tv.pending.length > 0 && (
                 <span className="ml-auto bg-warn px-1.5 py-0.5 text-[10px] font-bold text-background">{tv.pending.length}</span>
               )}
@@ -714,6 +726,7 @@ export default function App() {
           {s.error && <div className="border-b border-bad bg-bad/10 px-5 py-2 text-[11px] text-bad">{s.error}</div>}
           {tab === "status" && <StatusPage s={s} hist={hist} trips={trips} conns={conns} supported={supported} />}
           {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} push={s.push ?? []} run={run} />}
+          {tab === "nodes" && <NodesPage onGoSetup={() => setTab("setup")} />}
           {tab === "transfers" && <TransfersPage s={s} tv={tv} run={run} />}
           {tab === "logs" && <LogsPage lines={logs} />}
           {tab === "setup" && <SetupPage run={run} />}

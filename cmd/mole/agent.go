@@ -40,6 +40,7 @@ func (a nodeAgent) Status() (agent.Status, error) {
 	st := agent.Status{
 		Remote: cfg.Remote, AdminAddr: cfg.AdminAddr, ConfigPath: path,
 		Inbox: cfg.Transfer.InboxDir(), Nodes: len(cfg.Nodes),
+		AutoDiscover: cfg.AutoDiscover, DiscoverPorts: cfg.DiscoverPorts, ExcludePorts: cfg.ExcludePorts,
 	}
 	if cfg.AdminAddr == "" || !daemonLive(cfg.AdminAddr) {
 		return st, nil

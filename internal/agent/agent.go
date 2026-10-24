@@ -68,6 +68,10 @@ type Status struct {
 	ConfigPath string `json:"config_path,omitempty"`
 	Inbox      string `json:"inbox,omitempty"`
 	Nodes      int    `json:"nodes"` // how many nodes it knows
+	// The node's own port configuration (what its daemon would forward).
+	AutoDiscover  bool  `json:"auto_discover,omitempty"`
+	DiscoverPorts []int `json:"discover_ports,omitempty"`
+	ExcludePorts  []int `json:"exclude_ports,omitempty"`
 	// Admin is the daemon's own /status document, verbatim, when it runs.
 	Admin json.RawMessage `json:"admin,omitempty"`
 }

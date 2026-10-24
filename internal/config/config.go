@@ -168,6 +168,13 @@ func (c *Config) Node(name string) (NodeConfig, bool) {
 	return NodeConfig{}, false
 }
 
+// IsRegistered reports whether name is in the node registry (as opposed to
+// being the config's own `remote:`).
+func (c *Config) IsRegistered(name string) bool {
+	_, ok := c.Nodes[name]
+	return ok
+}
+
 // NodeNames returns the registered node names, sorted.
 func (c *Config) NodeNames() []string {
 	names := make([]string, 0, len(c.Nodes))

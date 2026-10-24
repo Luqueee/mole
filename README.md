@@ -463,6 +463,14 @@ and the config's own `remote:` also works as a node name (`mole -n <remote> ...`
 Nodes are kept in the user-global config (`mole node add` writes it when no
 config exists), so any project sees them.
 
+The desktop app has a **Nodes** tab for all of it: a map of your machines with
+the state and latency of every link, adding a node (with your `~/.ssh/config`
+hosts offered as suggestions), and, per node, its daemon (start, restart, stop),
+its ports and push forwards, updating mole there (or installing a branch to try
+it), and a console that runs `mole -n NODE ...`. `mole node ls -json` and
+`mole node ping -json NAME` print what the tab shows, for scripts. Re-register
+a node with `mole node add -force NAME TARGET`.
+
 ### Resolve a domain on the remote (split DNS)
 
 To reach names that only the remote can resolve (e.g. `admin.kena.lan`) from
@@ -595,8 +603,8 @@ mole unpush [-config PATH] LOCAL
 mole send   [-config PATH] [-to SUBFOLDER] [-a] [-direct] [files...]    (alias: ftp)
 mole inbox  [path | set DIR | receive on|off | mode ask|auto | pending | accept [ID|all] | reject [ID|all]] [-config PATH]
 mole -n NODE <command> [args...]                 run a mole command on a node
-mole node   add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check] [-config PATH]
-mole node   ls|ping NAME|rm NAME [-config PATH]
+mole node   add NAME TARGET [-ssh-port N] [-bin PATH] [-insecure] [-no-check] [-force] [-config PATH]
+mole node   ls [-json]|ping [-json] NAME|rm NAME [-config PATH]
 mole dns    install|uninstall [-config PATH]      (Linux, needs root)
 mole doctor [-config PATH] [-timeout 10s] [name...]
 mole config edit [-config PATH] [-editor CMD]
