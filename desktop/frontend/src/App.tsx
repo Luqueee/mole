@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Activity, Cable, Network, Terminal, ArrowUp, ArrowDown, FolderOpen, Upload, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
+import { Activity, Cable, Globe, Network, Terminal, ArrowUp, ArrowDown, FolderOpen, Upload, Plus, RotateCw, ScrollText, Square, Play, X, ArrowLeft, ArrowRight } from "lucide-react";
 import type { Status, CLIStatus, AppUpdate, UpdateProgress, Event as Conn } from "../bindings/github.com/Luqueee/mole/desktop";
 import type { PushInfo } from "../bindings/github.com/Luqueee/mole/internal/admin";
 import type { Record as TRecord } from "../bindings/github.com/Luqueee/mole/internal/transfer";
 import { api, MOCK, type Transfers } from "./api";
 import NodesPage from "./Nodes";
+import ProxyPage from "./Proxy";
 
-type Tab = "status" | "ports" | "nodes" | "transfers" | "logs" | "setup";
+type Tab = "status" | "ports" | "proxy" | "nodes" | "transfers" | "logs" | "setup";
 const NAV: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: "status", label: "STATUS", icon: Activity },
   { id: "ports", label: "PORTS", icon: Cable },
+  { id: "proxy", label: "PROXY", icon: Globe },
   { id: "nodes", label: "NODES", icon: Network },
   { id: "transfers", label: "TRANSFERS", icon: ArrowUp },
   { id: "logs", label: "LOGS", icon: ScrollText },
@@ -810,6 +812,7 @@ export default function App() {
           {s.error && <div className="border-b border-bad bg-bad/10 px-5 py-2 text-[11px] text-bad">{s.error}</div>}
           {tab === "status" && <StatusPage s={s} hist={hist} trips={trips} conns={conns} supported={supported} />}
           {tab === "ports" && <PortsPage discover={discover} forwarded={s.ports ?? []} push={s.push ?? []} run={run} />}
+          {tab === "proxy" && <ProxyPage />}
           {tab === "nodes" && <NodesPage onGoSetup={() => setTab("setup")} />}
           {tab === "transfers" && <TransfersPage s={s} tv={tv} run={run} />}
           {tab === "logs" && <LogsPage lines={logs} />}

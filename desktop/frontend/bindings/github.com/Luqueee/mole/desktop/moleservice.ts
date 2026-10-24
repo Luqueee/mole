@@ -47,6 +47,13 @@ export function AddPush(local: number, remote: number): $CancellablePromise<void
 }
 
 /**
+ * AddRoute names a service on the remote: target is PORT or HOST:PORT.
+ */
+export function AddRoute(name: string, target: string): $CancellablePromise<void> {
+    return $Call.ByID(3718261394, name, target);
+}
+
+/**
  * CancelNodeJob stops a running job.
  */
 export function CancelNodeJob(id: number): $CancellablePromise<void> {
@@ -85,6 +92,14 @@ export function GetAppVersion(): $CancellablePromise<string> {
  */
 export function GetCLI(): $CancellablePromise<$models.CLIStatus> {
     return $Call.ByID(960708464);
+}
+
+/**
+ * GetDomains reports the domain, its routes (live when the daemon is up) and
+ * the state of the DNS install.
+ */
+export function GetDomains(): $CancellablePromise<$models.DomainInfo> {
+    return $Call.ByID(1258256459);
 }
 
 /**
@@ -163,6 +178,14 @@ export function InstallCLI(): $CancellablePromise<void> {
     return $Call.ByID(2356803037);
 }
 
+/**
+ * InstallDNS points the OS at mole's DNS stub for the domain. It needs root:
+ * the system's own authentication dialog asks for it.
+ */
+export function InstallDNS(): $CancellablePromise<void> {
+    return $Call.ByID(3800904392);
+}
+
 export function NodeAddPort(name: string, port: number): $CancellablePromise<void> {
     return $Call.ByID(1591021702, name, port);
 }
@@ -206,6 +229,14 @@ export function OpenReleasePage(url: string): $CancellablePromise<void> {
 }
 
 /**
+ * OpenRoute opens a route in the browser. It takes the route's name, not a
+ * URL, so the page cannot make the app open an arbitrary address.
+ */
+export function OpenRoute(name: string): $CancellablePromise<void> {
+    return $Call.ByID(3035398595, name);
+}
+
+/**
  * PickFiles opens the system file dialog and returns the chosen paths
  * (none if the user cancels).
  */
@@ -243,6 +274,13 @@ export function RemovePush(local: number): $CancellablePromise<void> {
 }
 
 /**
+ * RemoveRoute deletes a route.
+ */
+export function RemoveRoute(name: string): $CancellablePromise<void> {
+    return $Call.ByID(2493873271, name);
+}
+
+/**
  * ResolveTransfer accepts or rejects an incoming offer.
  */
 export function ResolveTransfer(id: number, accept: boolean): $CancellablePromise<void> {
@@ -267,6 +305,14 @@ export function RunOnNode(name: string, args: string[] | null): $CancellableProm
  */
 export function SendFiles(paths: string[] | null, to: string): $CancellablePromise<$models.SendResult[] | null> {
     return $Call.ByID(3427970343, paths, to);
+}
+
+/**
+ * SetDomain sets the domain routes live under. A running daemon is restarted:
+ * the DNS stub and the route table are built at start.
+ */
+export function SetDomain(name: string): $CancellablePromise<void> {
+    return $Call.ByID(1778144030, name);
 }
 
 /**
@@ -315,4 +361,11 @@ export function StartNodeJob(name: string, args: string[] | null): $CancellableP
 
 export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(2128813218);
+}
+
+/**
+ * UninstallDNS undoes InstallDNS.
+ */
+export function UninstallDNS(): $CancellablePromise<void> {
+    return $Call.ByID(521458851);
 }
