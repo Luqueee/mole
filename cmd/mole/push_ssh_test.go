@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -40,6 +41,9 @@ type sshTestServer struct {
 	// exec, when set, runs "exec" session requests: ch carries the command's
 	// stdin/stdout (and ch.Stderr() its stderr); the result is its exit status.
 	exec func(cmd string, ch ssh.Channel) uint32
+	// events records what sessions asked for besides exec: "pty TERM CxR",
+	// "winch CxR", "signal NAME".
+	events []string
 }
 
 func (s *sshTestServer) session(nc ssh.NewChannel) {
@@ -48,21 +52,57 @@ func (s *sshTestServer) session(nc ssh.NewChannel) {
 		return
 	}
 	for r := range reqs {
-		if r.Type != "exec" {
+		switch r.Type {
+		case "exec":
+			var p struct{ Command string }
+			_ = ssh.Unmarshal(r.Payload, &p)
+			_ = r.Reply(true, nil)
+			go func() {
+				status := s.exec(p.Command, ch)
+				_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+				_ = ch.Close()
+			}()
+		case "pty-req":
+			var p struct {
+				Term                 string
+				Cols, Rows, Wpx, Hpx uint32
+				Modes                string
+			}
+			_ = ssh.Unmarshal(r.Payload, &p)
+			s.record(fmt.Sprintf("pty %s %dx%d", p.Term, p.Cols, p.Rows))
+			_ = r.Reply(true, nil)
+		case "window-change":
+			var p struct{ Cols, Rows, Wpx, Hpx uint32 }
+			_ = ssh.Unmarshal(r.Payload, &p)
+			s.record(fmt.Sprintf("winch %dx%d", p.Cols, p.Rows))
+		case "signal":
+			var p struct{ Name string }
+			_ = ssh.Unmarshal(r.Payload, &p)
+			s.record("signal " + p.Name)
+		default:
 			if r.WantReply {
 				_ = r.Reply(false, nil)
 			}
-			continue
 		}
-		var p struct{ Command string }
-		_ = ssh.Unmarshal(r.Payload, &p)
-		_ = r.Reply(true, nil)
-		go func() {
-			status := s.exec(p.Command, ch)
-			_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
-			_ = ch.Close()
-		}()
 	}
+}
+
+// record notes a session-level event (pty, resize, signal) for tests to inspect.
+func (s *sshTestServer) record(ev string) {
+	s.mu.Lock()
+	s.events = append(s.events, ev)
+	s.mu.Unlock()
+}
+
+func (s *sshTestServer) sawEvent(ev string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.events {
+		if e == ev {
+			return true
+		}
+	}
+	return false
 }
 
 func newSSHTestServer(t *testing.T, clientKey ssh.PublicKey) *sshTestServer {

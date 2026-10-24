@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -94,6 +95,87 @@ type Config struct {
 
 	// Transfer configures `mole send` and this machine's inbox.
 	Transfer TransferConfig `yaml:"transfer"`
+
+	// Nodes are the other machines this one can reach and manage, by name:
+	// `mole -n NAME <command>` runs a command on one. Empty by default; the
+	// `remote:` above stays the default peer for everything that has no -n.
+	Nodes map[string]NodeConfig `yaml:"nodes"`
+}
+
+// NodeConfig describes how to reach another mole node over SSH.
+type NodeConfig struct {
+	// Remote is the SSH target: user@host[:port] or an ssh config alias.
+	Remote string `yaml:"remote"`
+	// SSHPort overrides the SSH port (default: the config's ssh_port).
+	SSHPort int `yaml:"ssh_port,omitempty"`
+	// Insecure disables host key verification for this node (UNSAFE).
+	Insecure bool `yaml:"insecure,omitempty"`
+	// Bin is the mole executable on the node (default "mole", looked up in
+	// ~/.local/bin and the usual places).
+	Bin string `yaml:"bin,omitempty"`
+}
+
+// MaxNodeName bounds a node name.
+const MaxNodeName = 32
+
+// ValidNodeName reports whether name is usable as a node name: lowercase
+// letters, digits, '-' and '_', starting with a letter or digit.
+func ValidNodeName(name string) error {
+	if name == "" || len(name) > MaxNodeName {
+		return fmt.Errorf("node name %q must be 1-%d characters", name, MaxNodeName)
+	}
+	for i, r := range name {
+		ok := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || (i > 0 && (r == '-' || r == '_'))
+		if !ok {
+			return fmt.Errorf("node name %q: use lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
+		}
+	}
+	return nil
+}
+
+// Validate checks a node.
+func (n NodeConfig) Validate() error {
+	if strings.TrimSpace(n.Remote) == "" {
+		return errors.New("remote is required")
+	}
+	if n.SSHPort < 0 || n.SSHPort > 65535 {
+		return fmt.Errorf("ssh_port %d out of range", n.SSHPort)
+	}
+	if strings.ContainsAny(n.Bin, "\x00\n") {
+		return errors.New("bin must not contain control characters")
+	}
+	return nil
+}
+
+// BinOrDefault returns the mole executable name or path on the node.
+func (n NodeConfig) BinOrDefault() string {
+	if n.Bin == "" {
+		return "mole"
+	}
+	return n.Bin
+}
+
+// Node resolves a node by name: a registered one, or the config's own
+// `remote:` target (so `mole -n <remote>` keeps working without registering
+// it). The second result is false if there is no such node.
+func (c *Config) Node(name string) (NodeConfig, bool) {
+	if n, ok := c.Nodes[name]; ok {
+		return n, true
+	}
+	if c.Remote != "" && name == c.Remote {
+		return NodeConfig{Remote: c.Remote, SSHPort: c.SSHPort, Insecure: c.Insecure}, true
+	}
+	return NodeConfig{}, false
+}
+
+// NodeNames returns the registered node names, sorted.
+func (c *Config) NodeNames() []string {
+	names := make([]string, 0, len(c.Nodes))
+	for n := range c.Nodes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // DefaultTransferPort is the loopback port a receiving daemon listens on,
@@ -364,6 +446,14 @@ func Load(path string) (*Config, error) {
 	if err := cfg.Transfer.Validate(); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
+	for name, n := range cfg.Nodes {
+		if err := ValidNodeName(name); err != nil {
+			return nil, fmt.Errorf("parse config %q: nodes: %w", path, err)
+		}
+		if err := n.Validate(); err != nil {
+			return nil, fmt.Errorf("parse config %q: nodes.%s: %w", path, name, err)
+		}
+	}
 	seen := make(map[int]bool, len(cfg.Push))
 	for _, r := range cfg.Push {
 		if err := r.Validate(); err != nil {
@@ -441,6 +531,15 @@ func Save(path string, cfg *Config, fields ...string) error {
 		// document as a sequence of nodes; the actual mapping
 		// lives at node.Content[0]. Each pair in Content is
 		// [key, value, key, value, ...].
+		var keptComments []byte
+		if len(node.Content) == 0 && len(bytes.TrimSpace(stripYAMLComments(data))) == 0 {
+			// An empty file, or one with only comments: start a mapping in
+			// it, and keep whatever comments it had on top.
+			if t := bytes.TrimSpace(data); len(t) > 0 {
+				keptComments = append(t, '\n')
+			}
+			node = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
+		}
 		if len(node.Content) == 0 || node.Content[0].Kind != yaml.MappingNode {
 			return fmt.Errorf("config %q: top-level is not a mapping", path)
 		}
@@ -453,7 +552,7 @@ func Save(path string, cfg *Config, fields ...string) error {
 		}
 		// yaml.v3 emits two leading "---" bytes that we don't want
 		// at the top of a config file. Drop them.
-		out := bytes.TrimPrefix(encoded, []byte("---\n"))
+		out := append(keptComments, bytes.TrimPrefix(encoded, []byte("---\n"))...)
 		return atomicWriteFile(path, out, 0o644)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read %q: %w", path, err)
@@ -478,12 +577,25 @@ func Save(path string, cfg *Config, fields ...string) error {
 	return atomicWriteFile(path, []byte(header+string(body)), 0o644)
 }
 
+// stripYAMLComments drops comment-only and blank lines, to tell a file that
+// holds nothing from one that holds something.
+func stripYAMLComments(data []byte) []byte {
+	var out []byte
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if t := bytes.TrimSpace(line); len(t) > 0 && t[0] != '#' {
+			out = append(out, line...)
+			out = append(out, '\n')
+		}
+	}
+	return out
+}
+
 var configFields = map[string]bool{
 	"remote": true, "ports": true, "push": true, "domains": true, "domain_ports": true, "auto_discover": true,
 	"discover_ports": true, "exclude_ports": true, "admin_addr": true,
 	"log_level": true, "ssh_port": true, "insecure": true,
 	"clip_url": true, "clip_listen": true, "clip_interval_ms": true,
-	"transfer": true,
+	"transfer": true, "nodes": true,
 }
 
 func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
@@ -544,6 +656,7 @@ func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
 		{"clip_listen", cfg.ClipListen, cfg.ClipListen != ""},
 		{"clip_interval_ms", cfg.ClipIntervalMs, cfg.ClipIntervalMs != 0},
 		{"transfer", cfg.Transfer, cfg.Transfer != (TransferConfig{})},
+		{"nodes", nonNilNodes(cfg.Nodes), len(cfg.Nodes) > 0},
 	}
 	for _, item := range values {
 		if err := write(item.key, item.value, item.nonzero); err != nil {
@@ -588,6 +701,13 @@ func ValidateDomain(d string) error {
 	}
 	return nil
 }
+func nonNilNodes(n map[string]NodeConfig) map[string]NodeConfig {
+	if n == nil {
+		return map[string]NodeConfig{}
+	}
+	return n
+}
+
 func nonNilPush(rules []PushRule) []PushRule {
 	if rules == nil {
 		return []PushRule{}

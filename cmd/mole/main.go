@@ -46,6 +46,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// `mole -n NODE <command>` runs the command on another node.
+	if node, rest, ok, err := splitNodeFlag(os.Args[1:]); ok {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "mole:", err)
+			os.Exit(2)
+		}
+		os.Exit(runOnNode(node, rest))
+	}
+
 	cmd := os.Args[1]
 	args := os.Args[2:]
 
@@ -76,6 +85,10 @@ func main() {
 		os.Exit(runInbox(args))
 	case "recv":
 		os.Exit(runRecv(args))
+	case "agent":
+		os.Exit(runAgent(args))
+	case "node":
+		os.Exit(runNode(args))
 	case "dns":
 		os.Exit(runDNS(args))
 	case "doctor":
@@ -120,6 +133,7 @@ func printUsage() {
 		{"unpush", "Remove a push forward"},
 		{"send", "Send files to the other machine's inbox (picker when no files; alias: ftp)"},
 		{"inbox", "Where received files land; accept incoming transfers (inbox -h)"},
+		{"node", "Other machines you manage: node add|ls|rm|ping; run a command there with -n NODE"},
 		{"init", "Generate a mole.yaml (interactive; run once per machine)"},
 		{"config", "Open the active mole.yaml in $VISUAL / $EDITOR (see `mole config -h`)"},
 		{"version", "Print version and exit"},
@@ -132,6 +146,8 @@ func printUsage() {
 	hint := fmt.Sprintf("Run '%s' for up flags, '%s' for init flags.",
 		commandLine("up -h", color), commandLine("init -h", color))
 	fmt.Printf("  %s\n", cDim(hint, color))
+	nodeHint := fmt.Sprintf("Run any command on another machine with '%s'.", commandLine("-n NODE <command>", color))
+	fmt.Printf("  %s\n", cDim(nodeHint, color))
 	fmt.Println()
 }
 
