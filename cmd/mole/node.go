@@ -287,7 +287,11 @@ func nodePing(configPath, name string) int {
 		fmt.Printf("%s: reachable (connect %s); its mole%s has no agent\n", name, p.Connect.Round(time.Millisecond), versionSuffix(p.Version))
 		return 0
 	}
-	fmt.Printf("%s: connect %s, agent round trip %s\n", name, p.Connect.Round(time.Millisecond), p.RoundTrip.Round(time.Millisecond))
+	build := ""
+	if p.Hello.Build != "" {
+		build = ", built from " + p.Hello.Build
+	}
+	fmt.Printf("%s: connect %s, agent round trip %s (mole %s%s)\n", name, p.Connect.Round(time.Millisecond), p.RoundTrip.Round(time.Millisecond), p.Hello.Version, build)
 	return 0
 }
 

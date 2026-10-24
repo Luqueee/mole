@@ -62,10 +62,22 @@ else
 	fi
 fi
 
-REPO="https://github.com/Luqueee/mole.git"
+# MOLE_REPO points at another remote (a fork, or a local repository to try the
+# installer against). MOLE_VERSION is a git ref: a branch or a tag.
+REPO="${MOLE_REPO:-https://github.com/Luqueee/mole.git}"
 BINARY="mole"
 DEFAULT_REF="main"
 VERSION_REF="${MOLE_VERSION:-$DEFAULT_REF}"
+
+# The ref ends up in a `git clone --branch` and in a linker flag: keep it plain.
+if [ -n "${MOLE_VERSION:-}" ]; then
+	case "$VERSION_REF" in
+	-*|*..*|*[!A-Za-z0-9._/@+-]*)
+		echo "error: invalid MOLE_VERSION '$VERSION_REF' (letters, digits and . _ / @ + - only)" >&2
+		exit 1
+		;;
+	esac
+fi
 
 # Colour setup — only when stderr is a TTY and NO_COLOR is unset.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -108,6 +120,13 @@ Usage:
   curl -fsSL .../install.sh | sh             # one-liner
   ./scripts/install.sh --prefix /opt         # custom prefix
   INSTALL_DIR=~/bin/mole ./scripts/install.sh
+  MOLE_VERSION=feat/x curl -fsSL .../install.sh | sh   # build a branch or tag
+
+Environment:
+  MOLE_VERSION   git ref (branch or tag) to build; if it does not exist the
+                 install fails instead of falling back to main
+  MOLE_REPO      git remote to clone (a fork, or a local repository)
+  INSTALL_DIR    full path of the installed binary
 
 Options:
   --prefix <dir>      install under <dir>/bin/mole
@@ -155,6 +174,7 @@ done
 
 PROJECT_ROOT=""
 CLEANUP_DIR=""
+CLONED="no"
 
 cleanup() {
 	[ -n "$CLEANUP_DIR" ] && [ -d "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR"
@@ -192,11 +212,19 @@ resolve_source() {
 	local tmp
 	tmp="$(mktemp -d)"
 	step "cloning $REPO (ref: $VERSION_REF) into $tmp/mole"
+	CLEANUP_DIR="$tmp"
 	if ! git clone --depth 1 --branch "$VERSION_REF" "$REPO" "$tmp/mole" >/dev/null 2>&1; then
-		warn "branch '$VERSION_REF' not found, falling back to default branch"
+		# A ref asked for by name must be the one installed: falling back to
+		# main would hand someone testing a branch the wrong code, silently.
+		if [ -n "${MOLE_VERSION:-}" ] && [ "$VERSION_REF" != "$DEFAULT_REF" ]; then
+			hint="$(git ls-remote --heads --tags "$REPO" 2>/dev/null | sed 's#.*refs/\(heads\|tags\)/##' | grep -iF -- "${VERSION_REF##*/}" | head -5 | tr '\n' ' ' || true)"
+			die "ref '$VERSION_REF' not found in $REPO${hint:+ (similar: $hint)}"
+		fi
+		warn "ref '$VERSION_REF' not found, falling back to the default branch"
+		rm -rf "$tmp/mole"
 		git clone --depth 1 "$REPO" "$tmp/mole" >/dev/null
 	fi
-	CLEANUP_DIR="$tmp"
+	CLONED="yes"
 	PROJECT_ROOT="$tmp/mole"
 }
 
@@ -211,12 +239,30 @@ step "using source: $PROJECT_ROOT"
 GO_BIN="${GO:-$(command -v go || true)}"
 [ -n "$GO_BIN" ] || die "'go' is not installed. Install Go 1.26.4+ from https://go.dev/dl/ and re-run."
 
+# Say where the binary comes from, so `mole version` shows the branch and
+# commit that was installed (stamped with -ldflags; empty without git).
+BUILD_REF=""
+BUILD_COMMIT=""
+if command -v git >/dev/null 2>&1 && git -C "$PROJECT_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+	BUILD_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --short=7 HEAD 2>/dev/null || true)"
+	if [ "$CLONED" = "yes" ]; then
+		BUILD_REF="$VERSION_REF"
+	else
+		BUILD_REF="$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+		[ "$BUILD_REF" = "HEAD" ] && BUILD_REF=""
+		if [ -n "$(git -C "$PROJECT_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+			BUILD_COMMIT="${BUILD_COMMIT}+dirty"
+		fi
+	fi
+fi
+case "$BUILD_REF" in *[!A-Za-z0-9._/@+-]*) BUILD_REF="" ;; esac
+
 BUILD_DIR="$PROJECT_ROOT/dist"
 mkdir -p "$BUILD_DIR"
-step "building $BINARY"
+step "building $BINARY${BUILD_REF:+ from $BUILD_REF}${BUILD_COMMIT:+ ($BUILD_COMMIT)}"
 (
 	cd "$PROJECT_ROOT"
-	"$GO_BIN" build -trimpath -o "$BUILD_DIR/$BINARY" ./cmd/mole
+	"$GO_BIN" build -trimpath -ldflags "-X main.buildRef=$BUILD_REF -X main.buildCommit=$BUILD_COMMIT" -o "$BUILD_DIR/$BINARY" ./cmd/mole
 )
 [ -f "$BUILD_DIR/$BINARY" ] || die "build did not produce $BUILD_DIR/$BINARY"
 ok "built $BUILD_DIR/$BINARY"

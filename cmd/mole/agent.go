@@ -26,7 +26,7 @@ type nodeAgent struct{ configPath string }
 func (a nodeAgent) Hello() agent.Hello {
 	host, _ := os.Hostname()
 	return agent.Hello{
-		Agent: agent.ProtocolVersion, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Hostname: host,
+		Agent: agent.ProtocolVersion, Version: version, Build: buildLabel(), OS: runtime.GOOS, Arch: runtime.GOARCH, Hostname: host,
 		Caps: []string{agent.OpHello, agent.OpStatus},
 	}
 }
