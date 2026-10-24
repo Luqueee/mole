@@ -98,6 +98,8 @@ function Get-BranchSource {
         Die "invalid MOLE_BRANCH '$ref' (letters, digits and . _ / @ + - only)"
     }
     $headers = @{ 'User-Agent' = 'mole-installer' }
+    # A token raises the API's rate limit (CI runners share addresses).
+    if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
     try {
         $info = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/Luqueee/mole/commits/$ref"
     } catch {

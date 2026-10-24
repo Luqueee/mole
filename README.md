@@ -210,12 +210,39 @@ installer against the running binary's own location:
 ```bash
 mole update                  # latest main on Unix; latest release on Windows
 mole update -version v0.1.1  # Unix: Git ref; Windows: release tag
+mole update -branch feat/x   # build and install a branch (see below)
 mole update -dry-run         # print what it would run, change nothing
 ```
 
-Unix updates need Go, Git, and curl or wget. Windows updates need PowerShell.
-For a `go install` setup, re-run
+Unix updates need Go, Git, and curl or wget. Windows release updates need
+PowerShell. For a `go install` setup, re-run
 `go install github.com/Luqueee/mole/cmd/mole@latest` instead.
+
+#### Try a branch
+
+You do not need a release to test something: `-branch` builds a branch from
+source and installs it over the running binary.
+
+```bash
+mole update -branch feat/mesh-nodes      # this machine
+mole -n devlabs update -branch feat/x    # another node
+mole version                             # mole v0.3.0 (feat/mesh-nodes@a1b2c3d)
+mole update                              # back to main
+```
+
+`mole version` (and `mole node ping`) show which branch and commit a binary
+was built from, so you can tell what each machine runs. The installer fetched
+is the one **that branch** carries, so a branch can change the installer too.
+A branch that does not exist is an error, never a silent install of `main`.
+On Windows `-branch` downloads the branch's source and builds it, so it needs
+Go (releases do not). Without the CLI:
+
+```bash
+MOLE_VERSION=feat/x curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/refs/heads/feat/x/scripts/install.sh | sh
+```
+
+`MOLE_REPO` points the installer at a fork (or a local repository), and
+`MOLE_RAW_URL` at another place to fetch the installers from.
 
 ### Uninstall
 
