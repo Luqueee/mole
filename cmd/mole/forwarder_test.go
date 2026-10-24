@@ -208,3 +208,61 @@ func TestLoopbackPort(t *testing.T) {
 		}
 	}
 }
+
+// A port pushed to the same number on the remote must never also be pulled:
+// the pull listener would dial the push listener, which dials the pull
+// listener again, each turn opening more connections (thousands within
+// seconds, every forwarded port stalling).
+func TestPullSkipsAPortPushedToTheSameNumber(t *testing.T) {
+	push := newTestPush(&fakeRemote{})
+	pushed, free := freePort(t), freePort(t)
+	f := newRetainForwarder()
+	f.exclude = map[int]bool{}
+	f.loops = push.loopsPort
+	push.onLoop = func(p int) { _ = f.RemoveDiscover(p) }
+	t.Cleanup(f.closeAll)
+
+	// pulled first, then pushed: the pull is dropped
+	if err := f.ensure(pushed); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(f.ports(), pushed) {
+		t.Fatal("not pulled")
+	}
+	if err := push.AddPush(pushed, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if contains(f.ports(), pushed) {
+		t.Fatal("still pulled after being pushed to the same number: a loop")
+	}
+	// and discovery does not bring it back
+	if err := f.ensure(pushed); err == nil || contains(f.ports(), pushed) {
+		t.Fatalf("pulled again: err=%v ports=%v", err, f.ports())
+	}
+	// other ports are untouched, and a push to a different remote number is no loop
+	if err := f.ensure(free); err != nil || !contains(f.ports(), free) {
+		t.Fatalf("unrelated port: %v", err)
+	}
+	other := freePort(t)
+	if err := push.AddPush(free, other, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(f.ports(), free) {
+		t.Fatal("a push to a different remote port is not a loop; the pull must stay")
+	}
+	// removing the push lets the port be pulled again
+	_ = push.RemovePush(pushed)
+	if err := f.ensure(pushed); err != nil || !contains(f.ports(), pushed) {
+		t.Fatalf("after removing the push: %v", err)
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
+}

@@ -47,6 +47,9 @@ type pushForwarder struct {
 	// hidden rules belong to mole itself (the file-transfer receiver): they
 	// are not listed and their traffic is not counted in the stats.
 	hidden map[int]bool
+	// onLoop is told when a rule makes the same port number a pull/push
+	// loop (see loopsPort), so the pull side can drop it. Called without mu held.
+	onLoop func(port int)
 }
 
 func newPushForwarder(remote remoteListener, log *slog.Logger, hooks proxy.Hooks) *pushForwarder {
@@ -59,6 +62,23 @@ func newPushForwarder(remote remoteListener, log *slog.Logger, hooks proxy.Hooks
 		active: make(map[int]net.Listener),
 		failed: make(map[int]string),
 		hidden: make(map[int]bool),
+	}
+}
+
+// loopsPort reports whether port is pushed to the same number on the remote
+// (local N -> remote N). Pulling that port too would loop: the pull listener
+// dials remote N, which is the push listener, which dials local N, which is
+// the pull listener, and so on, each turn opening more connections.
+func (f *pushForwarder) loopsPort(port int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.rules[port]
+	return ok && r.RemotePort() == port
+}
+
+func (f *pushForwarder) noteLoop(r config.PushRule) {
+	if f.onLoop != nil && r.RemotePort() == r.Local {
+		f.onLoop(r.Local)
 	}
 }
 
@@ -102,10 +122,13 @@ func (f *pushForwarder) ensureLocked(r config.PushRule) error {
 // "failed") and are retried after a reconnect.
 func (f *pushForwarder) start(rules []config.PushRule) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	for _, r := range rules {
 		f.rules[r.Local] = r
 		_ = f.ensureLocked(r)
+	}
+	f.mu.Unlock()
+	for _, r := range rules {
+		f.noteLoop(r)
 	}
 }
 
@@ -141,12 +164,15 @@ func (f *pushForwarder) AddPush(local, remote int, bind string) error {
 		return err
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if _, ok := f.active[local]; ok {
+		f.mu.Unlock()
 		return fmt.Errorf("%w: local port %d is already pushed", admin.ErrConflict, local)
 	}
 	f.rules[local] = r
-	return f.ensureLocked(r)
+	err := f.ensureLocked(r)
+	f.mu.Unlock()
+	f.noteLoop(r)
+	return err
 }
 
 // addHidden opens an internal push forward (local -> same port on the remote)
@@ -161,8 +187,8 @@ func (f *pushForwarder) addHidden(port, remotePort int) error {
 		return err
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if _, ok := f.rules[port]; ok {
+		f.mu.Unlock()
 		return fmt.Errorf("%w: local port %d is already pushed", admin.ErrConflict, port)
 	}
 	f.rules[port] = r
@@ -171,8 +197,11 @@ func (f *pushForwarder) addHidden(port, remotePort int) error {
 		delete(f.rules, port)
 		delete(f.hidden, port)
 		delete(f.failed, port)
+		f.mu.Unlock()
 		return err
 	}
+	f.mu.Unlock()
+	f.noteLoop(r)
 	return nil
 }
 

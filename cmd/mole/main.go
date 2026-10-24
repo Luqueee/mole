@@ -38,7 +38,7 @@ import (
 	"github.com/Luqueee/mole/internal/tunnel"
 )
 
-const version = "0.6.0"
+const version = "0.6.1"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -296,6 +296,10 @@ Either -remote or a config file with 'remote:' is required.`)
 		hooks:       stats.Hooks(proxy.DirPull),
 	}
 	defer fwd.closeAll()
+	// A port that is pushed to the same number on the remote is never also
+	// pulled: the two would feed each other forever.
+	fwd.loops = pushFwd.loopsPort
+	pushFwd.onLoop = func(port int) { _ = fwd.RemoveDiscover(port) }
 
 	pushFwd.start(cfg.Push)
 	go hub.enableAtStart()
@@ -431,6 +435,10 @@ type forwarder struct {
 	// immediately prune. Set once at construction; the same set
 	// of excluded ports is enforced everywhere.
 	exclude map[int]bool
+
+	// loops, when set, says a port must not be pulled because a push forward
+	// of the same number would loop with it.
+	loops func(port int) bool
 }
 
 // ensure starts forwarding port p if it isn't already. Binding failures
@@ -450,6 +458,13 @@ func (f *forwarder) ensure(p int) error {
 func (f *forwarder) ensureLocked(p int) error {
 	if _, ok := f.active[p]; ok {
 		return nil
+	}
+	if f.loops != nil && f.loops(p) {
+		if !f.failed[p] {
+			f.log.Warn("not forwarding a port that is also pushed to the same number (it would loop)", "port", p)
+			f.failed[p] = true
+		}
+		return fmt.Errorf("port %d is pushed to the same port on the remote: forwarding it back would loop", p)
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
 	if err != nil {
