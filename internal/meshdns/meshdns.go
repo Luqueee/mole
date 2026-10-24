@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,8 +26,34 @@ import (
 // systemd-resolved accepts addr:port.
 const StubIP = "198.18.77.1"
 
-// StubAddr is where the DNS stub listens.
+// StubAddr is where the DNS stub listens on Linux, where `mole dns install`
+// puts StubIP on the mole0 link.
 const StubAddr = StubIP + ":5300"
+
+// LoopbackStubAddr is where it listens elsewhere (macOS): there is no mole0,
+// and /etc/resolver files name a nameserver and a port.
+const LoopbackStubAddr = "127.0.0.1:5300"
+
+// StubListenAddr returns the address the DNS stub binds on this OS.
+func StubListenAddr() string {
+	if runtime.GOOS == "linux" {
+		return StubAddr
+	}
+	return LoopbackStubAddr
+}
+
+// RouteIP is what route names resolve to. It is a loopback address of its own,
+// so redirecting its port 80 to the Host proxy never captures plain
+// localhost:80. `mole dns install` makes it reachable (an lo0 alias on macOS)
+// and redirects it; Linux treats all of 127/8 as loopback. Virtual IPs for
+// forward-by-name start at 127.77.0.2, so this one is never handed out.
+const RouteIP = "127.77.0.1"
+
+// RouteLookup tells whether a name is a configured route, which the Host
+// proxy serves.
+type RouteLookup interface {
+	Lookup(name string) (target string, ok bool)
+}
 
 // PortShift is added to every domain port to get the port mole listens on
 // for virtual IPs; `mole dns install` redirects port → port+PortShift with
@@ -61,6 +88,26 @@ type Mesh struct {
 	lns         []net.Listener
 	warnedPorts map[int]bool
 	closed      bool
+	routes      RouteLookup
+}
+
+// SetRoutes makes route names answer RouteIP instead of a virtual IP: they are
+// served by the Host proxy, not forwarded by name.
+func (m *Mesh) SetRoutes(r RouteLookup) {
+	m.mu.Lock()
+	m.routes = r
+	m.mu.Unlock()
+}
+
+func (m *Mesh) isRoute(name string) bool {
+	m.mu.Lock()
+	r := m.routes
+	m.mu.Unlock()
+	if r == nil {
+		return false
+	}
+	_, ok := r.Lookup(name)
+	return ok
 }
 
 // New returns a Mesh forwarding names under domains on ports via dialer.
@@ -189,6 +236,9 @@ func (m *Mesh) Answer(q []byte) []byte {
 	}
 	if qtype != typeA {
 		return reply(q, end, rcodeOK, nil) // NODATA: no AAAA/MX/... for mesh names
+	}
+	if m.isRoute(name) {
+		return reply(q, end, rcodeOK, net.ParseIP(RouteIP).To4())
 	}
 	ip, err := m.Resolve(name)
 	if err != nil {
