@@ -63,6 +63,15 @@ fi
 check "the binary is installed" test -x "$TMP/bin-branch/mole"
 check "mole version names the branch and commit" version_has "$TMP/bin-branch/mole" "(try/install-me@$WANT)"
 
+echo "== under a POSIX sh (dash on Debian and Ubuntu), as in curl ... | sh"
+if env MOLE_REPO="$TMP/origin.git" MOLE_VERSION=try/install-me INSTALL_DIR="$TMP/bin-sh/mole" NO_COLOR=1 \
+	sh "$ROOT/scripts/install.sh" --no-verify >"$TMP/out-sh.txt" 2>&1; then
+	check "sh installs and exits 0" true
+else
+	check "sh installs and exits 0" false
+fi
+check "and the result is the branch build" version_has "$TMP/bin-sh/mole" "(try/install-me@$WANT)"
+
 echo "== a tag"
 install_ref try-tag "$TMP/bin-tag/mole" >"$TMP/out-tag.txt" 2>&1 || true
 check "a tag installs" version_has "$TMP/bin-tag/mole" "(try-tag@$WANT)"

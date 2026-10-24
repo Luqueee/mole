@@ -27,7 +27,11 @@
 #   --init              also run `mole init` after install
 #   -h, --help          show help
 
-set -euo pipefail
+set -eu
+# pipefail is not POSIX: dash (the `sh` of Debian and Ubuntu) rejects it, which
+# broke `curl ... | sh` there. Use it where it exists.
+# shellcheck disable=SC3040
+(set -o pipefail) 2>/dev/null && set -o pipefail
 
 # Resolve a filesystem path to this script, when there is one. Used
 # only by resolve_source() to detect "am I running from inside a clone"
