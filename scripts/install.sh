@@ -193,9 +193,22 @@ resolve_source() {
 	if [ -n "${MOLE_SRC:-}" ] && is_mole_repo "$MOLE_SRC"; then
 		PROJECT_ROOT="$MOLE_SRC"; return 0
 	fi
-	if is_mole_repo "$PWD"; then
-		PROJECT_ROOT="$PWD"; return 0
+	# A ref asked for by name means that ref, not whatever checkout happens to
+	# be here (the working directory, or the clone this script lives in).
+	if [ -z "${MOLE_VERSION:-}" ]; then
+		if is_mole_repo "$PWD"; then
+			PROJECT_ROOT="$PWD"; return 0
+		fi
+		resolve_from_script_dir && return 0
 	fi
+	if ! command -v git >/dev/null 2>&1; then
+		die "no mole repo in CWD and 'git' not available to clone one"
+	fi
+	clone_ref
+}
+
+# Use the clone this script was run from, when there is one.
+resolve_from_script_dir() {
 	local script_dir=""
 	# $SELF was resolved at the top of the script and points at a
 	# real file path in every supported invocation (file or piped),
@@ -206,9 +219,10 @@ resolve_source() {
 	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
 		PROJECT_ROOT="$(cd "$script_dir/.." && pwd)"; return 0
 	fi
-	if ! command -v git >/dev/null 2>&1; then
-		die "no mole repo in CWD and 'git' not available to clone one"
-	fi
+	return 1
+}
+
+clone_ref() {
 	local tmp
 	tmp="$(mktemp -d)"
 	step "cloning $REPO (ref: $VERSION_REF) into $tmp/mole"
@@ -349,7 +363,7 @@ fi
 step "done"
 printf '\n  %s%smole%s %sinstalled successfully%s\n' \
 	"$C_BOLD" "$C_BRIGHT" "$C_RESET" "$C_OK" "$C_RESET"
-printf '  %s\n' "$C_DIM─────────────────────────────────────────────────$C_RESET"
+printf '  %s\n' "${C_DIM}─────────────────────────────────────────────────${C_RESET}"
 printf '  %s%s%s%s\n' "$C_DIM" "binary     " "$C_RESET" "$DEST"
 printf '  %s%s%s%s   (interactive, run once per machine)\n' "$C_DIM" "configure  " "$C_RESET" "${C_VALUE}mole init${C_RESET}"
 printf '  %s%s%s%s      (uses ./mole.yaml by default)\n' "$C_DIM" "start      " "$C_RESET" "${C_VALUE}mole up${C_RESET}"
