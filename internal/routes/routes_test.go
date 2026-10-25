@@ -165,7 +165,7 @@ func TestProxyReportsConnections(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	p.reverseProxy("").Transport.(*http.Transport).CloseIdleConnections()
+	p.reverseProxy("", false).Transport.(*http.Transport).CloseIdleConnections()
 	<-done
 
 	mu.Lock()
@@ -215,17 +215,21 @@ func TestSplitTarget(t *testing.T) {
 }
 
 func TestSplitSchemeAndHostHeader(t *testing.T) {
-	for _, tc := range []struct{ addr, scheme, hostport, host string }{
-		{"127.0.0.1:3000", "http", "127.0.0.1:3000", "127.0.0.1:3000"},
-		{"admin.corp:80", "http", "admin.corp:80", "admin.corp"},
-		{"admin.corp:8080", "http", "admin.corp:8080", "admin.corp:8080"},
-		{"https://admin.corp:443", "https", "admin.corp:443", "admin.corp"},
-		{"https://admin.corp:8443", "https", "admin.corp:8443", "admin.corp:8443"},
-		{"https://admin.corp:80", "https", "admin.corp:80", "admin.corp:80"}, // 80 is not https's default
+	for _, tc := range []struct {
+		addr, scheme, hostport, host string
+		insecure                     bool
+	}{
+		{"127.0.0.1:3000", "http", "127.0.0.1:3000", "127.0.0.1:3000", false},
+		{"admin.corp:80", "http", "admin.corp:80", "admin.corp", false},
+		{"admin.corp:8080", "http", "admin.corp:8080", "admin.corp:8080", false},
+		{"https://admin.corp:443", "https", "admin.corp:443", "admin.corp", false},
+		{"https://admin.corp:8443", "https", "admin.corp:8443", "admin.corp:8443", false},
+		{"https://admin.corp:80", "https", "admin.corp:80", "admin.corp:80", false}, // 80 is not https's default
+		{"https+insecure://admin.corp:443", "https", "admin.corp:443", "admin.corp", true},
 	} {
-		scheme, hostport := splitScheme(tc.addr)
-		if scheme != tc.scheme || hostport != tc.hostport {
-			t.Errorf("splitScheme(%q) = %q, %q", tc.addr, scheme, hostport)
+		scheme, insecure, hostport := splitScheme(tc.addr)
+		if scheme != tc.scheme || hostport != tc.hostport || insecure != tc.insecure {
+			t.Errorf("splitScheme(%q) = %q, %v, %q", tc.addr, scheme, insecure, hostport)
 		}
 		if got := hostHeader(scheme, hostport); got != tc.host {
 			t.Errorf("hostHeader(%q, %q) = %q, want %q", scheme, hostport, got, tc.host)
@@ -264,5 +268,31 @@ func TestProxyHTTPSTarget(t *testing.T) {
 	p2 := New(tb, dial, proxy.Hooks{}, slog.New(slog.DiscardHandler))
 	if code, _ := get(t, p2, "sec.mole.lan"); code != http.StatusBadGateway {
 		t.Errorf("untrusted certificate: %d, want 502", code)
+	}
+}
+
+// https+insecure:// reaches a service whose certificate nobody trusts, and it
+// does not weaken the plain https:// route to the same service.
+func TestProxyInsecureTargetSkipsVerificationOnlyForItself(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "internal host="+r.Host)
+	}))
+	defer srv.Close()
+	dial := &mapDialer{to: map[string]string{"internal.corp:443": strings.TrimPrefix(srv.URL, "https://")}}
+	tb := NewTable([]string{"mole.lan"}, map[string]string{
+		"strict": "https://internal.corp:443",
+		"loose":  "https+insecure://internal.corp:443",
+	})
+	p := New(tb, dial, proxy.Hooks{}, slog.New(slog.DiscardHandler)) // trusts only the system roots
+
+	if code, body := get(t, p, "loose.mole.lan"); code != 200 || body != "internal host=internal.corp" {
+		t.Errorf("insecure route: %d %q", code, body)
+	}
+	// the connection the insecure route left in the pool must not serve this one
+	if code, _ := get(t, p, "strict.mole.lan"); code != http.StatusBadGateway {
+		t.Errorf("strict route after the insecure one: %d, want 502 (certificate not trusted)", code)
+	}
+	if code, _ := get(t, p, "loose.mole.lan"); code != 200 {
+		t.Errorf("insecure route again: %d", code)
 	}
 }

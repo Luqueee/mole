@@ -79,6 +79,8 @@ TARGET is where the remote reaches the service:
   10.0.0.5:8080         a host the remote sees
   admin.corp            a name the remote resolves (HTTP, port 80)
   https://admin.corp    same over TLS (port 443; :PORT overrides either)
+  https+insecure://x    TLS without checking the certificate: for a service with
+                        a self-signed certificate or a CA this machine does not trust
 To go through another registered node, prefix it: @dockers:3000 is that node's
 port 3000, @dockers/db:5432 a host that node sees (each node gets its own
 SSH tunnel, opened on first use).

@@ -161,7 +161,7 @@ const mockProgress = (): UpdateProgress => {
 
 let mockDomain = "mole.lan";
 let mockDns = false;
-let mockRoutes = [{ name: "web", target: "127.0.0.1:3000" }, { name: "api", target: "10.0.0.5:8080" }, { name: "db", target: "@buildbox/127.0.0.1:5432" }, { name: "admin", target: "https://admin.corp:443" }];
+let mockRoutes = [{ name: "web", target: "127.0.0.1:3000" }, { name: "api", target: "10.0.0.5:8080" }, { name: "db", target: "@buildbox/127.0.0.1:5432" }, { name: "admin", target: "https://admin.corp:443" }, { name: "lab", target: "https+insecure://lab.corp:8443" }];
 const mockDomainInfo = (): DomainInfo => ({
   remote: "devlabs",
   domains: mockDomain ? [mockDomain] : [],

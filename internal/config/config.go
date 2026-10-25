@@ -751,13 +751,14 @@ func ValidateRouteName(n string) error {
 //	10.0.0.5:8080              -> 10.0.0.5:8080              a host the remote sees
 //	admin.corp                 -> admin.corp:80              a name the remote resolves
 //	https://admin.corp         -> https://admin.corp:443     same, over TLS
+//	https+insecure://x.corp    -> https+insecure://x.corp:443  TLS without checking the certificate
 //	http://admin.corp:8080     -> admin.corp:8080
 //	@dockers:3000              -> @dockers/127.0.0.1:3000    a node's loopback
 //	@dockers/https://db.corp   -> @dockers/https://db.corp:443
 //
 // A bare number is a port, not a host. The scheme only decides the default
-// port and whether the proxy speaks TLS; plain http is left out of the
-// canonical form. "@NODE:PORT" is a shorthand: NODE:PORT alone would be
+// port and whether the proxy speaks TLS (and checks the certificate); plain
+// http is left out of the canonical form. "@NODE:PORT" is a shorthand: NODE:PORT alone would be
 // ambiguous with HOST:PORT. Whether the node exists is the caller's check
 // (RouteNode).
 func NormalizeRouteTarget(t string) (string, error) {
@@ -775,7 +776,9 @@ func NormalizeRouteTarget(t string) (string, error) {
 		}
 	}
 	scheme, defPort := "http", "80"
-	if rest, ok := strings.CutPrefix(t, "https://"); ok {
+	if rest, ok := strings.CutPrefix(t, "https+insecure://"); ok {
+		scheme, defPort, t = "https+insecure", "443", rest
+	} else if rest, ok := strings.CutPrefix(t, "https://"); ok {
 		scheme, defPort, t = "https", "443", rest
 	} else if rest, ok := strings.CutPrefix(t, "http://"); ok {
 		t = rest
@@ -795,8 +798,8 @@ func NormalizeRouteTarget(t string) (string, error) {
 		return "", bad
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(p))
-	if scheme == "https" {
-		addr = "https://" + addr
+	if scheme != "http" {
+		addr = scheme + "://" + addr
 	}
 	if node != "" {
 		return "@" + node + "/" + addr, nil
