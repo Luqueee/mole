@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/Luqueee/mole/internal/brew"
 )
 
 // defaultRawURL is where the installers are fetched from; MOLE_RAW_URL points
@@ -92,6 +94,14 @@ func runUpdate(args []string) int {
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
+	}
+
+	// A binary Homebrew installed belongs to Homebrew: replacing it would leave
+	// its receipt and its upgrades describing a file that is no longer theirs.
+	if formula, ok := brew.Formula(exe); ok {
+		fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "this mole was installed by Homebrew; it updates it, not mole")
+		fmt.Fprintf(os.Stderr, "        brew upgrade %s\n", formula)
+		return 1
 	}
 
 	// The Unix installer builds from source and fetches Go itself when it is

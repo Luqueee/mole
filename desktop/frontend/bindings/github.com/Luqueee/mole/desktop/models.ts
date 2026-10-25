@@ -76,6 +76,11 @@ export interface CLIStatus {
      * file AddCLIToPath edits ("user PATH" on Windows)
      */
     "profile": string;
+
+    /**
+     * the Homebrew formula that owns the binary, or ""
+     */
+    "managedBy": string;
 }
 
 /**

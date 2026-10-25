@@ -99,7 +99,7 @@ function mockTransfers(): TransferView {
 let mockCli = false;
 let mockPathSet = false;
 function mockCliStatus(): CLIStatus {
-  return { bundled: true, installed: mockCli, path: mockCli ? "/Users/me/.local/bin/mole" : "", version: mockCli ? "v0.2.0" : "", upToDate: mockCli, installDir: "/Users/me/.local/bin", dirOnPath: false, pathSet: mockPathSet, profile: "/Users/me/.zshrc" } as CLIStatus;
+  return { bundled: true, installed: mockCli, path: mockCli ? "/Users/me/.local/bin/mole" : "", version: mockCli ? "v0.2.0" : "", upToDate: mockCli, installDir: "/Users/me/.local/bin", dirOnPath: false, pathSet: mockPathSet, profile: "/Users/me/.zshrc", managedBy: "" } as CLIStatus;
 }
 
 // ───────── nodes (mock) ─────────
