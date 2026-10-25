@@ -1,197 +1,178 @@
 @import "tailwindcss";
-
-/* Subsurface map: the page is a tunnel cross-section. The surface is pale
-   engineering paper; everything underground — terminal windows, the tunnel
-   band, the footer — is dark, where the CLI's own badge colours live. */
-@theme inline {
-  --font-sans: var(--font-sans);
-  --font-display: var(--font-display);
-  --font-mono: var(--font-mono);
-
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-surface: var(--surface);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-border: var(--border);
-  --color-subsoil: var(--subsoil);
-  --color-subsoil-foreground: var(--subsoil-foreground);
-  --color-subsoil-muted: var(--subsoil-muted);
-  --color-forward: var(--forward);
-  --color-unfwd: var(--unfwd);
-  --color-signal: var(--signal);
-  --color-terminal-green: var(--terminal-green);
-  --color-terminal-orange: var(--terminal-orange);
-  --color-terminal-cyan: var(--terminal-cyan);
-
-  --radius: 4px;
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
-}
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/jetbrains-mono";
 
 :root {
-  /* Surface — dry-earth paper */
-  --background: hsl(42 24% 89%); /* #ece7db */
-  --surface: hsl(42 20% 85%); /* alternating band */
-  --foreground: hsl(45 21% 11%); /* #211d15 ink */
-  --muted-foreground: hsl(42 12% 40%); /* #6b6353 */
-  --border: hsl(45 21% 11% / 0.25); /* hairline */
-
-  /* Subsoil — where the tunnel and the terminal live */
-  --subsoil: hsl(36 30% 10%); /* #221c13 */
-  --subsoil-foreground: hsl(42 24% 84%); /* #d8d0be */
-  --subsoil-muted: hsl(40 12% 54%); /* #8d8371 */
-
-  /* Product accents, darkened to hold contrast on paper */
-  --forward: hsl(133 45% 33%); /* FORWARD */
-  --unfwd: hsl(20 73% 40%); /* UNFWD */
-  --signal: hsl(202 69% 39%); /* INFO / links */
-
-  /* Same accents, bright, for use on subsoil */
-  --terminal-green: hsl(133 52% 53%);
-  --terminal-orange: hsl(28 72% 55%);
-  --terminal-cyan: hsl(202 62% 67%);
-
-  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: dark;
+  --nav-h: 84px;
+  --gut: 28px;
+  --background: #0a0908;
+  --panel: #100f0d;
+  --ink: #ebe5d8;
+  --muted: #8b8579;
+  --line: #2b2722;
+  --hot: #ff5a14;
+  --live: #c6ff3d;
+  --font-display: "Space Grotesk Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", monospace;
+}
+@theme inline {
+  --color-background: var(--background);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-hot: var(--hot);
+  --color-live: var(--live);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
 }
 
 @layer base {
+  * {
+    box-sizing: border-box;
+  }
   html {
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    scroll-padding-top: 90px;
   }
   body {
-    @apply bg-background text-foreground;
-    font-family: var(--font-sans);
-    overflow-x: hidden;
+    margin: 0;
+    background: var(--background);
+    color: var(--ink);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+  }
+  button,
+  input {
+    font: inherit;
+  }
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button {
+    cursor: pointer;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  button:disabled {
+    cursor: default;
   }
   ::selection {
-    background: var(--forward);
+    background: var(--hot);
     color: var(--background);
   }
-  /* One visible, consistent keyboard focus treatment everywhere */
   :focus-visible {
-    outline: 2px solid var(--forward);
-    outline-offset: 2px;
-    border-radius: 1px;
+    outline: 2px solid var(--live);
+    outline-offset: 5px;
+  }
+  h1,
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+  svg {
+    flex-shrink: 0;
+  }
+  [hidden] {
+    display: none !important;
   }
 }
 
-/* Scroll reveal: plain transition, no animation library */
-@media (prefers-reduced-motion: no-preference) {
-  [data-reveal] {
-    opacity: 0;
-    transform: translateY(14px);
-    transition:
-      opacity 500ms ease,
-      transform 500ms ease;
+.wrap {
+  max-width: 1240px;
+  padding-inline: 28px;
+  margin-inline: auto;
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.section-heading {
+  font-family: var(--font-display);
+  font-size: clamp(36px, 5vw, 66px);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -0.055em;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 17px 22px;
+  border: 1px solid var(--hot);
+  background: var(--hot);
+  color: var(--background);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.5;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+.button:hover {
+  background: #ff763c;
+  border-color: #ff763c;
+}
+.button.secondary {
+  background: transparent;
+  border-color: #544d42;
+  color: var(--ink);
+}
+.button.secondary:hover {
+  border-color: var(--ink);
+  background: #ebe5d808;
+}
+.skip-link {
+  position: fixed;
+  left: 16px;
+  top: -100px;
+  z-index: 100;
+  background: var(--live);
+  color: var(--background);
+  padding: 12px 20px;
+  font-family: var(--font-mono);
+}
+.skip-link:focus {
+  top: 16px;
+}
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--live);
+  box-shadow: 0 0 12px #c6ff3d30;
+}
+@media (max-width: 600px) {
+  :root {
+    --gut: 20px;
   }
-  [data-reveal].revealed {
-    opacity: 1;
-    transform: none;
+  .wrap {
+    padding-inline: 20px;
+  }
+  .button {
+    padding: 15px 18px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-terminal-line],
-  .caret,
-  .tunnel-dot {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
     animation: none !important;
-    opacity: 1 !important;
-    transform: none !important;
-  }
-  .caret {
-    display: none;
-  }
-}
-
-@keyframes caret-blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-@keyframes terminal-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* A packet travelling the tunnel, left to right */
-@keyframes tunnel-flow {
-  0% {
-    left: 0;
-    opacity: 0;
-  }
-  8% {
-    opacity: 1;
-  }
-  92% {
-    opacity: 1;
-  }
-  100% {
-    left: calc(100% - 6px);
-    opacity: 0;
-  }
-}
-
-@layer utilities {
-  /* Tunnel motif: dashed horizontal line */
-  .tunnel-line {
-    background-image: linear-gradient(
-      to right,
-      var(--terminal-green) 0 55%,
-      transparent 55% 100%
-    );
-    background-size: 10px 1px;
-    background-repeat: repeat-x;
-    background-position: center;
-  }
-  .tunnel-line--muted {
-    background-image: linear-gradient(
-      to right,
-      var(--subsoil-muted) 0 55%,
-      transparent 55% 100%
-    );
-    background-size: 10px 1px;
-    background-repeat: repeat-x;
-    background-position: center;
-  }
-  .tunnel-dot {
-    animation: tunnel-flow 2.6s linear infinite;
-  }
-  /* Log level badges, on subsoil */
-  .log-badge {
-    display: inline-block;
-    padding: 0 5px;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    letter-spacing: 0.04em;
-    border: 1px solid;
-  }
-  .log-badge--forward {
-    color: var(--terminal-green);
-    border-color: hsl(133 52% 53% / 0.4);
-    background: hsl(133 52% 53% / 0.08);
-  }
-  .log-badge--unfwd {
-    color: var(--terminal-orange);
-    border-color: hsl(28 72% 55% / 0.4);
-    background: hsl(28 72% 55% / 0.08);
-  }
-  .log-badge--info {
-    color: var(--terminal-cyan);
-    border-color: hsl(202 62% 67% / 0.4);
-    background: hsl(202 62% 67% / 0.08);
-  }
-  .scroll-mt-nav {
-    scroll-margin-top: 5rem;
+    transition: none !important;
   }
 }

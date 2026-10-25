@@ -1,71 +1,59 @@
 ---
-import Logo from "@/components/Logo.astro"
-
-const REPO = "https://github.com/Luqueee/mole"
+const repo = "https://github.com/Luqueee/mole"
 ---
 
-<footer class="border-t border-subsoil/60 bg-subsoil text-subsoil-foreground">
-  <div class="mx-auto max-w-6xl px-6 py-14">
-    <div class="grid grid-cols-1 gap-10 md:grid-cols-4">
+<footer class="overflow-hidden bg-background">
+  <div class="wrap">
+    <div
+      class="flex flex-col justify-between gap-8 border-b border-line py-10 md:flex-row md:items-start"
+    >
       <div>
-        <Logo size={30} withWordmark={true} tone="paper" />
-        <p class="mt-3 max-w-xs text-sm text-subsoil-muted">
-          SSH port forwarding, auto-discovered. One binary, one connection, zero
-          port lists.
+        <a
+          class="inline-flex items-center gap-2 text-[28px] font-bold tracking-[-.06em]"
+          href="#">mole<span class="text-hot">_</span></a
+        ><p class="mt-3 text-sm text-muted">
+          Distance is an implementation detail.
         </p>
       </div>
-
-      <div class="flex flex-col gap-2 text-sm">
-        <span
-          class="font-mono text-[11px] tracking-[0.16em] text-subsoil-muted uppercase"
-          >Project</span
-        >
+      <div class="flex flex-wrap gap-x-8 gap-y-4 font-mono text-xs text-muted">
         <a
-          href={REPO}
-          class="text-terminal-cyan transition-opacity hover:opacity-70"
+          class="hover:text-hot"
+          href={repo}
           target="_blank"
-          rel="noopener noreferrer">GitHub</a
-        >
-        <a
-          href={REPO + "#readme"}
-          class="text-terminal-cyan transition-opacity hover:opacity-70"
+          rel="noopener noreferrer">SOURCE ↗</a
+        ><a
+          class="hover:text-hot"
+          href={`${repo}#readme`}
           target="_blank"
-          rel="noopener noreferrer">README</a
-        >
-        <a
-          href="#install"
-          class="text-terminal-cyan transition-opacity hover:opacity-70"
-          >Install</a
-        >
-      </div>
-
-      <div class="flex flex-col gap-2 text-sm">
-        <span
-          class="font-mono text-[11px] tracking-[0.16em] text-subsoil-muted uppercase"
-          >Resources</span
-        >
-        <a
-          href={REPO + "/issues"}
-          class="text-terminal-cyan transition-opacity hover:opacity-70"
+          rel="noopener noreferrer">DOCS ↗</a
+        ><a
+          class="hover:text-hot"
+          href={`${repo}/releases`}
           target="_blank"
-          rel="noopener noreferrer">Issues</a
-        >
-        <a
-          href={REPO + "/releases"}
-          class="text-terminal-cyan transition-opacity hover:opacity-70"
+          rel="noopener noreferrer">RELEASES ↗</a
+        ><a
+          class="hover:text-hot"
+          href={`${repo}/issues`}
           target="_blank"
-          rel="noopener noreferrer">Releases</a
+          rel="noopener noreferrer">ISSUES ↗</a
         >
-      </div>
-
-      <div class="font-mono text-xs text-subsoil-muted md:text-right">
-        MIT License<br />v0.1.1
       </div>
     </div>
-
-    <div class="tunnel-line--muted mt-12 h-px w-full" aria-hidden="true"></div>
-    <div class="mt-6 text-center font-mono text-xs text-subsoil-muted">
-      Built with Astro · Tailwind
+    <div
+      class="flex flex-wrap justify-between gap-4 py-6 font-mono text-xs tracking-wide text-muted"
+    >
+      <p>OPEN SOURCE. YOUR MACHINES. YOUR RULES.</p><a
+        class="hover:text-ink"
+        href={`${repo}/blob/main/LICENSE`}
+        target="_blank"
+        rel="noopener noreferrer">MIT LICENSE ↗</a
+      ><a class="hover:text-hot" href="#">BACK TO THE SURFACE ↑</a>
+    </div>
+    <div
+      class="footer-word pointer-events-none -mb-[.21em] text-center text-[clamp(140px,31vw,410px)] leading-[.82] font-bold tracking-[-.09em] text-line select-none"
+      aria-hidden="true"
+    >
+      mole<span class="text-hot">.</span>
     </div>
   </div>
 </footer>

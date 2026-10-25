@@ -1,0 +1,552 @@
+---
+// Start something on the remote and it shows up here. Scroll-driven: the
+// terminal on the left notices each new listener, a pulse runs down the rail,
+// and the page it serves arrives on the right as a screen of its own.
+---
+
+<section
+  id="features"
+  class="ds"
+  aria-labelledby="discovery-title"
+  data-ds
+>
+  <div class="ds-stage">
+    <div class="wrap ds-in">
+      <header class="ds-head">
+        <div>
+          <p class="eyebrow">01 / AUTOMATIC DISCOVERY</p>
+          <h2 id="discovery-title">
+            Start something.<br /><span>It shows up here.</span>
+          </h2>
+        </div>
+        <p class="ds-lede">
+          Mole notices listening TCP ports on your remote machine and makes
+          them available on your own localhost. No manual forwarding list to
+          maintain.
+        </p>
+      </header>
+
+      <div class="ds-body">
+        <div class="ds-ports" aria-hidden="true">
+          <div class="ds-ports-head">
+            <span>REMOTE MACHINE</span><span>workstation / linux</span>
+          </div>
+          <div data-term></div>
+        </div>
+
+        <div class="ds-rail" aria-hidden="true">
+          <b data-label>detected → forwarded</b>
+          <i class="ds-line"></i>
+          <i class="ds-pulse" data-pulse></i>
+          <i class="ds-pulse" data-pulse></i>
+          <i class="ds-pulse" data-pulse></i>
+        </div>
+
+        <div class="ds-cards" aria-hidden="true">
+          <article class="ds-card" data-card>
+            <div class="ds-chrome"><i></i><i></i><i></i><span>↳ localhost:3000</span></div>
+            <div class="ds-page">
+              <div class="ds-row"><b>FIELDNOTES</b><small>FIELD JOURNAL</small></div>
+              <small class="ds-kick">YOUR NEXT GREAT IDEA</small>
+              <h3>Make room<br />for the work.</h3>
+              <p>A quiet space for your team’s best thinking.</p>
+              <div class="ds-row ds-foot"><span>Explore the journal</span><span class="o">↗</span></div>
+            </div>
+          </article>
+          <article class="ds-card" data-card>
+            <div class="ds-chrome"><i></i><i></i><i></i><span>↳ localhost:8080</span></div>
+            <div class="ds-page ds-api">
+              <small class="ds-kick">API · GET /health</small>
+              <h3>200<em> OK</em></h3>
+              <pre>{'{\n  "status": "ok",\n  "service": "api",\n  "uptime": "12s"\n}'}</pre>
+            </div>
+          </article>
+          <article class="ds-card" data-card>
+            <div class="ds-chrome"><i></i><i></i><i></i><span>↳ localhost:5173</span></div>
+            <div class="ds-page">
+              <small class="ds-kick">VITE + REACT</small>
+              <h3>Hot reload,<br />live<em>.</em></h3>
+              <p>Edit a file on the remote and watch it change here.</p>
+              <div class="ds-row ds-foot"><span>count is 0</span><span class="o">↗</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <p class="ds-cap" data-cap></p>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  .ds {
+    position: relative;
+    min-height: 100svh;
+    background: var(--background);
+    border-bottom: 1px solid var(--line);
+  }
+  .ds-stage {
+    position: relative;
+    min-height: 100svh;
+    overflow: hidden;
+  }
+  .ds-in {
+    min-height: 100svh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 22px;
+    padding-top: calc(var(--nav-h) + 14px);
+    padding-bottom: 26px;
+  }
+  .ds-head {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 28px;
+    align-items: end;
+  }
+  .ds-head .eyebrow {
+    margin-bottom: 14px;
+  }
+  .ds-head h2 {
+    font: 600 clamp(38px, 5.6vw, 76px) / 0.94 var(--font-display);
+    letter-spacing: -0.07em;
+  }
+  .ds-head h2 span {
+    color: var(--hot);
+  }
+  .ds-lede {
+    max-width: 400px;
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+  .ds-body {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1.12fr);
+    align-items: stretch;
+    gap: 0;
+  }
+
+  /* the remote: ports, set big, typed in as they are found */
+  .ds-ports {
+    align-self: center;
+    min-height: calc(3 * clamp(92px, 15vh, 122px) + 40px);
+  }
+  .ds-ports-head {
+    display: flex;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    font: 12px var(--font-mono);
+    letter-spacing: 0.12em;
+    color: var(--muted);
+  }
+  .ds-prow {
+    display: grid;
+    grid-template-columns: 34px 1fr 108px;
+    align-items: end;
+    gap: 12px;
+    height: clamp(92px, 15vh, 122px);
+    padding: 0 0 12px;
+    border-top: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .ds-prow .idx {
+    font: 12px var(--font-mono);
+    color: #5d574d;
+  }
+  .ds-prow b {
+    font: 600 clamp(48px, 6.4vw, 88px) / 0.95 var(--font-display);
+    letter-spacing: -0.07em;
+    color: var(--ink);
+    height: 0.95em;
+    white-space: nowrap;
+  }
+  .ds-prow.now b {
+    color: var(--hot);
+  }
+  .ds-prow.empty b {
+    color: #26221d;
+  }
+  .ds-prow .meta {
+    text-align: right;
+    font: 12px / 1.7 var(--font-mono);
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    height: 3.4em;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .ds-prow .meta i {
+    font-style: normal;
+    color: var(--live);
+  }
+  /* the rail between them */
+  .ds-rail {
+    position: relative;
+  }
+  .ds-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 4px;
+    margin-top: -2px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--hot) 15%,
+      var(--hot) 85%,
+      transparent
+    );
+    box-shadow: 0 0 40px #ff5a14aa;
+  }
+  .ds-pulse {
+    position: absolute;
+    top: 50%;
+    width: 34px;
+    height: 10px;
+    margin: -5px 0 0 -17px;
+    border-radius: 6px;
+    background: var(--live);
+    box-shadow: 0 0 22px #c6ff3d99;
+    opacity: 0;
+  }
+  .ds-rail b {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(50% - 40px);
+    text-align: center;
+    font: 500 10px var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--hot);
+    opacity: 0;
+  }
+
+  /* the screens that arrive */
+  .ds-cards {
+    position: relative;
+    align-self: center;
+    height: 360px;
+  }
+  .ds-card {
+    position: absolute;
+    inset: 0;
+    background: #ebe5d8;
+    color: #0a0908;
+    overflow: hidden;
+    transform-origin: 50% 0;
+    opacity: 0;
+    will-change: transform, opacity;
+    box-shadow:
+      0 40px 90px -30px #ff5a1450,
+      0 10px 30px #00000066;
+  }
+  .ds-chrome {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 16px;
+    background: #dcd4c3;
+  }
+  .ds-chrome i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #b9b2a1;
+  }
+  .ds-chrome span {
+    margin-left: 12px;
+    padding: 5px 12px;
+    background: #e9e2d2;
+    font: 500 12px var(--font-mono);
+  }
+  .ds-page {
+    padding: 22px 28px;
+  }
+  .ds-page h3 {
+    margin: 10px 0 12px;
+    font: 600 clamp(34px, 3.6vw, 50px) / 0.95 var(--font-display);
+    letter-spacing: -0.06em;
+  }
+  .ds-page h3 em {
+    font-style: normal;
+    color: var(--hot);
+  }
+  .ds-page p {
+    font-size: 15px;
+    color: #0a0908a8;
+  }
+  .ds-kick {
+    display: block;
+    margin-top: 18px;
+    font: 500 11px var(--font-mono);
+    letter-spacing: 0.14em;
+    color: #0a0908a8;
+  }
+  .ds-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font: 600 13px var(--font-mono);
+    letter-spacing: 0.06em;
+  }
+  .ds-row small {
+    font-weight: 400;
+    color: #0a0908a8;
+  }
+  .ds-foot {
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid #0a090826;
+    font: 500 14px var(--font-display);
+    letter-spacing: 0;
+  }
+  .ds-foot .o {
+    color: var(--hot);
+  }
+  .ds-api pre {
+    margin: 4px 0 0;
+    padding: 14px 16px;
+    background: #0a0908;
+    color: var(--live);
+    font: 500 13px / 1.7 var(--font-mono);
+  }
+  .ds-cap {
+    font: 13px var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .ds-bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 100%;
+    background: var(--hot);
+    transform-origin: left;
+    transform: scaleX(0);
+  }
+  @media (max-width: 900px) {
+    .ds-head {
+      grid-template-columns: 1fr;
+    }
+    .ds-lede {
+      display: none;
+    }
+    .ds-body {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 56px minmax(0, 1fr);
+    }
+    .ds-rail b {
+      display: none;
+    }
+    .ds-line {
+      left: 50%;
+      right: auto;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      height: auto;
+      margin: 0 0 0 -2px;
+    }
+    .ds-in {
+      gap: 14px;
+    }
+    .ds-head h2 {
+      font-size: 38px;
+    }
+    .ds-prow {
+      height: 74px;
+      grid-template-columns: 26px 1fr 92px;
+      padding-bottom: 8px;
+    }
+    .ds-prow b {
+      font-size: 42px;
+    }
+    .ds-prow .meta {
+      font-size: 10px;
+      min-width: 0;
+    }
+    .ds-ports {
+      min-height: calc(3 * 74px + 34px);
+    }
+    .ds-body {
+      grid-template-rows: auto 38px auto;
+    }
+    .ds-cards {
+      height: 236px;
+      min-height: 0;
+    }
+    .ds-page {
+      padding: 14px 20px;
+    }
+    .ds-page h3 {
+      font-size: 30px;
+      margin: 8px 0 8px;
+    }
+    .ds-page p {
+      font-size: 14px;
+    }
+    .ds-kick {
+      margin-top: 8px;
+    }
+    .ds-foot {
+      display: none;
+    }
+    .ds-cap {
+      height: auto;
+      min-height: 40px;
+      white-space: normal;
+      overflow: visible;
+    }
+  }
+</style>
+
+<script>
+  import { gsap } from "gsap"
+
+  const cl = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x))
+  const seg = (p: number, a: number, b: number) => cl((p - a) / (b - a))
+  const ease = (t: number) =>
+    t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+  const out = (t: number) => 1 - Math.pow(1 - t, 4)
+
+  const sec = document.getElementById("features") as HTMLElement
+  const term = sec.querySelector<HTMLElement>("[data-term]")!
+  const cards = [...sec.querySelectorAll<HTMLElement>("[data-card]")]
+  const pulses = [...sec.querySelectorAll<HTMLElement>("[data-pulse]")]
+  const label = sec.querySelector<HTMLElement>("[data-label]")!
+  const cap = sec.querySelector<HTMLElement>("[data-cap]")!
+  const vertical = matchMedia("(max-width: 900px)")
+
+  const events = [
+    { t: 0.06, cmd: "npm run dev", port: 3000 },
+    { t: 0.15, cmd: "./server --port 8080", port: 8080 },
+    { t: 0.24, cmd: "vite", port: 5173 },
+  ]
+  const caps: [number, string][] = [
+    [0, "Waiting for something to listen…"],
+    [0.08, "Web app started — port 3000 discovered"],
+    [0.17, "API started — port 8080 discovered"],
+    [0.26, "Vite started — port 5173 discovered"],
+    [0.52, "Three ports forwarded. No list to maintain."],
+  ]
+
+  let progress = 0
+  let lastHTML = ""
+  let lastCap = ""
+  const render = (p: number) => {
+    progress = p
+    const names = ["web app", "api", "vite"]
+    let h = ""
+    const started = events.filter((ev) => p >= ev.t).length
+    events.forEach((ev, k) => {
+      if (p < ev.t) {
+        h += `<div class="ds-prow empty"><span class="idx">0${k + 1}</span><b>&nbsp;</b><span class="meta">${k === 0 && !started ? "waiting▌" : ""}</span></div>`
+        return
+      }
+      const txt = `:${ev.port}`
+      const n = Math.floor(seg(p, ev.t, ev.t + 0.07) * txt.length)
+      const done = p >= ev.t + 0.16
+      const meta =
+        p < ev.t + 0.07
+          ? "<span>detecting…</span><i>&nbsp;</i>"
+          : `<span>${names[k]}</span><i>${done ? "● forwarded" : "LISTEN"}</i>`
+      h += `<div class="ds-prow${k === started - 1 ? " now" : ""}"><span class="idx">0${k + 1}</span><b>${txt.slice(0, n)}</b><span class="meta">${meta}</span></div>`
+    })
+    if (h !== lastHTML) {
+      term.innerHTML = h
+      lastHTML = h
+    }
+
+    // pulses run down the rail, then the page they serve arrives
+    let live = 0
+    events.forEach((ev, i) => {
+      const q = seg(p, ev.t + 0.06, ev.t + 0.16)
+      const el = pulses[i]
+      const pos = `${ease(q) * 100}%`
+      if (vertical.matches) {
+        el.style.left = "50%"
+        el.style.top = pos
+        el.style.width = "10px"
+        el.style.height = "34px"
+        el.style.margin = "-17px 0 0 -5px"
+      } else {
+        el.style.top = "50%"
+        el.style.left = pos
+        el.style.width = "34px"
+        el.style.height = "10px"
+        el.style.margin = "-5px 0 0 -17px"
+      }
+      el.style.opacity = String(q > 0 && q < 1 ? 1 : 0)
+      if (q > 0 && q < 1) live++
+    })
+    label.style.opacity = String(live ? 1 : 0)
+
+    cards.forEach((card, k) => {
+      const inT = out(seg(p, events[k].t + 0.14, events[k].t + 0.26))
+      let depth = 0
+      for (let j = k + 1; j < cards.length; j++)
+        depth += out(seg(p, events[j].t + 0.14, events[j].t + 0.26))
+      // opaque while it arrives; older screens only darken as they fall back
+      card.style.opacity = String(Math.min(1, inT * 4))
+      card.style.filter = `brightness(${1 - 0.45 * Math.min(1, depth)})`
+      card.style.zIndex = String(k)
+      const dx = vertical.matches ? 0 : (1 - inT) * 70
+      const dy = (vertical.matches ? (1 - inT) * 40 : 0) - depth * 22
+      card.style.transform = `translate(${dx}px, ${dy}px) scale(${1 - depth * 0.05})`
+    })
+
+    const c = caps.reduce((o, [t, s]) => (p >= t ? s : o), caps[0][1])
+    if (c !== lastCap) {
+      cap.textContent = c
+      lastCap = c
+    }
+  }
+
+  render(0)
+  vertical.addEventListener("change", () => render(progress))
+  // plays by itself once the section is on screen: no scrolling needed to advance it
+  const play = () => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      render(1)
+      return
+    }
+    const t = { p: 0 }
+    gsap.to(t, {
+      p: 1,
+      duration: 5.4,
+      delay: 0.15,
+      ease: "none",
+      onUpdate: () => render(t.p),
+    })
+  }
+  new IntersectionObserver(
+    (entries, obs) => {
+      if (entries[0].isIntersecting) {
+        obs.disconnect()
+        play()
+      }
+    },
+    { threshold: 0.55 },
+  ).observe(sec)
+</script>
+
+
+
+
+
+
+
+
+
+

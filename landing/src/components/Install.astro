@@ -1,74 +1,481 @@
 ---
-import CopyButton from "@/components/CopyButton.astro"
-import SectionLabel from "@/components/SectionLabel.astro"
-
-const steps = [
-  {
-    n: 1,
-    label: "Install the binary",
-    cmd: "curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh",
-  },
-  {
-    n: 2,
-    label: "Configure + start — interactive, accepts an ssh config alias",
-    cmd: "mole init",
-  },
-  {
-    n: 3,
-    label: "Later",
-    cmd: "mole status      # what's forwarded right now\nmole logs -f     # pretty, colourised, live\nmole down        # stop the background daemon",
-  },
-]
+// "Get mole / two ways in": both ways are on screen at once instead of behind
+// tabs. The desktop app on cream, the CLI on dark, one engine underneath.
 ---
 
-<section
-  id="install"
-  data-reveal
-  class="scroll-mt-nav relative border-t border-dashed border-border py-16 sm:py-20"
->
-  <div
-    class="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-12"
-  >
-    <SectionLabel label="Install" />
-    <div>
-      <h2
-        class="font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
-      >
-        From curl to forwarded ports
-      </h2>
-      <p class="mt-3 max-w-2xl text-base text-muted-foreground">
-        Three commands. Under a minute from download to a live tunnel.
+<section id="install" class="gi">
+  <div class="wrap">
+    <header class="gi-head">
+      <p class="eyebrow">GET MOLE / TWO WAYS IN</p>
+      <h2 class="gi-h">Two ways in.<br /><span>One engine.</span></h2>
+      <p class="gi-sub">
+        Pick the desktop app or stay in the terminal. Both talk to the same Mole
+        daemon, so you can switch whenever you like.
       </p>
+    </header>
 
-      <ol class="mt-10 space-y-6">
-        {
-          steps.map((s) => (
-            <li class="border-t border-border pt-5">
-              <div class="flex items-baseline gap-4">
-                <span class="font-mono text-xl font-semibold text-forward">
-                  {String(s.n).padStart(2, "0")}
-                </span>
-                <span class="text-sm text-muted-foreground">{s.label}</span>
-              </div>
-              <div class="mt-3 ml-11 flex items-center justify-between gap-3 rounded-md border border-subsoil/60 bg-subsoil px-4 py-3">
-                {/* prettier-ignore */}
-                <pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs whitespace-pre text-subsoil-foreground"><span class="text-terminal-green">$</span>&nbsp;{s.cmd}</pre>
-                <CopyButton
-                  text={s.cmd}
-                  class="text-subsoil-muted hover:bg-subsoil-foreground/10 hover:text-subsoil-foreground"
-                />
-              </div>
-            </li>
-          ))
-        }
-      </ol>
+    <div class="gi-grid">
+      <!-- the app -->
+      <article class="gi-card gi-app" aria-labelledby="gi-app-title">
+        <p class="gi-tag"><span>01 / DESKTOP APP</span><b>GUI</b></p>
+        <h3 id="gi-app-title" class="gi-title">Your machines,<br />in reach<span>.</span></h3>
+        <p class="gi-text">
+          A visual interface to the same tunnels and remote machines as the CLI.
+        </p>
+        <ol class="gi-list">
+          <li><i>01</i><span>See your ports</span><u aria-hidden="true">→</u></li>
+          <li><i>02</i><span>Reach your machines</span><u aria-hidden="true">→</u></li>
+          <li><i>03</i><span>Move your files</span><u aria-hidden="true">→</u></li>
+        </ol>
+        <div class="gi-cta">
+          <a class="button" href="https://github.com/Luqueee/mole/tree/main/desktop" target="_blank" rel="noreferrer"
+            >Build desktop app <span aria-hidden="true">↗</span></a
+          >
+          <a class="gi-link" href="https://github.com/Luqueee/mole/releases" target="_blank" rel="noreferrer"
+            >Browse releases ↗</a
+          >
+        </div>
+        <p class="gi-note">
+          Desktop builds are source-only for now: there is no public desktop
+          bundle yet.
+        </p>
+      </article>
 
-      <p class="mt-6 max-w-2xl text-sm text-muted-foreground">
-        <span class="font-mono text-foreground">mole init</span> writes the config,
-        then offers to start mole <strong>in the background</strong>
-        for you. From there it keeps the tunnel up and forwards new servers as they
-        appear.
-      </p>
+      <!-- the terminal -->
+      <article id="cli" class="gi-card gi-cli" aria-labelledby="gi-cli-title">
+        <p class="gi-tag"><span>02 / CLI + DAEMON</span><b>ALWAYS READY</b></p>
+        <h3 id="gi-cli-title" class="gi-title">One binary.<br />No ceremony<span>.</span></h3>
+        <p class="gi-text">
+          Install the CLI, start a background tunnel and let it discover remote
+          ports. The same binary runs the commands and the daemon.
+        </p>
+
+        <div class="gi-block">
+          <div class="gi-blockhead">
+            <p>INSTALL</p>
+            <div class="gi-os" role="tablist" aria-label="Choose your operating system" data-os-tabs>
+              <button type="button" id="tab-unix" role="tab" aria-selected="true" aria-controls="panel-unix">macOS / Linux</button>
+              <button type="button" id="tab-windows" role="tab" aria-selected="false" aria-controls="panel-windows" tabindex="-1">Windows</button>
+            </div>
+          </div>
+          <div id="panel-unix" role="tabpanel" aria-labelledby="tab-unix" data-os-panel>
+            <div class="gi-cmd">
+              <code id="unix-command">curl -fsSL https://<wbr>raw.githubusercontent.com/<wbr>Luqueee/<wbr>mole/<wbr>main/<wbr>scripts/<wbr>install.sh <span class="nb">| sh</span></code>
+              <button type="button" data-copy="unix-command" aria-label="Copy Unix install command">Copy</button>
+            </div>
+            <p class="gi-req">Requires Go 1.26.4+, Git and curl.</p>
+          </div>
+          <div id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" data-os-panel hidden>
+            <div class="gi-cmd">
+              <code id="windows-command">irm https://<wbr>raw.githubusercontent.com/<wbr>Luqueee/<wbr>mole/<wbr>main/<wbr>scripts/<wbr>install.ps1 <span class="nb">| iex</span></code>
+              <button type="button" data-copy="windows-command" aria-label="Copy Windows install command">Copy</button>
+            </div>
+            <p class="gi-req">Requires PowerShell 5.1+. Installs the prebuilt release; Go is not required.</p>
+          </div>
+        </div>
+
+        <div class="gi-block">
+          <div class="gi-blockhead"><p>THEN START AND CONTROL YOUR TUNNEL</p></div>
+          <div class="gi-cmd">
+            <code id="start-command">mole up --remote dev --auto-discover -d</code>
+            <button type="button" data-copy="start-command" aria-label="Copy tunnel start command">Copy</button>
+          </div>
+          <ul class="gi-cmds">
+            <li><code>mole status</code><span>Check status</span></li>
+            <li><code>mole logs</code><span>Read logs</span></li>
+            <li><code>mole down</code><span>Stop tunnel</span></li>
+          </ul>
+        </div>
+        <p class="gi-status copy-status" aria-live="polite" aria-atomic="true"></p>
+      </article>
+    </div>
+
+    <div class="gi-engine" aria-label="One shared engine">
+      <div>
+        <p>MOLE DAEMON</p>
+        <span>Discovers remote development ports and keeps your tunnel working.</span>
+      </div>
+      <b aria-hidden="true">MOLE</b>
+      <div>
+        <p class="live">GUI OPTIONAL</p>
+        <span>The daemon runs independently. The desktop app is optional.</span>
+      </div>
     </div>
   </div>
 </section>
+
+<style is:global>
+  .gi {
+    border-top: 1px solid var(--line);
+    background: var(--background);
+    padding: clamp(72px, 10vw, 128px) 0;
+    color: var(--ink);
+  }
+  .gi-head {
+    margin-bottom: clamp(36px, 5vw, 64px);
+  }
+  .gi-h {
+    margin: 22px 0 22px;
+    font: 600 clamp(52px, 8.6vw, 128px) / 0.9 var(--font-display);
+    letter-spacing: -0.075em;
+  }
+  .gi-h span {
+    color: var(--hot);
+  }
+  .gi-sub {
+    max-width: 560px;
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+  .gi-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: stretch;
+  }
+  .gi-card {
+    min-width: 0;
+    padding: clamp(24px, 3.4vw, 48px);
+    display: flex;
+    flex-direction: column;
+  }
+  .gi-tag {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font: 12px var(--font-mono);
+    letter-spacing: 0.14em;
+  }
+  .gi-tag b {
+    padding: 4px 9px;
+    border: 1px solid currentColor;
+    font-weight: 500;
+    font-size: 11px;
+  }
+  .gi-title {
+    margin: 26px 0 16px;
+    font: 600 clamp(38px, 4.6vw, 68px) / 0.94 var(--font-display);
+    letter-spacing: -0.07em;
+  }
+  .gi-title span {
+    color: var(--hot);
+  }
+  .gi-text {
+    max-width: 480px;
+    font-size: 18px;
+    line-height: 1.55;
+  }
+
+  /* the app: cream */
+  .gi-app {
+    background: #ebe5d8;
+    color: #0a0908;
+  }
+  .gi-app .gi-tag {
+    color: #0a0908a8;
+  }
+  .gi-app .gi-text {
+    color: #0a0908b8;
+  }
+  .gi-list {
+    margin: 30px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .gi-list li {
+    display: grid;
+    grid-template-columns: 38px 1fr auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 18px 0;
+    border-top: 1px solid #0a090826;
+    font: 600 clamp(24px, 2.4vw, 32px) / 1 var(--font-display);
+    letter-spacing: -0.04em;
+  }
+  .gi-list li:last-child {
+    border-bottom: 1px solid #0a090826;
+  }
+  .gi-list i {
+    font: 500 13px var(--font-mono);
+    font-style: normal;
+    letter-spacing: 0;
+    color: var(--hot);
+  }
+  .gi-list u {
+    text-decoration: none;
+    font: 400 22px var(--font-mono);
+    color: #0a090880;
+  }
+  .gi-cta {
+    margin-top: auto;
+    padding-top: 34px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 22px;
+  }
+  .gi-link {
+    font-size: 16px;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .gi-link:hover {
+    color: var(--hot);
+  }
+  .gi-note {
+    margin-top: 18px;
+    max-width: 440px;
+    padding-left: 14px;
+    border-left: 2px solid var(--hot);
+    font-size: 15px;
+    line-height: 1.5;
+    color: #0a0908a0;
+  }
+
+  /* the terminal: dark */
+  .gi-cli {
+    background: #100f0d;
+    border: 1px solid var(--line);
+  }
+  .gi-cli .gi-tag {
+    color: var(--muted);
+  }
+  .gi-cli .gi-tag b {
+    color: var(--live);
+  }
+  .gi-cli .gi-title span {
+    color: var(--live);
+  }
+  .gi-cli .gi-text {
+    color: var(--muted);
+  }
+  .gi-block {
+    margin-top: 28px;
+    min-width: 0;
+  }
+  .gi-blockhead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .gi-blockhead p {
+    font: 12px var(--font-mono);
+    letter-spacing: 0.14em;
+    color: var(--hot);
+  }
+  .gi-os {
+    display: inline-flex;
+    border: 1px solid var(--line);
+  }
+  .gi-os button {
+    border: 0;
+    background: transparent;
+    padding: 7px 14px;
+    font: 12px var(--font-mono);
+    color: var(--muted);
+  }
+  .gi-os button[aria-selected="true"] {
+    background: var(--live);
+    color: #0a0908;
+    font-weight: 600;
+  }
+  .gi-os button:not([aria-selected="true"]):hover {
+    color: var(--ink);
+  }
+  .gi-cmd {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 12px 12px 16px;
+    border: 1px solid #3a342d;
+    background: #0a0908;
+  }
+  .gi-cmd code {
+    flex: 1;
+    min-width: 0;
+    font: 500 15px / 1.5 var(--font-mono);
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .gi-cmd code::before {
+    content: "$ ";
+    color: var(--hot);
+  }
+  .gi-cmd button {
+    flex-shrink: 0;
+    border: 1px solid var(--line);
+    background: transparent;
+    padding: 7px 12px;
+    font: 12px var(--font-mono);
+    color: var(--muted);
+  }
+  .gi-cmd button:hover {
+    border-color: var(--live);
+    color: var(--live);
+  }
+  .nb {
+    white-space: nowrap;
+  }
+  .gi-req {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .gi-cmds {
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .gi-cmds li {
+    padding-left: 12px;
+    border-left: 2px solid var(--line);
+  }
+  .gi-cmds code {
+    display: block;
+    font: 500 14px var(--font-mono);
+    color: var(--ink);
+  }
+  .gi-cmds span {
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .gi-status {
+    margin-top: auto;
+    padding-top: 16px;
+    min-height: 40px;
+    font: 13px var(--font-mono);
+    color: var(--live);
+  }
+
+  /* the engine under both */
+  .gi-engine {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .gi-engine > div {
+    padding: 22px clamp(18px, 2.4vw, 32px);
+  }
+  .gi-engine p {
+    font: 12px var(--font-mono);
+    letter-spacing: 0.14em;
+    color: var(--hot);
+  }
+  .gi-engine p.live {
+    color: var(--live);
+  }
+  .gi-engine span {
+    display: block;
+    margin-top: 8px;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  .gi-engine b {
+    display: grid;
+    place-items: center;
+    padding: 0 40px;
+    background: var(--hot);
+    color: #100d0a;
+    font: 700 28px var(--font-display);
+    letter-spacing: -0.04em;
+  }
+  @media (max-width: 960px) {
+    .gi-grid {
+      grid-template-columns: 1fr;
+    }
+    .gi-engine {
+      grid-template-columns: 1fr;
+    }
+    .gi-engine b {
+      padding: 18px 0;
+    }
+  }
+  @media (max-width: 520px) {
+    .gi-cmd {
+      flex-wrap: wrap;
+      row-gap: 10px;
+    }
+    .gi-cmd code {
+      flex-basis: 100%;
+    }
+    .gi-cmd button {
+      margin-left: auto;
+    }
+    .gi-cmds {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  const section = document.querySelector<HTMLElement>("#install")
+  if (section) {
+    const osTabs = [...section.querySelectorAll<HTMLButtonElement>("[data-os-tabs] [role='tab']")]
+    const osPanels = [...section.querySelectorAll<HTMLElement>("[data-os-panel]")]
+    const status = section.querySelector<HTMLElement>(".copy-status")
+
+    const select = (tab: HTMLButtonElement) => {
+      osTabs.forEach((item) => {
+        const active = item === tab
+        item.setAttribute("aria-selected", String(active))
+        item.tabIndex = active ? 0 : -1
+      })
+      osPanels.forEach((panel) => (panel.hidden = panel.id !== tab.getAttribute("aria-controls")))
+      if (status) status.textContent = ""
+    }
+    osTabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => select(tab))
+      tab.addEventListener("keydown", (event: KeyboardEvent) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+        event.preventDefault()
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? osTabs.length - 1
+              : (index + (event.key === "ArrowRight" ? 1 : osTabs.length - 1)) % osTabs.length
+        osTabs[next].focus()
+        select(osTabs[next])
+      })
+    })
+
+    // pick the platform you are on
+    if (/win/i.test(navigator.platform)) select(osTabs[1])
+
+    section.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const code = section.querySelector<HTMLElement>(`#${button.dataset.copy}`)
+        if (!code || !status) return
+        const text = code.textContent ?? ""
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable")
+          await navigator.clipboard.writeText(text)
+          status.textContent = "Copied to clipboard."
+        } catch {
+          try {
+            const selection = window.getSelection()
+            if (!selection) throw new Error("Selection unavailable")
+            const range = document.createRange()
+            range.selectNodeContents(code)
+            selection.removeAllRanges()
+            selection.addRange(range)
+            status.textContent = "Clipboard unavailable — command selected. Copy it with your keyboard."
+          } catch {
+            status.textContent = "Could not access the clipboard. Select the command and copy it with your keyboard."
+          }
+        }
+      })
+    })
+  }
+</script>
+

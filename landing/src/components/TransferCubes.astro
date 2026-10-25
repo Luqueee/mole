@@ -1,0 +1,292 @@
+---
+// A file crosses the SSH connection as cubes: they break off the file, funnel
+// through the tunnel and re-assemble in the remote inbox. Scroll-driven; Three.js
+// loads lazily the first time the section gets near.
+---
+
+<section
+  id="file-transfers"
+  class="tc"
+  aria-labelledby="transfer-title"
+  data-tc
+>
+  <div class="tc-stage">
+    <div class="tc-copy">
+      <div>
+        <p class="eyebrow tc-dim">03 / A LITTLE LESS BACK AND FORTH</p>
+        <h2 id="transfer-title">
+          Over there.<br /><span>In one move.</span>
+        </h2>
+      </div>
+      <div class="tc-side">
+        <p>
+          That build. Those assets. The file you need on the other machine. Send
+          it to its inbox over the same SSH connection.
+        </p>
+        <code>mole send ./build.zip</code>
+      </div>
+    </div>
+    <div class="tc-canvas" data-canvas aria-hidden="true"></div>
+    <p class="tc-cap" data-cap></p>
+    <i class="tc-bar" data-bar></i>
+  </div>
+</section>
+
+<style is:global>
+  .tc {
+    position: relative;
+    height: 380vh;
+    background: #ebe5d8;
+    color: #0a0908;
+    border-bottom: 1px solid var(--line);
+  }
+  .tc-stage {
+    position: sticky;
+    top: 0;
+    height: 100svh;
+    overflow: hidden;
+  }
+  .tc-dim {
+    color: #0a0908a8;
+    margin-bottom: 18px;
+  }
+  .tc-copy {
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: 2;
+    pointer-events: none;
+    max-width: 1240px;
+    margin: auto;
+    padding: calc(var(--nav-h) + clamp(8px, 2vh, 24px)) 28px 0;
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 28px;
+    align-items: end;
+  }
+  .tc-copy h2 {
+    font: 600 clamp(44px, 6.4vw, 90px) / 0.95 var(--font-display);
+    letter-spacing: -0.065em;
+  }
+  .tc-copy h2 span {
+    color: var(--hot);
+  }
+  .tc-side p {
+    font-size: 18px;
+    line-height: 1.55;
+    color: #0a0908a8;
+    max-width: 440px;
+  }
+  .tc-side code {
+    display: block;
+    margin-top: 14px;
+    font: 14px var(--font-mono);
+  }
+  .tc-canvas {
+    position: absolute;
+    inset-inline: max(var(--gut), calc((100% - 1240px) / 2 + var(--gut)));
+    bottom: 36px;
+    top: 42%;
+  }
+  .tc-canvas canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .tc-cap {
+    position: absolute;
+    left: max(var(--gut), calc((100% - 1240px) / 2 + var(--gut)));
+    bottom: 12px;
+    z-index: 2;
+    font: 13px var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #0a0908a8;
+  }
+  .tc-bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 100%;
+    background: var(--hot);
+    transform-origin: left;
+    transform: scaleX(0);
+    z-index: 2;
+  }
+  @media (max-width: 800px) {
+    .tc-copy {
+      grid-template-columns: 1fr;
+    }
+    .tc-side {
+      display: none;
+    }
+    .tc-canvas {
+      top: 32%;
+      bottom: 30px;
+    }
+  }
+</style>
+
+<script>
+  import { gsap } from "gsap"
+  import { ScrollTrigger } from "gsap/ScrollTrigger"
+  import { initialTier, dprFor } from "../lib/perf"
+  gsap.registerPlugin(ScrollTrigger)
+
+  const cl = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x))
+  const seg = (p: number, a: number, b: number) => cl((p - a) / (b - a))
+  const ease = (t: number) =>
+    t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+
+  const sec = document.getElementById("file-transfers") as HTMLElement
+  const host = sec.querySelector<HTMLElement>("[data-canvas]")!
+  const cap = sec.querySelector<HTMLElement>("[data-cap]")!
+  const bar = sec.querySelector<HTMLElement>("[data-bar]")!
+  const caps: [number, string][] = [
+    [0, "build.zip on your machine"],
+    [0.15, "The file breaks apart and funnels into the connection"],
+    [0.8, "Reassembled in the remote inbox."],
+  ]
+
+  let progress = 0
+  let draw: ((p: number) => void) | null = null
+  const apply = (p: number) => {
+    progress = p
+    cap.textContent = caps.reduce((o, [t, s]) => (p >= t ? s : o), caps[0][1])
+    bar.style.transform = `scaleX(${p})`
+    draw?.(p)
+  }
+  apply(0)
+  ScrollTrigger.create({
+    trigger: sec,
+    start: "top top",
+    end: "bottom bottom",
+    onUpdate: (s) => apply(s.progress),
+  })
+
+  const boot = async () => {
+    // a static asset served as-is: built through Function so Vite leaves the import alone
+    const load = new Function("u", "return import(u)") as (u: string) => Promise<any>
+    const THREE: any = await load("/vendor/three.module.min.js")
+    const BLACK = 0x0a0908,
+      HOT = 0xff5a14,
+      LIVE = 0xc6ff3d,
+      PAPER = 0xebe5d8
+    // only a strong machine pays for antialiasing; the rest gets a lighter pixel ratio
+    const tier = initialTier()
+    const renderer = new THREE.WebGLRenderer({ antialias: tier === 2, powerPreference: "low-power" })
+    renderer.setPixelRatio(dprFor(tier))
+    renderer.setClearColor(PAPER)
+    host.appendChild(renderer.domElement)
+    const scene = new THREE.Scene()
+    // everything lives in one group so a narrow screen can turn the whole scene upright
+    const world = new THREE.Group()
+    scene.add(world)
+    let portrait = false
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 200)
+    const fit = () => {
+      const w = host.clientWidth,
+        h = host.clientHeight
+      if (!w || !h) return
+      renderer.setSize(w, h, false)
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+      // on a phone the file sits at the top, the tunnel runs down, the inbox is at the bottom
+      portrait = w < h * 1.1
+      world.rotation.z = portrait ? -Math.PI / 2 : 0
+      // beside the frames, not on top of them
+      l1.position.y = l2.position.y = portrait ? -5.6 : -3.6
+      draw?.(progress)
+    }
+    new ResizeObserver(fit).observe(host)
+
+    const label = (text: string) => {
+      const c = document.createElement("canvas")
+      c.width = 512
+      c.height = 128
+      const g = c.getContext("2d")!
+      g.font = `700 64px "Space Grotesk Variable", sans-serif`
+      g.fillStyle = "#0a0908"
+      g.textAlign = "center"
+      g.textBaseline = "middle"
+      g.fillText(text, 256, 64)
+      const m = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: new THREE.CanvasTexture(c),
+          transparent: true,
+          depthWrite: false,
+        }),
+      )
+      m.scale.set(4, 1, 1)
+      return m
+    }
+    const flat = (c: number) => new THREE.MeshBasicMaterial({ color: c })
+    const edges = (geo: any, color = BLACK) =>
+      new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color }),
+      )
+
+    for (const x of [-9, 9]) {
+      const g = edges(new THREE.BoxGeometry(0.4, 5, 5))
+      g.position.x = x
+      world.add(g)
+    }
+    const l1 = label("build.zip")
+    l1.position.set(-9, -3.6, 0)
+    const l2 = label("remote inbox")
+    l2.position.set(9, -3.6, 0)
+    world.add(l1, l2)
+    const ringGeo = new THREE.TorusGeometry(2.3, 0.05, 6, 48)
+    for (let i = 0; i < 11; i++) {
+      const r = new THREE.Mesh(ringGeo, flat(BLACK))
+      r.rotation.y = Math.PI / 2
+      r.position.x = -5 + i
+      world.add(r)
+    }
+    const cubes = Array.from({ length: 16 }, () => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), flat(HOT))
+      m.add(edges(m.geometry))
+      world.add(m)
+      return m
+    })
+
+    draw = (p: number) => {
+      const a = (p - 0.5) * (portrait ? 0.7 : 1.1)
+      const dist = portrait ? 34 : 19
+      camera.position.set(
+        Math.sin(a) * dist,
+        (portrait ? 3 : 4) + Math.sin(p * Math.PI) * 2.4,
+        Math.cos(a) * dist,
+      )
+      camera.lookAt(0, 0, 0)
+      cubes.forEach((m: any, i: number) => {
+        const gy = (Math.floor(i / 4) - 1.5) * 1.15,
+          gz = ((i % 4) - 1.5) * 1.15
+        const t = ease(seg(p, 0.08 + i * 0.03, 0.48 + i * 0.03))
+        const spread = 1 - 0.92 * Math.sin(Math.PI * t)
+        m.position.set(-9 + 18 * t, gy * spread, gz * spread)
+        m.rotation.set(t * Math.PI * 2, t * Math.PI, 0)
+        m.material.color.set(t >= 1 ? LIVE : HOT)
+      })
+      renderer.render(scene, camera)
+    }
+    fit()
+    document.fonts?.ready.then(() => draw?.(progress))
+  }
+
+  // load Three.js only when the section is about to be seen
+  new IntersectionObserver(
+    (entries, obs) => {
+      if (!entries[0].isIntersecting) return
+      obs.disconnect()
+      boot().catch((err) => console.warn("3D transfer scene unavailable", err))
+    },
+    { rootMargin: "100% 0px 100% 0px" },
+  ).observe(sec)
+</script>
+
+
+
+
+

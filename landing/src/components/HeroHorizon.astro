@@ -1,0 +1,1228 @@
+---
+// "Far away. Right here." The remote's screen arrives down a glowing rail with
+// echoes behind it, a drop lands on it and floods it cream until it is the page.
+// Plays once by itself on load; nothing here waits for a click or a scroll.
+---
+
+<section id="overview" class="hh" aria-labelledby="hero-title">
+  <div class="hh-stage" data-stage>
+    <canvas class="hh-bits" data-bits aria-hidden="true"></canvas>
+    <div class="hh-world" data-world>
+      <i class="hh-glow" data-glow aria-hidden="true"></i>
+      <div class="hh-floor" data-floor aria-hidden="true">
+        <i class="hh-rail"></i>
+        <i class="hh-pulse"></i><i class="hh-pulse"></i><i class="hh-pulse"></i>
+        <b class="hh-mark" style="left:14%;top:22%">:8080</b>
+        <b class="hh-mark" style="left:70%;top:34%">:5173</b>
+        <b class="hh-mark" style="left:20%;top:58%">:9229</b>
+        <b class="hh-mark" style="left:66%;top:74%">:4000</b>
+      </div>
+    </div>
+    <div class="hh-flash" data-flash aria-hidden="true"></div>
+    <div class="hh-copy">
+      <h1 id="hero-title">
+        <span data-a>Far away.</span><span class="sr-only"> Right here.</span>
+      </h1>
+    </div>
+    <div class="hh-final" data-final>
+      <div class="wrap hh-fin">
+        <p class="hh-big" data-big aria-hidden="true">Right here<em>.</em></p>
+        <div class="hh-fin-text" data-text>
+          <p>
+            Mole forwards the ports of any remote machine to your localhost over
+            one SSH connection, and picks up new services as they start.
+          </p>
+          <div class="hh-row">
+            <div class="hh-cmd">
+              <code id="hh-cmd">mole init -up</code>
+              <button type="button" data-hh-copy aria-label="Copy command">Copy</button>
+            </div>
+            <a class="button" href="#install"
+              >Meet the desktop app <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <a class="hh-alt" href="#cli"
+            >Or take the CLI <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  .hh {
+    position: relative;
+    height: 100svh;
+    min-height: 640px;
+    background: var(--background);
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .hh-stage {
+    position: absolute;
+    inset: 0;
+  }
+  .hh-bits {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .hh-world {
+    position: absolute;
+    inset: 0;
+    perspective: 1000px;
+    perspective-origin: 50% 40%;
+  }
+  .hh-copy {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    max-width: 1240px;
+    margin: auto;
+    padding: calc(var(--nav-h) + clamp(16px, 4vh, 44px)) var(--gut) 0;
+    display: grid;
+    grid-template-columns: 1.5fr 0.62fr;
+    gap: 24px;
+    align-items: start;
+  }
+  .hh-copy h1 [data-a] {
+    display: inline-block;
+    animation: hh-slam 0.9s cubic-bezier(0.16, 0.9, 0.2, 1) backwards;
+  }
+  @keyframes hh-slam {
+    from {
+      opacity: 0;
+      transform: scale(1.4) translateY(10px);
+      filter: blur(16px);
+      letter-spacing: 0.05em;
+    }
+    60% {
+      opacity: 1;
+      filter: blur(0);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      filter: blur(0);
+    }
+  }
+  .hh-flash {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(60% 55% at 50% 45%, #ebe5d8, #ff5a14aa 55%, transparent 80%);
+    mix-blend-mode: screen;
+  }
+  .hh-copy h1 {
+    font: 600 clamp(52px, 9.2vw, 132px) / 0.9 var(--font-display);
+    letter-spacing: -0.075em;
+    color: var(--ink);
+  }
+  /* the final composition: real DOM, so it is always sharp */
+  .hh-final {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    pointer-events: none;
+  }
+  .hh-final.on .hh-fin-text a,
+  .hh-final.on .hh-cmd button {
+    pointer-events: auto;
+  }
+  .hh-fin {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding-top: calc(var(--nav-h) + clamp(14px, 4vh, 52px));
+  }
+  .hh-big {
+    margin: 0;
+    font: 600 clamp(56px, 8.4vw, 124px) / 0.92 var(--font-display);
+    letter-spacing: -0.075em;
+    color: var(--ink);
+    opacity: 0;
+  }
+  .hh-big em {
+    color: var(--hot);
+    font-style: normal;
+  }
+  .hh-fin-text {
+    margin-top: clamp(14px, 2.6vh, 28px);
+    max-width: 780px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    opacity: 0;
+  }
+  .hh-fin-text p {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 700px;
+  }
+  .hh-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .hh-cmd {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    padding: 0 10px 0 20px;
+    border: 1px solid #544d42;
+    background: var(--panel);
+    font: 500 19px var(--font-mono);
+    color: var(--ink);
+  }
+  .hh-cmd code::before {
+    content: "$ ";
+    color: var(--hot);
+  }
+  .hh-cmd code::after {
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 1.1em;
+    margin-left: 6px;
+    vertical-align: -0.18em;
+    background: var(--live);
+    animation: hh-caret 1.1s steps(1) infinite;
+  }
+  @keyframes hh-caret {
+    50% {
+      opacity: 0;
+    }
+  }
+  .hh-cmd button {
+    border: 1px solid var(--line);
+    background: transparent;
+    padding: 7px 12px;
+    font: 12px var(--font-mono);
+    color: var(--muted);
+  }
+  .hh-cmd button:hover {
+    border-color: var(--live);
+    color: var(--live);
+  }
+  .hh-alt {
+    font: 13px var(--font-mono);
+    color: var(--muted);
+  }
+  .hh-alt:hover {
+    color: var(--ink);
+  }
+  @media (max-width: 800px) {
+    .hh-copy {
+      grid-template-columns: 1fr;
+    }
+    .hh-fin-text p {
+      font-size: 18px;
+    }
+  }
+
+  /* the mesh map: this machine in the middle, every node around it */
+  .hh-mapbox {
+    position: relative;
+    height: 400px;
+    background-image:
+      linear-gradient(#0a090812 1px, transparent 1px),
+      linear-gradient(90deg, #0a090812 1px, transparent 1px);
+    background-size: 32px 32px;
+    overflow: hidden;
+  }
+  .hh-links {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .hh-me {
+    position: absolute;
+    z-index: 2;
+    width: 140px;
+    padding: 9px 10px;
+    transform: translate(-50%, -50%);
+    background: var(--hot);
+    color: #0a0908;
+    text-align: center;
+    box-shadow: 0 0 40px -6px #ff5a14;
+  }
+  .hh-me b {
+    display: block;
+    font: 800 17px var(--font-display);
+    letter-spacing: 0.25em;
+  }
+  .hh-me span {
+    display: block;
+    font: 700 10px var(--font-mono);
+  }
+  .hh-me small {
+    display: block;
+    margin-top: 1px;
+    font: 9px var(--font-mono);
+    letter-spacing: 0.22em;
+    opacity: 0.7;
+  }
+  .hh-me u {
+    display: inline-block;
+    margin-top: 5px;
+    padding: 1px 5px;
+    border: 1px solid #0a090899;
+    font: 8px var(--font-mono);
+    letter-spacing: 0.28em;
+    text-decoration: none;
+  }
+  .hh-node {
+    position: absolute;
+    z-index: 2;
+    width: 132px;
+    padding: 6px 9px;
+    transform: translate(-50%, -50%);
+    background: #100f0d;
+    color: #ebe5d8;
+    border: 1px solid #2b2722;
+  }
+  .hh-node div {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .hh-node i {
+    width: 7px;
+    height: 7px;
+    background: var(--live);
+  }
+  .hh-node.warn i {
+    background: var(--hot);
+  }
+  .hh-node b {
+    font: 700 13px var(--font-display);
+  }
+  .hh-node span {
+    display: block;
+    margin-top: 2px;
+    font: 9px var(--font-mono);
+    color: #8b8579;
+  }
+  .hh-node em {
+    display: block;
+    margin-top: 4px;
+    font: normal 8px var(--font-mono);
+    letter-spacing: 0.18em;
+    color: var(--live);
+  }
+  .hh-node.warn em {
+    color: var(--hot);
+  }
+  .hh-lat {
+    position: absolute;
+    z-index: 1;
+    transform: translate(-50%, -50%);
+    padding: 0 5px;
+    background: #ebe5d8;
+    font: 8px var(--font-mono);
+    letter-spacing: 0.12em;
+    color: #0a0908a8;
+  }
+  .hh-mapnote {
+    position: absolute;
+    left: 14px;
+    top: 232px;
+    z-index: 2;
+    font: 8px var(--font-mono);
+    letter-spacing: 0.2em;
+    color: #0a090880;
+  }
+
+  /* ?hero=ssh : the old way against mole, inside the window */
+  .hh-tm {
+    position: absolute;
+    inset: 14px;
+    background: #100f0d;
+    color: var(--ink);
+    padding: 14px 20px;
+    font: 500 15px / 1.7 var(--font-mono);
+    overflow: hidden;
+  }
+  .hh-tm-bar {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font: 11px var(--font-mono);
+    letter-spacing: 0.14em;
+    color: var(--muted);
+  }
+  .hh-tm-bar b {
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .hh-tl {
+    white-space: pre;
+    min-height: 1.7em;
+  }
+  .hh-tl.on::after {
+    content: "";
+    display: inline-block;
+    width: 0.55em;
+    height: 1.05em;
+    margin-left: 3px;
+    vertical-align: -0.15em;
+    background: var(--live);
+  }
+  .hh-tm [data-tm-old] .hh-tl:first-child::before,
+  .hh-tm [data-tm-new] .hh-tl:first-child::before {
+    content: "$ ";
+    color: var(--hot);
+  }
+  .hh-tw {
+    color: var(--hot);
+    opacity: 0;
+  }
+  .hh-tm [data-tm-new] {
+    position: absolute;
+    left: 20px;
+    right: 20px;
+    top: 48px;
+    opacity: 0;
+  }
+  .hh-tk {
+    color: var(--live);
+    opacity: 0;
+  }
+  .hh-tk i {
+    font-style: normal;
+    color: var(--muted);
+  }
+  /* ?hero=live : edit over there, see it here */
+  .hh-lv {
+    position: absolute;
+    inset: 14px;
+    display: grid;
+    grid-template-columns: 1fr 34px 1fr;
+  }
+  .hh-lv-ed {
+    background: #100f0d;
+    color: var(--ink);
+    padding: 12px 16px;
+    font: 500 14px / 1.7 var(--font-mono);
+  }
+  .hh-lv-cap {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font: 10px var(--font-mono);
+    letter-spacing: 0.14em;
+    color: var(--muted);
+  }
+  .hh-lv-ed pre {
+    margin: 0;
+    white-space: pre-wrap;
+    font: inherit;
+  }
+  .hh-lv-ed .d {
+    color: #8b8579;
+  }
+  .hh-lv-ed b {
+    color: var(--hot);
+    font-weight: 500;
+  }
+  .hh-lv-ed b::after {
+    content: "";
+    display: inline-block;
+    width: 0.5em;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: -0.15em;
+    background: var(--live);
+  }
+  .hh-lv-wire {
+    position: relative;
+  }
+  .hh-lv-wire > i:first-child {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 3px;
+    margin-top: -1.5px;
+    background: var(--hot);
+    box-shadow: 0 0 18px #ff5a14aa;
+  }
+  .hh-lv-pkt {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 22px;
+    height: 10px;
+    margin-top: -5px;
+    background: var(--live);
+    box-shadow: 0 0 18px #c6ff3d;
+    opacity: 0;
+  }
+  .hh-lv-br {
+    background: #f6f1e6;
+    border: 2px solid #0a0908;
+    color: #0a0908;
+    padding: 10px 16px;
+  }
+  .hh-lv-br .hh-lv-cap {
+    color: #0a0908a8;
+  }
+  .hh-lv-br h4 {
+    margin: 14px 0 0;
+    font: 600 34px / 0.98 var(--font-display);
+    letter-spacing: -0.06em;
+  }
+  /* ?hero=flood : the drop floods the whole screen with light */
+  .hh[data-variant="flood"] .hh-fin {
+    justify-content: center;
+    padding-top: calc(var(--nav-h) + 10px);
+    padding-bottom: 40px;
+  }
+  .hh[data-variant="flood"] .hh-big {
+    font-size: clamp(76px, 13.5vw, 200px);
+    line-height: 0.88;
+    color: #0a0908;
+  }
+  .hh[data-variant="flood"] .hh-fin-text {
+    margin-top: clamp(18px, 3.4vh, 38px);
+  }
+  .hh[data-variant="flood"] .hh-fin-text p {
+    color: #0a0908b8;
+    font-size: 21px;
+  }
+  .hh[data-variant="flood"] .hh-cmd {
+    background: #0a0908;
+    border-color: #0a0908;
+    color: #ebe5d8;
+  }
+  @media (max-width: 800px) {
+    .hh[data-variant="flood"] .hh-fin-text p {
+      font-size: 18px;
+    }
+  }
+  .hh[data-variant="flood"] .hh-alt {
+    color: #0a0908a0;
+  }
+  .hh[data-variant="flood"] .hh-alt:hover {
+    color: #0a0908;
+  }
+  .hh-switch {
+    position: fixed;
+    left: 14px;
+    bottom: 14px;
+    z-index: 60;
+    display: flex;
+    gap: 6px;
+    font: 12px var(--font-mono);
+  }
+  .hh-switch a {
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    background: #0a0908e6;
+    color: var(--muted);
+  }
+  .hh-switch a.on {
+    border-color: var(--hot);
+    color: var(--hot);
+  }
+  /* the floor: a grid receding to a horizon, with the rail down the middle */
+  .hh-floor {
+    position: absolute;
+    left: -70%;
+    right: -70%;
+    top: 40%;
+    height: 300%;
+    transform-origin: 50% 0;
+    transform: rotateX(79deg);
+    background-image:
+      linear-gradient(#ff5a1440 2px, transparent 2px),
+      linear-gradient(90deg, #ff5a1440 2px, transparent 2px);
+    background-size: 110px 110px;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 14%,
+      #000 100%
+    );
+    mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 100%);
+  }
+  .hh-rail {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 26px;
+    margin-left: -13px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--hot) 30%,
+      var(--hot) 70%,
+      transparent
+    );
+    box-shadow: 0 0 80px #ff5a14aa;
+  }
+  .hh-pulse {
+    position: absolute;
+    left: 50%;
+    width: 14px;
+    height: 70px;
+    margin-left: -7px;
+    background: var(--live);
+    border-radius: 8px;
+    box-shadow: 0 0 30px #c6ff3d88;
+  }
+  .hh-mark {
+    position: absolute;
+    font: 600 90px var(--font-mono);
+    color: #ff5a1438;
+    letter-spacing: -0.04em;
+  }
+
+  /* the remote's screen: a dark slab, and the cream page that floods it */
+  .hh-card {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 640px;
+    height: 400px;
+  }
+  .hh-face {
+    position: absolute;
+    inset: 0;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .hh-glow {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    border-radius: 50%;
+    background: radial-gradient(
+      closest-side,
+      #ff5a14cc,
+      #ff5a1455 45%,
+      transparent
+    );
+    filter: blur(10px);
+    mix-blend-mode: screen;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .hh-slab::before,
+  .hh-slab::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  /* faint scanlines, and a sheen that sweeps across as the screen comes in */
+  .hh-slab::before {
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.028) 0 1px,
+      transparent 1px 4px
+    );
+  }
+  .hh-slab::after {
+    background: linear-gradient(
+      112deg,
+      transparent calc(var(--sheen, -30%) - 16%),
+      rgba(255, 255, 255, 0.11) var(--sheen, -30%),
+      transparent calc(var(--sheen, -30%) + 16%)
+    );
+  }
+  .hh-slab {
+    z-index: 1;
+    background: linear-gradient(160deg, #181512, #0d0c0a 60%);
+    border: 1px solid #ff5a1466;
+    box-shadow:
+      inset 0 0 70px #ff5a1420,
+      0 0 0 1px #ff5a1422,
+      0 0 50px -4px #ff5a1466,
+      0 50px 120px -30px #ff5a1488,
+      0 12px 40px #00000070;
+    display: flex;
+    align-items: flex-end;
+    padding: 0 38px 40px;
+  }
+  .hh-slab h3 {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    font: 600 94px / 0.9 var(--font-display);
+    letter-spacing: -0.07em;
+    color: var(--ink);
+  }
+  .hh-slab h3 span {
+    color: var(--hot);
+  }
+  .hh-page {
+    z-index: 2;
+    background: #ebe5d8;
+    color: #0a0908;
+    clip-path: circle(0px at 50% 50%);
+  }
+  .hh-ripples {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 3;
+    pointer-events: none;
+  }
+</style>
+
+<script>
+  import { gsap } from "gsap"
+  import { initialTier, dprFor, runLoop } from "../lib/perf"
+
+  const cl = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x))
+  const seg = (p: number, a: number, b: number) => cl((p - a) / (b - a))
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+  const fract = (x: number) => x - Math.floor(x)
+
+  const root = document.getElementById("overview") as HTMLElement
+  const stage = root.querySelector<HTMLElement>("[data-stage]")!
+  const world = root.querySelector<HTMLElement>("[data-world]")!
+  const floor = root.querySelector<HTMLElement>("[data-floor]")!
+  const pulses = [...floor.querySelectorAll<HTMLElement>(".hh-pulse")]
+  const a = root.querySelector<HTMLElement>("[data-a]")!
+  const flash = root.querySelector<HTMLElement>("[data-flash]")!
+  const rail = root.querySelector<HTMLElement>(".hh-rail")!
+  const fin = root.querySelector<HTMLElement>("[data-final]")!
+  const text = fin.querySelector<HTMLElement>("[data-text]")!
+  const big = fin.querySelector<HTMLElement>("[data-big]")!
+
+  const slabHTML =
+    '<div class="hh-face hh-slab"><h3>workstation<br /><span>:3000</span></h3></div>'
+  // this machine in the centre, each node on a ring around it, packets running the links
+  const meshHTML = () => {
+    const cx = 320,
+      cy = 118
+    const nodes = [
+      { n: "dev", t: "adria@workstation", st: "READY · UP", ms: "14 ms", x: 88, y: 56, ok: true, dur: 1.4 },
+      { n: "build", t: "ci@build-01", st: "READY · UP", ms: "38 ms", x: 552, y: 56, ok: true, dur: 2.1 },
+      { n: "gpu", t: "root@gpu-rig", st: "READY · UP", ms: "27 ms", x: 552, y: 180, ok: true, dur: 1.9 },
+      { n: "pi", t: "pi@raspberrypi", st: "READY · UP", ms: "61 ms", x: 88, y: 180, ok: true, dur: 2.8 },
+    ]
+    let svg = ""
+    let html = ""
+    nodes.forEach((o) => {
+      const path = `M${cx},${cy} L${o.x},${o.y}`
+      svg += `<g class="hh-m"><line x1="${cx}" y1="${cy}" x2="${o.x}" y2="${o.y}" stroke="${o.ok ? "#0a0908" : "#ff5a14"}" stroke-width="1.3" stroke-opacity="${o.ok ? 0.5 : 0.9}"${o.ok ? "" : ' stroke-dasharray="7 5"'}/>`
+      if (o.ok)
+        svg += `<rect width="9" height="3" x="-4.5" y="-1.5" fill="#ff5a14"><animateMotion dur="${o.dur}s" repeatCount="indefinite" path="${path}" rotate="auto"/></rect><rect width="9" height="3" x="-4.5" y="-1.5" fill="#0a0908"><animateMotion dur="${o.dur}s" begin="${o.dur / 2}s" repeatCount="indefinite" path="M${o.x},${o.y} L${cx},${cy}" rotate="auto"/></rect>`
+      svg += "</g>"
+      if (o.ms) html += `<span class="hh-lat hh-m" style="left:${(cx + o.x) / 2}px;top:${(cy + o.y) / 2}px">${o.ms}</span>`
+      html += `<div class="hh-node hh-m${o.ok ? "" : " warn"}" style="left:${o.x}px;top:${o.y}px"><div><i></i><b>${o.n}</b></div><span>${o.t}</span><em>${o.st}</em></div>`
+    })
+    return `<div class="hh-face hh-page"><div class="hh-mapbox"><svg class="hh-links" viewBox="0 0 640 400">${svg}</svg>${html}<div class="hh-me" style="left:${cx}px;top:${cy}px"><b>MOLE</b><span>macbook</span><small>MACOS · ARM64</small><u>THIS MACHINE</u></div><p class="hh-mapnote">ANY NODE CAN MANAGE ANY OTHER · mole -n NODE &lt;command&gt;</p></div></div>`
+  }
+  // ?hero=flood (default) | nodes | ssh | live : the same intro, a different scene at the end
+  const asked = new URLSearchParams(location.search).get("hero")
+  const variant = asked === "ssh" || asked === "live" || asked === "nodes" ? asked : "flood"
+  root.dataset.variant = variant
+  const sshHTML = () =>
+    '<div class="hh-face hh-page"><div class="hh-tm hh-m"><p class="hh-tm-bar"><span>● REMOTE · dev</span><b data-tm-stat>5 lines · 4 flags</b></p><div data-tm-old><p class="hh-tl"></p><p class="hh-tl"></p><p class="hh-tl"></p><p class="hh-tl"></p><p class="hh-tl"></p><p class="hh-tw" data-tm-warn># dropped. type it all again.</p></div><div data-tm-new><p class="hh-tl"></p><p class="hh-tk">✓ connected · dev</p><p class="hh-tk">✓ :3000 <i>→</i> localhost:3000</p><p class="hh-tk">✓ :8080 <i>→</i> localhost:8080</p><p class="hh-tk">✓ :5173 <i>→</i> localhost:5173</p><p class="hh-tk">✓ watching for new ports</p></div></div></div>'
+  const liveHTML = () =>
+    '<div class="hh-face hh-page"><div class="hh-lv hh-m"><div class="hh-lv-ed"><p class="hh-lv-cap"><span>REMOTE</span><span>App.tsx</span></p><pre><span class="d">return &lt;h1&gt;</span><b data-lv-text>Hello, world.</b><span class="d">&lt;/h1&gt;</span></pre></div><div class="hh-lv-wire"><i></i><i class="hh-lv-pkt" data-lv-pkt></i></div><div class="hh-lv-br"><p class="hh-lv-cap"><span>localhost:5173</span><span data-lv-hmr>● connected</span></p><h4 data-lv-h>Hello, world.</h4></div></div></div>'
+  const pageHTML =
+    variant === "ssh" ? sshHTML() : variant === "live" ? liveHTML() : variant === "flood" ? '<div class="hh-face hh-page"></div>' : meshHTML()
+  const makeCard = (withPage: boolean) => {
+    const c = document.createElement("div")
+    c.className = "hh-card"
+    c.setAttribute("aria-hidden", "true")
+    c.innerHTML = slabHTML + (withPage ? pageHTML : "")
+    world.appendChild(c)
+    return c
+  }
+
+  // echoes of the remote screen trailing behind it as it comes in
+  const ghosts = [0.12, 0.08, 0.04].map((lag, i) => {
+    const c = makeCard(false)
+    const f = c.querySelector<HTMLElement>(".hh-face")!
+    f.style.boxShadow = "none"
+    f.style.opacity = String(0.16 + i * 0.1)
+    return { c, lag }
+  })
+  const card = makeCard(true)
+  const slab = card.querySelector<HTMLElement>(".hh-slab")!
+  const glow = root.querySelector<HTMLElement>("[data-glow]")!
+  const page = card.querySelector<HTMLElement>(".hh-page")!
+
+  // ripples that leave the drop, drawn in the card's own 640x400 space
+  const NS = "http://www.w3.org/2000/svg"
+  const rip = document.createElementNS(NS, "svg")
+  rip.setAttribute("class", "hh-ripples")
+  rip.setAttribute("viewBox", "0 0 640 400")
+  const rings = [0, 1].map(() => {
+    const c = document.createElementNS(NS, "circle")
+    c.setAttribute("fill", "none")
+    c.setAttribute("stroke", "#ebe5d8")
+    c.setAttribute("stroke-width", "1.5")
+    c.setAttribute("cx", "320")
+    c.setAttribute("cy", "200")
+    rip.appendChild(c)
+    return c
+  })
+  card.querySelector(".hh-slab")!.appendChild(rip)
+
+  // ---- the flood is drawn anew on every visit: it never spreads the same way twice
+  const rnd = (a: number, b: number) => a + Math.random() * (b - a)
+  // always one drop: it lands at a random point of the screen and spreads from there
+  const nDrops = 1
+  const plan = Array.from({ length: nDrops }, (_, i) => {
+    const x = rnd(50, 590)
+    const y = rnd(35, 365)
+    const far = Math.max(Math.hypot(x, y), Math.hypot(640 - x, y), Math.hypot(x, 400 - y), Math.hypot(640 - x, 400 - y))
+    return {
+      x,
+      y,
+      rMax: far * 1.5, // enough to cover the whole screen even where the edge is pulled in
+      delay: i === 0 ? 0 : rnd(0.1, 0.34),
+      ease: rnd(1.25, 2.2),
+      amp: rnd(0.1, 0.25),
+      k: [2 + Math.floor(Math.random() * 3), 4 + Math.floor(Math.random() * 4), 7 + Math.floor(Math.random() * 6)],
+      ph: [rnd(0, 6.3), rnd(0, 6.3), rnd(0, 6.3)],
+      spin: rnd(6, 18) * (Math.random() < 0.5 ? -1 : 1),
+    }
+  })
+  // union of the blobs, as clip paths: one in the screen's own pixels (the cream), one in stage pixels (the words)
+  const SVGNS = "http://www.w3.org/2000/svg"
+  const clipSvg = document.createElementNS(SVGNS, "svg")
+  clipSvg.setAttribute("width", "0")
+  clipSvg.setAttribute("height", "0")
+  clipSvg.style.cssText = "position:absolute;pointer-events:none"
+  const mkClip = (id: string) => {
+    const cp = document.createElementNS(SVGNS, "clipPath")
+    cp.setAttribute("id", id)
+    const paths = plan.map(() => {
+      const el = document.createElementNS(SVGNS, "path")
+      cp.appendChild(el)
+      return el
+    })
+    clipSvg.appendChild(cp)
+    return paths
+  }
+  const pagePaths = mkClip("hh-cp-page")
+  const finPaths = mkClip("hh-cp-fin")
+  root.appendChild(clipSvg)
+  if (variant === "flood") {
+    page.style.clipPath = "url(#hh-cp-page)"
+    fin.style.clipPath = "url(#hh-cp-fin)"
+    rings.forEach((c) => (c.setAttribute("cx", String(plan[0].x)), c.setAttribute("cy", String(plan[0].y))))
+  }
+  const floodClip = (p: number, W: number, s: number, cy: number, land: number) => {
+    const t = seg(p, 0.67, 0.93)
+    let full = true
+    plan.forEach((d, i) => {
+      const tt = Math.max(0, Math.min(1, (t - d.delay) / (1 - d.delay)))
+      const r = (i === 0 ? land * 14 : t > d.delay ? 6 : 0) + Math.pow(tt, d.ease) * d.rMax
+      if (tt < 1) full = false
+      if (r < 0.5) {
+        pagePaths[i].setAttribute("d", "")
+        finPaths[i].setAttribute("d", "")
+        return
+      }
+      const amp = d.amp * Math.sin(Math.PI * Math.min(1, tt * 1.1)) + 0.03
+      const ph = p * d.spin
+      let dp = "",
+        df = ""
+      for (let k = 0; k < 72; k++) {
+        const an = (k / 72) * Math.PI * 2
+        const n = 0.5 * Math.sin(d.k[0] * an + d.ph[0] + ph) + 0.35 * Math.sin(d.k[1] * an + d.ph[1] - 1.3 * ph) + 0.25 * Math.sin(d.k[2] * an + d.ph[2] + 2 * ph)
+        const rr = r * (1 + amp * n)
+        const lx = d.x + rr * Math.cos(an),
+          ly = d.y + rr * Math.sin(an)
+        dp += `${k ? "L" : "M"}${lx.toFixed(1)},${ly.toFixed(1)}`
+        df += `${k ? "L" : "M"}${(W / 2 + (lx - 320) * s).toFixed(1)},${(cy + (ly - 200) * s).toFixed(1)}`
+      }
+      pagePaths[i].setAttribute("d", dp + "Z")
+      finPaths[i].setAttribute("d", df + "Z")
+    })
+    if (full) {
+      page.style.clipPath = "none"
+      fin.style.clipPath = "none"
+    } else {
+      page.style.clipPath = "url(#hh-cp-page)"
+      fin.style.clipPath = "url(#hh-cp-fin)"
+    }
+  }
+
+  const E = 170
+
+  // where the screen is at scroll-free progress pp: always centred on the rail
+  const pose = (pp: number, W: number, H: number) => {
+    const g = seg(pp, 0.03, 0.6)
+    const e = g * g * (3 - 2 * g)
+    const flood = variant === "flood"
+    const z = (flood ? 0.945 : 0.93) * e + (flood ? 0 : 0.015 * seg(pp, 0.6, 1))
+    const s = 0.13 / (1 - z)
+    // it swings in: turned away at first, squaring up to you as it arrives
+    const swing = Math.pow(1 - e, 1.6)
+    return {
+      s,
+      x: W / 2,
+      y: flood ? lerp(H * 0.4 + (E - 200) * s, H / 2, seg(pp, 0.35, 0.6)) : H * 0.4 + (E - 200) * s,
+      yaw: -34 * swing,
+      pitch: 7 * swing,
+    }
+  }
+  const ease = (t: number) =>
+    t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+  let progress = 0
+  const render = (p: number) => {
+    progress = p
+    const W = stage.clientWidth,
+      H = stage.clientHeight
+    const m = pose(p, W, H)
+    // once the page is cream the screen settles under the text, peeking in from the bottom
+    const f = ease(seg(p, 0.8, 0.96))
+    // flood: the screen keeps coming until it is the whole stage; otherwise it settles under the text
+    const flood = variant === "flood"
+    const sFinal = flood ? Math.max(W / 640, H / 400) * 1.02 : Math.min(1.45, ((W - 40) * 0.9) / 640)
+    const cyFinal = flood ? H / 2 : text.offsetTop + text.offsetHeight + 44 + 200 * sFinal
+    const s = flood ? m.s : lerp(m.s, sFinal, f),
+      cy = flood ? m.y : lerp(m.y, cyFinal, f)
+    card.style.transform = `translate(-50%, ${cy - 200}px) rotateY(${m.yaw * (1 - f)}deg) rotateX(${m.pitch * (1 - f)}deg) scale(${s})`
+    slab.style.setProperty("--sheen", `${lerp(-30, 130, seg(p, 0.12, 0.62))}%`)
+    // light pooling on the floor under the screen
+    const base = m.y + 200 * m.s
+    const gl = 1 - seg(p, 0.5, 0.66)
+    glow.style.width = `${900 * m.s}px`
+    glow.style.height = `${150 * m.s}px`
+    glow.style.transform = `translate(-50%, ${base - 70 * m.s}px)`
+    glow.style.opacity = String(gl * (0.35 + 0.65 * seg(p, 0.1, 0.55)))
+    const gone = 1 - seg(p, 0.56, 0.64)
+    ghosts.forEach(({ c, lag }) => {
+      const q = pose(Math.max(0, p - lag), W, H)
+      const back = Math.max(0, m.s - q.s)
+      c.style.transform = `translate(-50%, ${q.y - back * 28 - 200}px) translateX(${-back * 90}px) rotateY(${q.yaw}deg) rotateX(${q.pitch}deg) scale(${q.s})`
+      c.style.display = gone > 0 ? "block" : "none"
+      c.style.opacity = String(gone)
+    })
+    floor.style.backgroundPosition = `0 ${p * 2600}px`
+    floor.style.opacity = String(1 - seg(p, 0.74, 0.88))
+    pulses.forEach((el, i) => (el.style.top = `${fract(p * 4 + i / 3) * 100}%`))
+    a.style.opacity = String(1 - seg(p, flood ? 0.6 : 0.5, flood ? 0.72 : 0.66))
+    // the rail lights up, the screen lands with a jolt and a flash
+    rail.style.opacity = String(0.2 + 0.8 * seg(p, 0, 0.07))
+    const hit = Math.max(0, 1 - Math.abs(p - 0.615) / 0.03)
+    flash.style.opacity = String(hit * 0.6)
+    const shake = hit * 7
+    world.style.transform = shake > 0.05 ? `translate(${Math.sin(p * 1300) * shake}px, ${Math.cos(p * 1700) * shake}px)` : ""
+    bitsAlpha = 1 - (variant === "flood" ? 0.45 : 0.78) * seg(p, 0.58, 0.9)
+
+    // the drop lands small on the screen, then spreads with a liquid edge
+    const land = 1 - Math.pow(1 - seg(p, 0.6, 0.645), 3)
+    const spread = Math.pow(seg(p, flood ? 0.67 : 0.655, flood ? 0.92 : 0.86), 1.6)
+    const rMax = Math.hypot(320, 200) * 1.3
+    const r = land * 14 + spread * rMax
+    if (flood) floodClip(p, W, s, cy, land)
+    else if (r < 0.5) {
+      page.style.clipPath = "circle(0px at 50% 50%)"
+      if (flood) fin.style.clipPath = "circle(0px at 50% 50%)"
+    } else {
+      const ph = p * 14,
+        amp = 0.03 + 0.12 * Math.sin(Math.PI * Math.min(1, spread * 1.1))
+      const pts: string[] = []
+      const stagePts: string[] = []
+      for (let k = 0; k < 80; k++) {
+        const an = (k / 80) * Math.PI * 2
+        const n =
+          0.5 * Math.sin(3 * an + ph) +
+          0.35 * Math.sin(5 * an - 1.3 * ph) +
+          0.25 * Math.sin(9 * an + 2 * ph)
+        const rr = r * (1 + amp * n)
+        pts.push(
+          `${(320 + rr * Math.cos(an)).toFixed(1)}px ${(200 + rr * Math.sin(an)).toFixed(1)}px`,
+        )
+        // the same blob, in stage pixels: the words are hidden outside it and uncovered as it spreads
+        stagePts.push(`${(W / 2 + rr * Math.cos(an) * s).toFixed(1)}px ${(cy + rr * Math.sin(an) * s).toFixed(1)}px`)
+      }
+      page.style.clipPath = `polygon(${pts.join(",")})`
+      if (flood) fin.style.clipPath = spread >= 0.999 ? "none" : `polygon(${stagePts.join(",")})`
+    }
+    rings.forEach((c, i) => {
+      const q = seg(p, 0.6 + i * 0.02, 0.76 + i * 0.02)
+      c.setAttribute("r", String(14 + q * 260))
+      c.setAttribute("opacity", String(q > 0 && q < 1 ? 0.55 * (1 - q) : 0))
+    })
+
+    // the words arrive once the screen has settled
+    const out = (t: number) => 1 - Math.pow(1 - t, 3)
+    page.querySelectorAll<HTMLElement>(".hh-m").forEach((el, i) => {
+      const q = out(seg(p, 0.8 + i * 0.012, 0.9 + i * 0.012))
+      el.style.opacity = String(q)
+    })
+    const tb = flood ? 1 : out(seg(p, 0.84, 0.95)),
+      tt = flood ? 1 : out(seg(p, 0.9, 1))
+    big.style.opacity = String(tb)
+    big.style.transform = flood ? "" : `translateY(${(1 - tb) * 40}px)`
+    text.style.opacity = String(tt)
+    text.style.transform = flood ? "" : `translateY(${(1 - tt) * 24}px)`
+    fin.classList.toggle("on", p > 0.96)
+  }
+
+  // copy the command
+  const copyBtn = fin.querySelector<HTMLButtonElement>("[data-hh-copy]")!
+  copyBtn.addEventListener("click", async () => {
+    const cmd = fin.querySelector("#hh-cmd")!.textContent ?? ""
+    try {
+      await navigator.clipboard.writeText(cmd)
+      copyBtn.textContent = "Copied"
+    } catch {
+      copyBtn.textContent = "Press ⌘C"
+    }
+    setTimeout(() => (copyBtn.textContent = "Copy"), 1600)
+  })
+
+  // bits: streams of ones and zeros crossing the sky, left and right, like comets
+  const canvas = root.querySelector<HTMLCanvasElement>("[data-bits]")!
+  const ctx = canvas.getContext("2d")!
+  let cw = 0,
+    ch = 0,
+    dpr = 1
+  const tier = initialTier()
+  const COMETS = [14, 24, 34][tier]
+  const fitCanvas = () => {
+    dpr = dprFor(tier)
+    cw = stage.clientWidth
+    ch = stage.clientHeight
+    canvas.width = Math.round(cw * dpr)
+    canvas.height = Math.round(ch * dpr)
+  }
+  const PALETTE = ["#ff5a14", "#ff5a14", "#c6ff3d", "#ebe5d8"]
+  type Comet = { x: number; y: number; dir: number; v: number; size: number; alpha: number; color: string; len: number; tick: number; chars: string[] }
+  const comets: Comet[] = []
+  const spawn = (c: Partial<Comet> = {}, anywhere = false): Comet => {
+    const d = Math.random() // 0 = high and near, 1 = low and far
+    const dir = Math.random() < 0.5 ? 1 : -1
+    const len = 7 + Math.floor(Math.random() * 9)
+    const size = 16 - d * 7
+    const top = 84 + 6,
+      bottom = ch * 0.38
+    return {
+      dir,
+      y: top + d * Math.max(40, bottom - top),
+      v: 150 + (1 - d) * 420 + Math.random() * 90,
+      size,
+      alpha: 0.95 - d * 0.55,
+      color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+      len,
+      x: anywhere ? Math.random() * cw : dir > 0 ? -len * size * 0.9 : cw + len * size * 0.9,
+      tick: 0,
+      chars: Array.from({ length: len }, () => (Math.random() < 0.5 ? "0" : "1")),
+      ...c,
+    }
+  }
+  let bitsAlpha = 1
+  const born = performance.now()
+  const drawBits = (dt: number) => {
+    // the sky arrives at speed and calms down over the first couple of seconds
+    const boost = 1 + 5.5 * Math.exp(-((performance.now() - born) / 1000) * 1.7)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, cw, ch)
+    ctx.textBaseline = "middle"
+    comets.forEach((c, k) => {
+      c.x += c.dir * c.v * boost * dt
+      c.tick += dt
+      if (c.tick > 0.11) {
+        c.tick = 0
+        // the digits shift down the trail, one fresh bit at the head
+        c.chars.pop()
+        c.chars.unshift(Math.random() < 0.5 ? "0" : "1")
+      }
+      const gap = c.size * 0.95
+      if ((c.dir > 0 && c.x - c.len * gap > cw) || (c.dir < 0 && c.x + c.len * gap < 0)) {
+        comets[k] = spawn()
+        return
+      }
+      ctx.font = `600 ${c.size}px "JetBrains Mono Variable", monospace`
+      // a faint streak under the digits
+      const tail = c.x - c.dir * c.len * gap
+      const grad = ctx.createLinearGradient(c.x, 0, tail, 0)
+      grad.addColorStop(0, c.color)
+      grad.addColorStop(1, "transparent")
+      ctx.globalAlpha = c.alpha * 0.28 * bitsAlpha
+      ctx.fillStyle = grad
+      ctx.fillRect(Math.min(c.x, tail), c.y - 0.5, Math.abs(c.x - tail), 1)
+      ctx.fillStyle = variant === "flood" && progress > 0.72 && c.color !== "#ff5a14" ? "#0a0908" : c.color
+      for (let i = 0; i < c.len; i++) {
+        const f = 1 - i / c.len
+        ctx.globalAlpha = c.alpha * f * f * bitsAlpha
+        ctx.fillText(c.chars[i], c.x - c.dir * i * gap, c.y)
+      }
+      // the head
+      ctx.globalAlpha = c.alpha * bitsAlpha
+      ctx.shadowColor = c.color
+      ctx.shadowBlur = 10
+      ctx.fillText(c.chars[0], c.x, c.y)
+      ctx.shadowBlur = 0
+    })
+    ctx.globalAlpha = 1
+  }
+  fitCanvas()
+  for (let i = 0; i < COMETS; i++) comets.push(spawn({}, true))
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches
+  if (calm) drawBits(0)
+  else
+    runLoop(root, (_now, dt) => drawBits(dt), {
+      tier,
+      // once the page has formed the sky can ease off
+      fps: () => (progress > 0.95 ? 30 : 60),
+    })
+  addEventListener("resize", fitCanvas)
+
+  if (asked) {
+    const sw = document.createElement("div")
+    sw.className = "hh-switch"
+    sw.innerHTML = ["flood", "nodes", "ssh", "live"].map((v) => `<a href="/?hero=${v}"${v === variant ? ' class="on"' : ""}>${v}</a>`).join("")
+    document.body.appendChild(sw)
+  }
+
+  render(0)
+  addEventListener("resize", () => render(progress))
+
+  const type = (tl: gsap.core.Timeline, el: HTMLElement, text: string, at: number, dur: number) => {
+    const o = { v: 0 }
+    tl.to(o, { v: 1, duration: dur, ease: "none", onUpdate: () => (el.textContent = text.slice(0, Math.round(o.v * text.length))) }, at)
+  }
+  // runs only while the hero is on screen
+  const watchTl = (tl: gsap.core.Timeline) =>
+    new IntersectionObserver((e) => (e[0].isIntersecting ? tl.play() : tl.pause()), { threshold: 0.2 }).observe(root)
+  const scene = (still: boolean) => {
+    if (variant === "ssh") {
+      const old = page.querySelector<HTMLElement>("[data-tm-old]")!
+      const neu = page.querySelector<HTMLElement>("[data-tm-new]")!
+      const lines = [...old.querySelectorAll<HTMLElement>(".hh-tl")]
+      const warn = page.querySelector<HTMLElement>("[data-tm-warn]")!
+      const stat = page.querySelector<HTMLElement>("[data-tm-stat]")!
+      const oks = [...neu.querySelectorAll<HTMLElement>(".hh-tk")]
+      const cmd = neu.querySelector<HTMLElement>(".hh-tl")!
+      const text = ["ssh -N dev@workstation \\", "    -L 3000:localhost:3000 \\", "    -L 8080:localhost:8080 \\", "    -L 5173:localhost:5173 \\", "    -L 9229:localhost:9229"]
+      if (still) {
+        old.style.display = "none"
+        neu.style.opacity = "1"
+        cmd.textContent = "mole up"
+        oks.forEach((o) => (o.style.opacity = "1"))
+        stat.textContent = "1 command · 0 flags"
+        return
+      }
+      const tl = gsap.timeline({ repeat: -1 })
+      tl.call(() => {
+        lines.forEach((l) => ((l.textContent = ""), l.classList.remove("on")))
+        cmd.textContent = ""
+        stat.textContent = "5 lines · 4 flags"
+      })
+      tl.set(old, { opacity: 1, scaleY: 1, y: 0, transformOrigin: "0 0" })
+      tl.set([neu, warn, ...oks], { opacity: 0 }, 0)
+      let at = 0.3
+      lines.forEach((l, i) => {
+        tl.call(() => (lines.forEach((x) => x.classList.remove("on")), l.classList.add("on")), [], at)
+        const dur = 0.1 + text[i].length * 0.018
+        type(tl, l, text[i], at, dur)
+        at += dur + 0.04
+      })
+      tl.call(() => lines.forEach((x) => x.classList.remove("on")), [], at)
+      tl.to(warn, { opacity: 1, duration: 0.2 }, at + 0.25)
+      tl.to(old, { opacity: 0, scaleY: 0.1, y: -16, duration: 0.45, ease: "power3.in" }, at + 1.2)
+      tl.set(neu, { opacity: 1 }, at + 1.6)
+      tl.call(() => cmd.classList.add("on"), [], at + 1.6)
+      type(tl, cmd, "mole up", at + 1.65, 0.4)
+      tl.call(() => (cmd.classList.remove("on"), (stat.textContent = "1 command · 0 flags")), [], at + 2.3)
+      oks.forEach((o, i) => tl.to(o, { opacity: 1, duration: 0.2 }, at + 2.3 + i * 0.26))
+      tl.to({}, { duration: 2.6 }, at + 2.3 + oks.length * 0.26)
+      tl.to(neu, { opacity: 0, duration: 0.35 })
+      watchTl(tl)
+    } else if (variant === "live" && !still) {
+      const code = page.querySelector<HTMLElement>("[data-lv-text]")!
+      const h = page.querySelector<HTMLElement>("[data-lv-h]")!
+      const hmr = page.querySelector<HTMLElement>("[data-lv-hmr]")!
+      const pkt = page.querySelector<HTMLElement>("[data-lv-pkt]")!
+      const msgs = ["Hello, world.", "Works on my remote.", "It's localhost."]
+      const tl = gsap.timeline({ repeat: -1 })
+      let prev = msgs[0]
+      msgs.forEach((_, i) => {
+        const at = 0.8 + i * 3.5
+        const next = msgs[(i + 1) % msgs.length]
+        const old = prev
+        const o1 = { v: 0 }
+        tl.to(o1, { v: 1, duration: 0.4, ease: "none", onUpdate: () => (code.textContent = old.slice(0, Math.round(old.length * (1 - o1.v)))) }, at)
+        type(tl, code, next, at + 0.45, 0.8)
+        tl.set(pkt, { left: 0, opacity: 1 }, at + 1.4)
+        tl.to(pkt, { left: "calc(100% - 22px)", duration: 0.4, ease: "power2.in" }, at + 1.4)
+        tl.set(pkt, { opacity: 0 }, at + 1.8)
+        tl.call(() => ((h.textContent = next), (hmr.textContent = "● updated")), [], at + 1.8)
+        tl.call(() => (hmr.textContent = "● connected"), [], at + 3.1)
+        prev = next
+      })
+      watchTl(tl)
+    }
+  }
+
+  const play = () => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      render(1)
+      scene(true)
+      return
+    }
+    const t = { p: 0 }
+    // quick start, long settle
+    gsap.to(t, {
+      p: 1,
+      duration: 3.8,
+      delay: 0.05,
+      ease: "power3.out",
+      onUpdate: () => render(t.p),
+      onComplete: () => scene(false),
+    })
+  }
+  new IntersectionObserver(
+    (entries, obs) => {
+      if (entries[0].isIntersecting) {
+        obs.disconnect()
+        play()
+      }
+    },
+    { threshold: 0.5 },
+  ).observe(root)
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

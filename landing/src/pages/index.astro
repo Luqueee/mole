@@ -1,28 +1,159 @@
 ---
 import Base from "@/layouts/Base.astro"
 import Nav from "@/components/Nav.astro"
-import Hero from "@/components/Hero.astro"
-import Features from "@/components/Features.astro"
-import HowItWorks from "@/components/HowItWorks.astro"
-import Logs from "@/components/Logs.astro"
+import Hero from "@/components/HeroHorizon.astro"
+import DiscoveryScene from "@/components/DiscoveryRail.astro"
+import TunnelJourney from "@/components/TunnelMerge.astro"
+import TransferScene from "@/components/TransferCubes.astro"
 import Install from "@/components/Install.astro"
-import Commands from "@/components/Commands.astro"
-import Platforms from "@/components/Platforms.astro"
-import FAQ from "@/components/FAQ.astro"
 import Footer from "@/components/Footer.astro"
+const faqs = [
+  {
+    q: "Do I need the desktop app?",
+    a: "No. The desktop app is a visual interface to Mole. The CLI and daemon work independently: start a tunnel with mole up --remote dev --auto-discover -d, inspect it with mole status or mole logs, and stop it with mole down.",
+  },
+  {
+    q: "What runs on the remote?",
+    a: "For port forwarding, your remote needs an SSH server. Mole runs locally and discovers remote TCP listeners using ss or netstat, with configured-port probing as a fallback. Remote node management and file inboxes need additional setup described in the documentation.",
+  },
+  {
+    q: "Why not just use ssh -L?",
+    a: "You can. Mole adds automatic listener discovery, multiple forwarded ports over one SSH connection, and automatic reconnect. You can also choose an explicit port list instead of auto-discovery.",
+  },
+  {
+    q: "Will my SSH configuration work?",
+    a: "Yes. Use a Host alias from ~/.ssh/config. Mole resolves it with ssh -G, including HostName, User, Port, IdentityFile, Include, and Match. Authentication uses your SSH agent and keys.",
+  },
+  {
+    q: "Which machines can I use?",
+    a: "The CLI supports macOS, Linux, Windows, and FreeBSD. Desktop packaging targets macOS, Windows, and Linux. Desktop bundles are not publicly published yet; the installation section links to source and releases.",
+  },
+]
 ---
 
 <Base>
+  <a class="skip-link" href="#main">Skip to content</a>
   <Nav />
-  <main>
+  <main id="main">
     <Hero />
-    <Features />
-    <HowItWorks />
-    <Logs />
+    <DiscoveryScene />
+    <TunnelJourney />
+    <TransferScene />
     <Install />
-    <Commands />
-    <Platforms />
-    <FAQ />
+    <section id="faq" class="border-t border-line" aria-labelledby="faq-title">
+      <div
+        class="wrap grid gap-10 py-18 md:grid-cols-[.8fr_1.2fr] md:gap-18 md:py-26"
+      >
+        <div>
+          <p class="mb-5 font-mono text-xs tracking-wider text-muted">
+            05 / NOTHING HIDDEN UNDERNEATH
+          </p><h2 id="faq-title" class="section-heading">
+            No black boxes.
+          </h2><div
+            class="relative mt-6 hidden h-72 md:block"
+            aria-hidden="true"
+          >
+            <span
+              class="faq-glyph absolute -top-4 left-0 text-[280px] leading-none font-medium tracking-[-.1em] text-hot"
+              >?</span
+            ><span
+              class="absolute right-6 bottom-0 font-mono text-xs text-muted"
+              >ASK THE BORING QUESTIONS.<br />THEY’RE THE IMPORTANT ONES.</span>
+          </div><p class="mt-6 text-base leading-relaxed text-muted">
+            The details matter. Here are the ones worth knowing before you
+            connect.
+          </p>
+        </div>
+        <div class="border-t border-line">
+          {
+            faqs.map((faq, index) => (
+              <details
+                name="mole-questions"
+                class="group border-b border-line"
+                open={index === 0}
+              >
+                <>
+                  <summary class="flex cursor-pointer list-none items-center gap-4 py-6 text-lg leading-snug tracking-tight sm:text-2xl [&::-webkit-details-marker]:hidden">
+                    <>
+                      <span class="font-mono text-xs text-hot">
+                        0{index + 1}
+                      </span>
+                      <span class="flex-1">{faq.q}</span>
+                      <span
+                        class="font-mono text-xl text-muted transition-transform group-open:rotate-45"
+                        aria-hidden="true"
+                      >
+                        +
+                      </span>
+                    </>
+                  </summary>
+                  <p class="pr-4 pb-7 pl-8 text-base leading-8 text-muted">
+                    {faq.a}
+                  </p>
+                </>
+              </details>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+    <section
+      class="closing-scene relative overflow-hidden border-t border-line"
+      aria-labelledby="closing-title"
+    >
+      <div
+        class="closing-orbit pointer-events-none absolute top-1/2 -right-30 size-[600px] -translate-y-1/2 rounded-full border border-hot/20 shadow-[0_0_0_80px_#ff5a1408,0_0_0_160px_#ff5a1405]"
+        aria-hidden="true"
+      >
+      </div>
+      <div class="wrap relative py-20 md:py-28">
+        <p class="mb-7 font-mono text-xs tracking-wider text-muted">
+          YOUR NEXT IDEA DOESN’T CARE WHERE IT RUNS.
+        </p><h2
+          id="closing-title"
+          class="max-w-4xl text-[clamp(58px,9.5vw,128px)] leading-[.92] font-medium tracking-[-.07em]"
+        >
+          Make yourself<br /><span class="text-hot">localhost.</span>
+        </h2><div class="mt-10 flex flex-wrap items-center gap-8">
+          <a class="button" href="#install"
+            >Find your way in <span aria-hidden="true">↗</span></a
+          ><a
+            class="font-mono text-sm text-muted hover:text-ink"
+            href="https://github.com/Luqueee/mole#readme"
+            target="_blank"
+            rel="noopener noreferrer">Read the documentation ↗</a>
+        </div>
+      </div>
+    </section>
   </main>
   <Footer />
 </Base>
+<script>
+  import { gsap } from "gsap"
+  import { ScrollTrigger } from "gsap/ScrollTrigger"
+  gsap.registerPlugin(ScrollTrigger)
+  gsap.matchMedia().add("(prefers-reduced-motion: no-preference)", () => {
+    gsap.from(".closing-orbit", {
+      scale: 0.65,
+      rotation: -30,
+      ease: "none",
+      scrollTrigger: {
+        trigger: ".closing-scene",
+        start: "top bottom",
+        end: "bottom bottom",
+        scrub: 1,
+      },
+    })
+    gsap.from(".faq-glyph", {
+      y: 60,
+      rotation: -12,
+      ease: "none",
+      scrollTrigger: {
+        trigger: "#faq",
+        start: "top bottom",
+        end: "top center",
+        scrub: 1,
+      },
+    })
+  })
+</script>

@@ -17,8 +17,11 @@
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
     "@tailwindcss/vite": "^4",
     "astro": "^7.1.4",
+    "gsap": "^3.15.0",
     "tailwindcss": "^4"
   },
   "devDependencies": {
