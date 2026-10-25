@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/Luqueee/mole/internal/brew"
 )
 
 func TestInstallCLI(t *testing.T) {
@@ -18,6 +20,8 @@ func TestInstallCLI(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("LOCALAPPDATA", home)
 	t.Setenv("PATH", "")
+	brewDirs = nil // a mole of this machine's Homebrew must not count
+	t.Cleanup(func() { brewDirs = brew.Prefixes })
 	m := NewMoleService()
 
 	if st := m.GetCLI(); st.Installed || !st.Bundled {

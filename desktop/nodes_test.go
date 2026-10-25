@@ -11,14 +11,16 @@ import (
 )
 
 // stubMole puts a `mole` on PATH that runs script (a POSIX shell body) and
-// points HOME and the config at a scratch area.
+// points HOME and the config at a scratch area. Like the real CLI it answers
+// `mole version` with its identity before anything else, which is how the app
+// tells it from another program called mole; that probe never reaches script.
 func stubMole(t *testing.T, script string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("needs sh")
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "mole"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "mole"), []byte("#!/bin/sh\nif [ \"$#\" -eq 1 ] && [ \"$1\" = version ]; then echo 'mole v0.0.0-test'; exit 0; fi\n"+script+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	home := t.TempDir()

@@ -69,6 +69,20 @@ On **Linux, macOS, or FreeBSD**, install with Go 1.26.4+ and Git available:
 curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
 ```
 
+With **Homebrew** (macOS and Linux) there is a tap; the formula is `mole-tunnel`
+because homebrew-core already has an unrelated `mole`, and the two cannot be
+installed together (both provide a `mole` binary):
+
+```bash
+brew tap luqueee/mole
+brew trust luqueee/mole          # Homebrew 7+ asks you to trust third-party taps
+brew install mole-tunnel         # the CLI, built from the release tag
+brew install --cask mole-tunnel  # the desktop app (macOS; it is not notarized, the cask lifts the quarantine flag)
+```
+
+Update a Homebrew install with `brew upgrade mole-tunnel`: `mole update` and the
+desktop app leave a binary that Homebrew owns alone and say so.
+
 Open a new terminal if needed, then start mole with an SSH `Host` alias from
 your `~/.ssh/config`. On a fresh install, choose how to select ports:
 

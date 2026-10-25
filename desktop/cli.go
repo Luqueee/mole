@@ -8,9 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Luqueee/mole/internal/brew"
 )
 
 // The mole CLI is embedded so the app can install it. Builds that skip
@@ -47,18 +51,74 @@ func cliInstallDir() string {
 	return filepath.Join(home, ".local", "bin")
 }
 
-// moleBin finds the CLI the app shells out to. Apps started from the Finder
-// or the Start menu don't inherit the shell's PATH, so the install directory
-// is tried too.
-func moleBin() (string, error) {
-	if p, err := exec.LookPath(cliName()); err == nil {
-		return p, nil
+// brewDirs are searched after PATH and the install directory: an app opened
+// from the Finder or the Start menu does not inherit the shell's PATH, which is
+// where Homebrew's links live. A variable so tests can point it elsewhere.
+var brewDirs = brew.Prefixes
+
+// moleIdentity is what this project's `mole version` starts with. Another
+// program may be called mole too (homebrew-core has one that cleans a Mac and
+// answers "Mole version 1.44.1"): shelling out to it would run the wrong tool.
+var moleIdentity = regexp.MustCompile(`(?m)^mole v\d+\.\d+\.\d+`)
+
+type identityVerdict struct {
+	size int64
+	mod  time.Time
+	ok   bool
+}
+
+var (
+	identityMu    sync.Mutex
+	identityCache = map[string]identityVerdict{}
+)
+
+// isMole reports whether the file at bin is this project's CLI. The answer is
+// cached until the file changes: moleBin runs on every action.
+func isMole(bin string) bool {
+	fi, err := os.Stat(bin)
+	if err != nil || fi.IsDir() {
+		return false
 	}
-	p := filepath.Join(cliInstallDir(), cliName())
-	if _, err := os.Stat(p); err == nil {
-		return p, nil
+	identityMu.Lock()
+	v, hit := identityCache[bin]
+	identityMu.Unlock()
+	if hit && v.size == fi.Size() && v.mod.Equal(fi.ModTime()) {
+		return v.ok
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, bin, "version").Output() // stdin is /dev/null
+	ok := moleIdentity.Match(out)
+	identityMu.Lock()
+	identityCache[bin] = identityVerdict{size: fi.Size(), mod: fi.ModTime(), ok: ok}
+	identityMu.Unlock()
+	return ok
+}
+
+// moleBin finds the CLI the app shells out to: the first binary on PATH, in the
+// install directory or in a Homebrew prefix that says it is this project's.
+func moleBin() (string, error) {
+	dirs := append(filepath.SplitList(os.Getenv("PATH")), cliInstallDir())
+	dirs = append(dirs, brewDirs...)
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		if p := filepath.Join(d, cliName()); isMole(p) {
+			return p, nil
+		}
 	}
 	return "", fmt.Errorf("mole CLI not found: install it from the Setup tab")
+}
+
+// brewFormulaOf returns the Homebrew formula that owns the file bin points at.
+func brewFormulaOf(bin string) (string, bool) {
+	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+		bin = resolved
+	}
+	return brew.Formula(bin)
 }
 
 // CLIStatus describes the CLI install for the Setup tab.
@@ -72,6 +132,7 @@ type CLIStatus struct {
 	DirOnPath  bool   `json:"dirOnPath"`  // InstallDir is in the shell PATH
 	PathSet    bool   `json:"pathSet"`    // the shell profile already adds InstallDir
 	Profile    string `json:"profile"`    // file AddCLIToPath edits ("user PATH" on Windows)
+	ManagedBy  string `json:"managedBy"`  // the Homebrew formula that owns the binary, or ""
 }
 
 // GetCLI reports whether the CLI is installed and whether it matches the
@@ -90,6 +151,7 @@ func (m *MoleService) GetCLI() CLIStatus {
 		return st
 	}
 	st.Installed, st.Path = true, bin
+	st.ManagedBy, _ = brewFormulaOf(bin)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, bin, "version").Output(); err == nil {
@@ -107,6 +169,12 @@ func (m *MoleService) GetCLI() CLIStatus {
 // any previous copy there. A running daemon keeps its old binary until it is
 // restarted.
 func (m *MoleService) InstallCLI() error {
+	// Homebrew owns its copy: a second one here would shadow it on PATH.
+	if cur, err := moleBin(); err == nil {
+		if formula, ok := brewFormulaOf(cur); ok {
+			return fmt.Errorf("mole is installed by Homebrew: update it with `brew upgrade %s`", formula)
+		}
+	}
 	bin := bundledCLI()
 	if bin == nil {
 		return fmt.Errorf("this build does not embed the CLI")

@@ -490,7 +490,8 @@ function SetupPage({ run, up }: { run: Run; up: ReturnType<typeof useAppUpdate> 
   const [cli, setCli] = useState<CLIStatus | null>(null);
   const load = useCallback(() => api.cli().then(setCli).catch(() => {}), []);
   useEffect(() => void load(), [load]);
-  const state = !cli ? "…" : !cli.installed ? "NOT INSTALLED" : cli.bundled && !cli.upToDate ? "UPDATE AVAILABLE" : "INSTALLED";
+  const brewed = !!cli?.managedBy; // Homebrew owns the binary: it updates it, the app must not
+  const state = !cli ? "…" : !cli.installed ? "NOT INSTALLED" : brewed ? "INSTALLED" : cli.bundled && !cli.upToDate ? "UPDATE AVAILABLE" : "INSTALLED";
   const tone = state === "INSTALLED" ? "text-live" : state === "UPDATE AVAILABLE" ? "text-warn" : "text-faint";
   const label = !cli?.installed ? "INSTALL" : cli.upToDate ? "REINSTALL" : "UPDATE";
   return (
@@ -515,7 +516,11 @@ function SetupPage({ run, up }: { run: Run; up: ReturnType<typeof useAppUpdate> 
           <div className="mt-2 text-xs text-dim select-text">
             {cli?.installed ? `${cli.path}${cli.version ? ` · ${cli.version}` : ""}` : `will be installed to ${cli?.installDir ?? "…"}`}
           </div>
+          {brewed && <div className="mt-2 text-xs text-dim">Installed by Homebrew: update it with <span className="text-foreground">brew upgrade {cli?.managedBy}</span>.</div>}
         </div>
+        {brewed ? (
+          <span className="border border-line px-5 py-3 text-[11px] tracking-[0.2em] text-dim">MANAGED BY HOMEBREW</span>
+        ) : (
         <button
           disabled={!cli?.bundled}
           onClick={() => run("CLI installed", api.cliInstall).then(load)}
@@ -523,8 +528,9 @@ function SetupPage({ run, up }: { run: Run; up: ReturnType<typeof useAppUpdate> 
         >
           {label}
         </button>
+        )}
       </div>
-      {cli && !cli.bundled && <div className="border-b border-line px-5 py-4 text-xs text-dim">This build does not embed the CLI (run <span className="text-foreground">wails3 task bundle:cli</span> before building).</div>}
+      {cli && !cli.bundled && !brewed && <div className="border-b border-line px-5 py-4 text-xs text-dim">This build does not embed the CLI (run <span className="text-foreground">wails3 task bundle:cli</span> before building).</div>}
       {cli?.installed && !cli.dirOnPath && cli.path.startsWith(cli.installDir) && (
         <div className="flex items-center border-b border-line px-5 py-4">
           <div className="flex-1 text-xs select-text">
