@@ -123,12 +123,16 @@ func SplitTarget(target string) (node, addr string) {
 }
 
 // splitScheme splits the address of a canonical target into its scheme
-// ("http" unless it starts with "https://") and host:port.
-func splitScheme(addr string) (scheme, hostport string) {
-	if rest, ok := strings.CutPrefix(addr, "https://"); ok {
-		return "https", rest
+// ("http" unless it starts with "https://" or "https+insecure://"), whether the
+// certificate is left unchecked, and host:port.
+func splitScheme(addr string) (scheme string, insecure bool, hostport string) {
+	if rest, ok := strings.CutPrefix(addr, "https+insecure://"); ok {
+		return "https", true, rest
 	}
-	return "http", addr
+	if rest, ok := strings.CutPrefix(addr, "https://"); ok {
+		return "https", false, rest
+	}
+	return "http", false, addr
 }
 
 // hostHeader is the Host the service is sent: the target's name, without the
@@ -143,7 +147,10 @@ func hostHeader(scheme, hostport string) string {
 }
 
 // upstream is where one request goes, carried in its context.
-type upstream struct{ scheme, hostport string }
+type upstream struct {
+	scheme, hostport string
+	insecure         bool // https without checking the certificate
+}
 
 // Proxy forwards HTTP requests to the target their Host header names, through
 // the tunnel of the node that target lives on.
@@ -156,7 +163,7 @@ type Proxy struct {
 	tls *tls.Config
 
 	mu  sync.Mutex
-	rps map[string]*httputil.ReverseProxy // by node
+	rps map[rpKey]*httputil.ReverseProxy
 }
 
 type ctxKey struct{}
@@ -164,17 +171,30 @@ type ctxKey struct{}
 // New returns a Proxy for table. Connections show up in the stats like any
 // other pull, under the target's port.
 func New(table *Table, dial NodeDialer, hooks proxy.Hooks, log *slog.Logger) *Proxy {
-	return &Proxy{table: table, dial: dial, hooks: hooks, log: log, rps: map[string]*httputil.ReverseProxy{}}
+	return &Proxy{table: table, dial: dial, hooks: hooks, log: log, rps: map[rpKey]*httputil.ReverseProxy{}}
 }
 
-// reverseProxy returns the proxy for one node. Each node gets its own
-// Transport: idle connections are pooled by address, and "127.0.0.1:3000" on
-// two nodes must not share them.
-func (p *Proxy) reverseProxy(node string) *httputil.ReverseProxy {
+// rpKey tells proxies apart: each node and each way of checking certificates
+// gets its own Transport, since idle connections are pooled by address:
+// "127.0.0.1:3000" on two nodes must not share them, and a connection made
+// without checking a certificate must never serve a request that wanted it
+// checked.
+type rpKey struct {
+	node     string
+	insecure bool
+}
+
+// reverseProxy returns the proxy for one node.
+func (p *Proxy) reverseProxy(node string, insecure bool) *httputil.ReverseProxy {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if rp, ok := p.rps[node]; ok {
+	key := rpKey{node, insecure}
+	if rp, ok := p.rps[key]; ok {
 		return rp
+	}
+	tlsCfg := p.tls
+	if insecure {
+		tlsCfg = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // the route asked for it: https+insecure://
 	}
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -196,7 +216,7 @@ func (p *Proxy) reverseProxy(node string) *httputil.ReverseProxy {
 			},
 			// For https targets the Transport wraps the tunnel connection in
 			// TLS itself, with the target's name as SNI and for verification.
-			TLSClientConfig:     p.tls,
+			TLSClientConfig:     tlsCfg,
 			MaxIdleConnsPerHost: 8,
 			IdleConnTimeout:     30 * time.Second,
 		},
@@ -209,7 +229,7 @@ func (p *Proxy) reverseProxy(node string) *httputil.ReverseProxy {
 			http.Error(w, fmt.Sprintf("mole: %s is routed but %s did not answer: %v", r.Host, where, err), http.StatusBadGateway)
 		},
 	}
-	p.rps[node] = rp
+	p.rps[key] = rp
 	return rp
 }
 
@@ -226,8 +246,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	node, addr := SplitTarget(target)
-	scheme, hostport := splitScheme(addr)
-	p.reverseProxy(node).ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, upstream{scheme, hostport})))
+	scheme, insecure, hostport := splitScheme(addr)
+	p.reverseProxy(node, insecure).ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, upstream{scheme, hostport, insecure})))
 }
 
 // Serve answers requests on ln until it is closed.

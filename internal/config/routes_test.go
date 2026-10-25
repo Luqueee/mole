@@ -24,7 +24,7 @@ func TestNormalizeRouteTarget(t *testing.T) {
 			t.Errorf("NormalizeRouteTarget(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "0", "65536", ":80", "a b:80", "host:", "host:x", "a/b:80", "@", "@dockers", "@:3000", "@Docker:3000", "@dockers:", "@dockers/@x:80", "https://", "https://:80", "ftp://x", "admin.corp:", "a:b:c", "https://admin.corp/path"} {
+	for _, bad := range []string{"", "0", "65536", ":80", "a b:80", "host:", "host:x", "a/b:80", "@", "@dockers", "@:3000", "@Docker:3000", "@dockers:", "@dockers/@x:80", "https://", "https+insecure://", "https+insecure://:80", "https+insecure:/x", "ftp://x", "admin.corp:", "a:b:c", "https://admin.corp/path"} {
 		if got, err := NormalizeRouteTarget(bad); err == nil {
 			t.Errorf("NormalizeRouteTarget(%q) = %q, want an error", bad, got)
 		}

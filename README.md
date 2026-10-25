@@ -490,6 +490,7 @@ mole route add web 3000                  # web.dev.lan   -> port 3000 on the rem
 mole route add api 10.0.0.5:8080         # api.dev.lan   -> a host the remote sees
 mole route add admin admin.corp          # admin.dev.lan -> a name only the remote resolves
 mole route add sec https://admin.corp    # same, over TLS
+mole route add lab https+insecure://lab.corp:8443   # TLS without checking the certificate
 mole route add db @dockers:5432          # db.dev.lan    -> port 5432 on the node "dockers"
 sudo mole dns install -config ~/.config/mole/config.yaml   # once: make the OS resolve it
 ```
@@ -515,8 +516,10 @@ works on `http://NAME.DOMAIN:ROUTE_PORT`, if the name resolves.
 - The service receives its own address as `Host` (dev servers such as Vite or
   Ollama reject names they do not know); the name you typed travels in
   `X-Forwarded-Host`.
-- `https://` targets are verified against the system roots: a service behind a
-  private CA answers `502` until that CA is trusted.
+- `https://` targets are verified against the operating system's trusted
+  roots. A service whose certificate is not trusted answers `502`;
+  `https+insecure://` skips the check for that one route (the app shows it as
+  `UNVERIFIED`), and never for another route to the same service.
 - On macOS, a route through a node on your LAN (`192.168.x.x`) needs mole to be
   allowed under System Settings > Privacy & Security > **Local Network**: the
   permission is per application, so a daemon the desktop app started can get

@@ -37,10 +37,11 @@ function InputRow({ value, onChange, onSubmit, placeholder, pattern, action, bus
 // A canonical target is "host:port" (the primary remote) or "@node/host:port".
 const node = (t: string) => (t.startsWith("@") ? t.slice(1, t.indexOf("/")) : "");
 const addrOf = (t: string) => (t.startsWith("@") ? t.slice(t.indexOf("/") + 1) : t);
-const isHttps = (t: string) => addrOf(t).startsWith("https://");
+const isHttps = (t: string) => /^https(\+insecure)?:\/\//.test(addrOf(t));
+const isLoose = (t: string) => addrOf(t).startsWith("https+insecure://");
 // The address without its scheme and without the scheme's default port.
 const pretty = (t: string) => {
-  const a = addrOf(t).replace(/^https:\/\//, "");
+  const a = addrOf(t).replace(/^https(\+insecure)?:\/\//, "");
   return a.replace(isHttps(t) ? /:443$/ : /:80$/, "");
 };
 
@@ -54,6 +55,7 @@ export default function ProxyPage() {
   const [rhost, setRhost] = useState(""); // host as the node sees it ("" = the node itself)
   const [rport, setRport] = useState("");
   const [rhttps, setRhttps] = useState(false); // speak TLS to the target
+  const [rloose, setRloose] = useState(false); // ...without checking its certificate
 
   const load = useCallback(async () => {
     try {
@@ -102,7 +104,7 @@ export default function ProxyPage() {
     const port = Number(rport);
     // A name can use the scheme's default port; "this machine" needs one.
     if (rport ? !Number.isInteger(port) || port < 1 || port > 65535 : !rhost) return toast.error(rhost ? "Port must be 1–65535" : "Give a port, or a host to use the default one");
-    const addr = (rhttps ? "https://" : "") + (rhost || (rhttps ? "127.0.0.1" : "")) + (rhost ? (rport ? `:${port}` : "") : (rhttps ? `:${port}` : String(port)));
+    const addr = (rhttps ? (rloose ? "https+insecure://" : "https://") : "") + (rhost || (rhttps ? "127.0.0.1" : "")) + (rhost ? (rport ? `:${port}` : "") : (rhttps ? `:${port}` : String(port)));
     const target = rnode ? `@${rnode}/${addr}` : addr;
     act("route", `route ${name}.${domain}`, () => api.routeAdd(name, target)).then(() => { setRn(""); setRhost(""); setRport(""); });
   };
@@ -176,6 +178,11 @@ export default function ProxyPage() {
             <span className="mr-2 w-20 text-[10px] tracking-[0.25em] text-faint">TARGET</span>
             <button onClick={() => setRhttps(false)} aria-pressed={!rhttps} className={chip(!rhttps)}>HTTP</button>
             <button onClick={() => setRhttps(true)} aria-pressed={rhttps} className={`${chip(rhttps)} -ml-px`}>HTTPS</button>
+            {rhttps && (
+              <button onClick={() => setRloose(!rloose)} aria-pressed={rloose} title="For a self-signed certificate or a CA this machine does not trust" className={`no-drag border px-3 py-2 text-[11px] tracking-[0.2em] transition ${rloose ? "border-warn bg-warn font-bold text-background" : "border-line text-dim hover:border-warn hover:text-warn"}`}>
+                {rloose ? "ANY CERTIFICATE" : "CHECK CERTIFICATE"}
+              </button>
+            )}
             <input value={rhost} onChange={(e) => setRhost(e.target.value.toLowerCase().replace(/[^a-z0-9.-]/g, ""))} onKeyDown={submitOnEnter} placeholder="LOCALHOST, OR A NAME LIKE ADMIN.CORP" spellCheck={false} aria-label="Host" className={`${field} min-w-0 flex-1`} />
             <span className="text-faint">:</span>
             <input value={rport} onChange={(e) => setRport(e.target.value.replace(/\D/g, "").slice(0, 5))} onKeyDown={submitOnEnter} placeholder={rhost ? (rhttps ? "443" : "80") : "3000"} inputMode="numeric" aria-label="Port" className={`${field} w-24`} />
@@ -193,6 +200,7 @@ export default function ProxyPage() {
             <ArrowRight size={14} className="text-hot" />
             <span className={`border px-2 py-0.5 text-[10px] tracking-[0.2em] ${node(r.target) ? "border-hot text-hot" : "border-line text-dim"}`}>{(node(r.target) || primary || "REMOTE").toUpperCase()}</span>
             {isHttps(r.target) && <span className="border border-live px-2 py-0.5 text-[10px] tracking-[0.2em] text-live">HTTPS</span>}
+            {isLoose(r.target) && <span title="The certificate is not checked" className="border border-warn px-2 py-0.5 text-[10px] tracking-[0.2em] text-warn">UNVERIFIED</span>}
             {pretty(r.target)}
           </span>
           <button onClick={() => act("open", "", () => api.routeOpen(r.name))} title={r.url} className="no-drag mr-6 flex items-center gap-2 text-[10px] tracking-[0.2em] text-dim transition hover:text-foreground">
