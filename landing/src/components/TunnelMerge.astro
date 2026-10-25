@@ -1,0 +1,172 @@
+---
+// Four ssh -L connections collapse into one. Scroll-driven: the progress of the
+// pinned section is the only input.
+---
+
+<section
+  id="how-it-works"
+  class="tm"
+  aria-labelledby="journey-title"
+  data-tm
+>
+  <div class="tm-stage">
+    <div class="wrap tm-in">
+      <p class="eyebrow tm-eyebrow">02 / ONE CONNECTION. ALL YOUR PORTS.</p>
+      <h2 id="journey-title" class="sr-only">One connection. All your ports.</h2>
+      <div class="tm-body" data-body></div>
+      <p class="tm-cap" data-cap></p>
+    </div>
+    <i class="tm-bar" data-bar></i>
+  </div>
+</section>
+
+<style is:global>
+  .tm {
+    position: relative;
+    height: 360vh;
+    background: var(--hot);
+    color: #0a0908;
+    border-bottom: 1px solid var(--line);
+  }
+  .tm-stage {
+    position: sticky;
+    top: 0;
+    height: 100svh;
+    overflow: hidden;
+  }
+  .tm-in {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 8px;
+    padding-top: calc(var(--nav-h) + 8px);
+    padding-bottom: 26px;
+  }
+  .tm-eyebrow {
+    color: #0a0908a8;
+  }
+  .tm-body {
+    min-height: 0;
+    display: grid;
+    place-items: center;
+  }
+  .tm-body svg {
+    overflow: visible;
+    width: 100%;
+    height: 100%;
+    max-height: calc(100svh - 260px);
+  }
+  .tm-cap {
+    font: 13px var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #0a0908a8;
+    min-height: 20px;
+  }
+  .tm-bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 100%;
+    background: #0a0908;
+    transform-origin: left;
+    transform: scaleX(0);
+  }
+</style>
+
+<script>
+  import { gsap } from "gsap"
+  import { ScrollTrigger } from "gsap/ScrollTrigger"
+  gsap.registerPlugin(ScrollTrigger)
+
+  const cl = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x))
+  const seg = (p: number, a: number, b: number) => cl((p - a) / (b - a))
+  const ease = (t: number) =>
+    t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+
+  const sec = document.getElementById("how-it-works") as HTMLElement
+  const body = sec.querySelector<HTMLElement>("[data-body]")!
+  const cap = sec.querySelector<HTMLElement>("[data-cap]")!
+  const bar = sec.querySelector<HTMLElement>("[data-bar]")!
+
+  const labels = [":3000", ":8080", ":5173", ":9229"]
+  const caps: [number, string][] = [
+    [0, "The usual way: one tunnel per port"],
+    [0.3, "Merging…"],
+    [0.7, "One SSH connection. All your ports inside it."],
+  ]
+  // a phone gets the drawing turned upright: four lines run down and become one
+  const tall = matchMedia("(max-width: 700px)")
+  let portrait = tall.matches
+  let progress = 0
+
+  const build = () => {
+    portrait = tall.matches
+    let h = `<rect id="pipe" x="0" y="0" width="0" height="0" rx="58" fill="#0a0908" opacity="0"/>`
+    labels.forEach((l, i) => {
+      h += `<line id="w${i}" stroke="#0a0908" stroke-width="${portrait ? 4 : 5}" stroke-linecap="round"/>`
+      h += `<circle id="a${i}" r="${portrait ? 10 : 12}" fill="#c6ff3d" stroke="#0a0908" stroke-width="3"/>`
+      h += `<circle id="b${i}" r="${portrait ? 10 : 12}" fill="#ebe5d8" stroke="#0a0908" stroke-width="3"/>`
+      h += `<text id="l${i}" ${portrait ? "" : 'text-anchor="middle"'} font-weight="600">${l}</text>`
+    })
+    h += `<text id="cnt" x="${portrait ? 200 : 500}" y="${portrait ? 78 : 84}" text-anchor="middle" font-size="${portrait ? 38 : 86}" font-weight="700" font-family="'Space Grotesk Variable', sans-serif" letter-spacing="${portrait ? -2 : -4}">4 connections</text>`
+    h += `<text id="sub" x="${portrait ? 200 : 500}" y="${portrait ? 566 : 474}" text-anchor="middle" letter-spacing="${portrait ? 1 : 2}" font-size="${portrait ? 12 : 13}"></text>`
+    body.innerHTML = `<svg viewBox="${portrait ? "0 0 400 600" : "0 0 1000 520"}" preserveAspectRatio="xMidYMid meet" font-family="'JetBrains Mono Variable', monospace" font-size="${portrait ? 15 : 14}" role="img" aria-label="Four separate SSH connections merging into one">${h}</svg>`
+  }
+  const q = (s: string) => body.querySelector<SVGElement>(s)!
+  const set = (el: SVGElement, o: Record<string, string | number>) =>
+    Object.entries(o).forEach(([k, v]) => el.setAttribute(k, String(v)))
+
+  const render = (p: number) => {
+    progress = p
+    const e = ease(seg(p, 0.3, 0.7))
+    const merged = e > 0.6
+    labels.forEach((_, i) => {
+      const w = q(`#w${i}`),
+        l = q(`#l${i}`)
+      if (portrait) {
+        // four lines hanging from the top, drawn towards one pipe in the middle
+        const x = lerp([78, 152, 226, 300][i], 200 + (i - 1.5) * 24, e)
+        set(w, { x1: x, x2: x, y1: 170, y2: 500, stroke: merged ? "#ff5a14" : "#0a0908", "stroke-width": lerp(4, 3, e), "stroke-dasharray": merged ? "10 8" : "none" })
+        for (const k of ["a", "b"]) set(q(`#${k}${i}`), { cx: x, cy: k === "a" ? 170 : 500, opacity: i === 0 || e < 0.9 ? 1 : 0 })
+        // beside the pipe on the orange: dark ink, never orange on orange
+        set(l, { x: lerp(x - 22, 272, e), y: lerp(146, 236 + i * 56, e), fill: "#0a0908" })
+      } else {
+        const yy = lerp([150, 230, 310, 390][i], 280 + (i - 1.5) * 34 * e, e)
+        set(w, { x1: 90, x2: 910, y1: yy, y2: yy, stroke: merged ? "#ff5a14" : "#0a0908", "stroke-width": lerp(5, 3, e), "stroke-dasharray": merged ? "10 8" : "none" })
+        set(q(`#a${i}`), { cx: 90, cy: yy, opacity: i === 0 || e < 0.9 ? 1 : 0 })
+        set(q(`#b${i}`), { cx: 910, cy: yy, opacity: i === 0 || e < 0.9 ? 1 : 0 })
+        set(l, { x: lerp(500, 300 + i * 130, e), y: yy - 12, fill: merged ? "#ff5a14" : "#0a0908" })
+      }
+    })
+    const pipe = q("#pipe")
+    if (portrait) set(pipe, { x: 200 - 56 * e, y: 150, width: 112 * e, height: 370, rx: 56, opacity: e })
+    else set(pipe, { x: 90, y: 280 - 95 * e, width: 820, height: 190 * e, rx: 60, opacity: e })
+    q("#cnt").textContent = e < 0.5 ? "4 connections" : "1 connection"
+    q("#sub").textContent = portrait
+      ? e < 0.5
+        ? "ssh -L ×4 · four handshakes"
+        : "mole · one handshake"
+      : e < 0.5
+        ? "ssh -L ×4 · four handshakes · four things to reconnect"
+        : "mole · one handshake · every port rides along"
+    cap.textContent = caps.reduce((o, [t, s]) => (p >= t ? s : o), caps[0][1])
+    bar.style.transform = `scaleX(${p})`
+  }
+
+  build()
+  render(0)
+  tall.addEventListener("change", () => {
+    build()
+    render(progress)
+  })
+  ScrollTrigger.create({
+    trigger: sec,
+    start: "top top",
+    end: "bottom bottom",
+    onUpdate: (s) => render(s.progress),
+  })
+</script>
+

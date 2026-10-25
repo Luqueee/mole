@@ -7,8 +7,8 @@ interface Props {
 }
 
 const {
-  title = "mole — SSH port forwarding, auto-discovered",
-  description = "SSH port forwarding that auto-discovers your remote's listeners. One binary, one connection, zero port lists.",
+  title = "mole — Remote machine. Local feeling.",
+  description = "Bring your remote ports home over one SSH connection. A visual desktop app or an independent CLI and background daemon. Open source. Your infrastructure.",
 } = Astro.props
 
 // Self-hosted analytics. Both halves of the pair have to be set or nothing is
@@ -65,13 +65,15 @@ const structuredData = {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/webp" href="/mole.webp" />
     <link rel="apple-touch-icon" href="/mole.webp" />
-    <meta name="theme-color" content="#ece7db" />
+    <meta name="theme-color" content="#0a0908" />
     <title>{title}</title>
     <meta name="description" content={description} />
 
-    {/* Search Console verifies an URL-prefix property by fetching its root, and
+    {
+      /* Search Console verifies an URL-prefix property by fetching its root, and
         this layout renders the only page there is. The token belongs to the
-        property, not to the host serving it, so it is a literal. */}
+        property, not to the host serving it, so it is a literal. */
+    }
     <meta
       name="google-site-verification"
       content="6Fs8IePpUHnOCsQg8mlX_ADhWLEmTI8MRm41hPztRvI"
@@ -79,8 +81,7 @@ const structuredData = {
 
     <link rel="canonical" href={canonical} />
 
-    <!-- Open Graph. The card is public/og.png, 1200x630, generated from the
-         logs screenshot with sips; see README. -->
+    <!-- Open Graph: committed 1200×630 capture of the landing hero. -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={preview} />
@@ -100,16 +101,10 @@ const structuredData = {
       content="index, follow, max-image-preview:large, max-snippet:-1"
     />
 
-    <!-- Fonts: IBM Plex Sans Condensed + IBM Plex Sans + IBM Plex Mono -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-
-    {/* The tracker of the self-hosted Umami instance. `is:inline` because the
-        file is served by that instance and is not bundled here. */}
+    {
+      /* The tracker of the self-hosted Umami instance. `is:inline` because the
+        file is served by that instance and is not bundled here. */
+    }
     {
       umami && (
         <script
@@ -129,21 +124,5 @@ const structuredData = {
   </head>
   <body>
     <slot />
-    <script>
-      const obs = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((e) => {
-            if (e.isIntersecting) {
-              e.target.classList.add("revealed")
-              obs.unobserve(e.target)
-            }
-          })
-        },
-        { threshold: 0.1, rootMargin: "0px 0px -50px 0px" }
-      )
-      document
-        .querySelectorAll("[data-reveal]")
-        .forEach((el) => obs.observe(el))
-    </script>
   </body>
 </html>

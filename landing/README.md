@@ -58,35 +58,39 @@ rsync -az --delete dist/ web@websites:/home/web/mole/landing/dist/
 ssh web@websites 'pm2 reload mole-landing --update-env'
 ```
 
-## Customize
+## Design and content
 
-- **Domain:** `MOLE_LANDING_URL` in `landing/.env`; `astro.config.mjs` falls back
-  to `https://mole.luqueee.dev` when the file declares nothing.
-- **Repo URL:** `https://github.com/Luqueee/mole` is hardcoded in `Nav.astro`,
-  `Hero.astro`, and `Footer.astro`.
-- **Theme:** the "subsurface map" palette and type scale live in
-  `src/styles/global.css`. The surface is pale paper; anything underground —
-  terminal blocks, the tunnel band in `Tunnel.astro`, platform cards, the
-  footer — uses the dark `subsoil` tokens, where the CLI's FORWARD/UNFWD/INFO
-  colours live.
-- **Preview card:** `public/og.png`, 1200×630, a committed asset rather than a
-  build step. It is the logs screenshot scaled onto the paper background:
-
-  ```bash
-  sips --resampleWidth 1200 public/mole-logs.png --out /tmp/og-scaled.png
-  sips -p 630 1200 --padColor ECE7DB /tmp/og-scaled.png --out public/og.png
-  ```
-
-- **SEO:** `robots.txt` is a route, not a file in `public/`, so its `Sitemap:`
-  line and every absolute URL in the head — canonical, `og:*`, the JSON-LD
-  graph — come from `site` and cannot name the wrong host. `@astrojs/sitemap`
-  emits `sitemap-index.xml`. A relative `og:image` is the defect this replaced:
-  most crawlers do not resolve one.
-
-## Gotcha: prettier and whitespace-sensitive markup
-
-Prettier reflows the contents of `<pre>` and `whitespace-pre-wrap` elements,
-which silently corrupts the rendered terminal output, the install commands and
-the command-table chevron. Four spots are pinned with `{/* prettier-ignore */}`
-— in `TerminalBlock.astro`, `Install.astro`, `Platforms.astro` and
-`Commands.astro`. Don't remove them.
+- **Identity:** the desktop app's industrial palette, square panels, Space
+  Grotesk and JetBrains Mono. Fonts are self-hosted through Fontsource.
+- **Styling:** Tailwind v4 utilities for layout, responsive variants, and states.
+  Theme tokens and shared typography live in `src/styles/global.css`; custom
+  CSS handles illustrated browsers, paths, and spatial effects.
+- **Scenes:** `Hero.astro` places a local browser in front of a perspective
+  tunnel. `DiscoveryScene.astro` maps three selectable remote services to their
+  matching localhost previews. These are conceptual illustrations, not the app UI.
+- **Connection journey:** `TunnelJourney.astro` explains connect, discover, and
+  forward with explicit stage buttons. On screens at least 1024×950 with motion
+  enabled, a CSS-sticky scene advances through these stages as the user scrolls.
+  Shorter screens and reduced-motion users get the normal-flow button experience.
+- **File transfer:** `TransferScene.astro` moves an illustrated file to a remote
+  inbox on demand and announces completion. It uploads nothing. Reduced motion
+  skips the travel animation and shows the received state immediately.
+- **Motion:** GSAP and ScrollTrigger move the hero's spatial layers, the tunnel
+  packet, and closing artwork. Core explanatory copy is never hidden for an
+  entrance effect. Reduced-motion preferences disable scroll choreography.
+- **Installation:** `Install.astro` switches the whole stage between Desktop
+  and Terminal while keeping the independent daemon explanation visible. `#cli`
+  activates the terminal stage, including on direct entry. Mode and OS tabs
+  support arrows/Home/End. Copy buttons select text if clipboard access fails.
+  Both installation paths remain readable without JavaScript.
+- **Desktop availability:** no public `desktop-v*` bundle was found during this
+  redesign. The desktop card links to source and releases instead of inventing
+  a download. When desktop bundles are published, update this card to link to
+  the desktop release, not an unrelated CLI release.
+- **Content:** `src/pages/index.astro` composes the scenes and owns FAQs.
+  Repository links use `https://github.com/Luqueee/mole`.
+- **Social preview:** `public/og.png` is a committed 1200×630 capture of the hero.
+  Regenerate it from the local page with fonts loaded and reduced motion enabled.
+- **SEO and deployment:** canonical URLs, JSON-LD, robots, sitemap, Search
+  Console verification, and environment-gated Umami analytics are preserved.
+  `MOLE_LANDING_URL` continues to determine the public site URL.
