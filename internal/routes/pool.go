@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Luqueee/mole/internal/proxy"
@@ -120,9 +122,19 @@ func isReady(e *nodeEntry) bool {
 
 func wrap(node string, err error) error {
 	if err != nil {
-		return fmt.Errorf("node %s: %w", node, err)
+		return fmt.Errorf("node %s: %w%s", node, err, localNetworkHint(runtime.GOOS, err))
 	}
 	return nil
+}
+
+// localNetworkHint explains the one cause of "no route to host" that is not a
+// network problem: macOS grants LAN access per application, so a daemon the
+// app started can be refused an address a terminal reaches without trouble.
+func localNetworkHint(goos string, err error) string {
+	if goos != "darwin" || !errors.Is(err, syscall.EHOSTUNREACH) {
+		return ""
+	}
+	return " (if other tools reach it, allow mole in System Settings > Privacy & Security > Local Network)"
 }
 
 // Close closes every node tunnel.
