@@ -517,6 +517,10 @@ works on `http://NAME.DOMAIN:ROUTE_PORT`, if the name resolves.
   `X-Forwarded-Host`.
 - `https://` targets are verified against the system roots: a service behind a
   private CA answers `502` until that CA is trusted.
+- On macOS, a route through a node on your LAN (`192.168.x.x`) needs mole to be
+  allowed under System Settings > Privacy & Security > **Local Network**: the
+  permission is per application, so a daemon the desktop app started can get
+  `no route to host` where a terminal does not.
 - Any valid domain works (`.lan` and `.test` are the safe ones). `mole domain
   set` warns about `.local` (mDNS), `.dev`/`.app` (browsers force HTTPS) and
   public domains (they would stop reaching the real site from this machine).

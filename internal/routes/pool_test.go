@@ -2,10 +2,14 @@ package routes
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -133,5 +137,23 @@ func TestPoolCloseClosesTunnelsAndRefusesDials(t *testing.T) {
 	}
 	if _, err := p.DialNode("a", "tcp", "x:1"); err == nil {
 		t.Error("dial after Close succeeded")
+	}
+}
+
+func TestLocalNetworkHint(t *testing.T) {
+	unreachable := fmt.Errorf("ssh dial 192.168.1.2:22: %w", &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.EHOSTUNREACH)})
+	refused := fmt.Errorf("ssh dial: %w", &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)})
+
+	if h := localNetworkHint("darwin", unreachable); !strings.Contains(h, "Local Network") {
+		t.Errorf("darwin + no route to host: hint = %q", h)
+	}
+	for name, h := range map[string]string{
+		"refused on darwin":      localNetworkHint("darwin", refused),
+		"unreachable on linux":   localNetworkHint("linux", unreachable),
+		"unreachable on windows": localNetworkHint("windows", unreachable),
+	} {
+		if h != "" {
+			t.Errorf("%s: hint = %q, want none", name, h)
+		}
 	}
 }
