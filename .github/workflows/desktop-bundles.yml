@@ -80,6 +80,8 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
+          # The runner's Azure mirror can stall large GTK/WebKit downloads.
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libfuse2
 
