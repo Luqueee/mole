@@ -4,6 +4,7 @@ includes:
   common: ../Taskfile.yml
 
 vars:
+  MOLE_DESKTOP_ID: dev.luqueee.mole
   # Signing configuration - edit these values for your project
   # PGP_KEY: "path/to/signing-key.asc"
   # SIGN_ROLE: "builder"  # Options: origin, maint, archive, builder
@@ -115,6 +116,9 @@ tasks:
     deps:
       - task: build
       - task: generate:dotdesktop
+        vars:
+          EXEC: '{{.APP_NAME}}'
+          OUTPUTFILE: '{{.ROOT_DIR}}/build/linux/appimage/{{.MOLE_DESKTOP_ID}}.desktop'
     cmds:
       - cp "{{.APP_BINARY}}" "{{.APP_NAME}}"
       - cp ../../appicon.png "{{.APP_NAME}}.png"
@@ -123,7 +127,7 @@ tasks:
       APP_NAME: '{{.APP_NAME}}'
       APP_BINARY: '../../../bin/{{.APP_NAME}}'
       ICON: '{{.APP_NAME}}.png'
-      DESKTOP_FILE: '../{{.APP_NAME}}.desktop'
+      DESKTOP_FILE: '{{.MOLE_DESKTOP_ID}}.desktop'
       OUTPUT_DIR: '../../../bin'
 
   create:deb:
@@ -170,13 +174,13 @@ tasks:
     dir: build
     cmds:
       - mkdir -p {{.ROOT_DIR}}/build/linux/appimage
-      - wails3 generate .desktop -name "{{.APP_NAME}}" -exec "{{.EXEC}}" -icon "{{.ICON}}" -outputfile "{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop" -categories "{{.CATEGORIES}}"
+      - wails3 generate .desktop -name "Mole" -exec "{{.EXEC}}" -icon "{{.ICON}}" -outputfile "{{.OUTPUTFILE}}" -categories "{{.CATEGORIES}}" -comment "Desktop control panel for mole SSH tunnels" -keywords "SSH;Tunnel;Development;"
     vars:
       APP_NAME: '{{.APP_NAME}}'
-      EXEC: '{{.APP_NAME}}'
+      EXEC: '{{.EXEC | default (printf "/usr/lib/%s/%s" .APP_NAME .APP_NAME)}}'
       ICON: '{{.APP_NAME}}'
       CATEGORIES: 'Development;'
-      OUTPUTFILE: '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'
+      OUTPUTFILE: '{{.OUTPUTFILE | default (printf "%s/build/linux/%s.desktop" .ROOT_DIR .MOLE_DESKTOP_ID)}}'
 
   run:
     cmds:

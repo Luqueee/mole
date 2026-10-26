@@ -124,7 +124,7 @@ func runDNSMac(action, configPath string) int {
 	}
 	_ = exec.Command("launchctl", "bootout", "system/"+macLabel).Run() // not loaded is fine
 	if out, err := exec.Command("launchctl", "bootstrap", "system", macPlistPath).CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: LaunchDaemon not loaded (%v: %s); the redirect will not survive a reboot\n", err, strings.TrimSpace(string(out)))
+		return macFail(fmt.Errorf("loading the DNS LaunchDaemon: %v\n%s", err, strings.TrimSpace(string(out))))
 	}
 	_ = exec.Command("dscacheutil", "-flushcache").Run()
 	_ = exec.Command("killall", "-HUP", "mDNSResponder").Run()

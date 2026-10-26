@@ -1,59 +1,85 @@
-# Welcome to Your New Wails3 Project!
+# Mole desktop
 
-Congratulations on generating your Wails3 application! This README will guide you through the next steps to get your project up and running.
+The desktop app controls the Mole SSH forwarder. Run it as your normal user,
+never with `sudo`. The Setup tab installs the bundled CLI into a per-user
+location; it does not require an administrator.
 
-## Getting Started
+## Linux installation and window integration
 
-1. Navigate to your project directory in the terminal.
+The Debian, RPM and Arch packages install the GUI at `/usr/lib/mole/mole`,
+outside `PATH`, because the CLI owns the `mole` command. Their desktop entry is
+`dev.luqueee.mole.desktop` and executes that absolute path. The GTK application
+ID matches the entry so Wayland desktops can associate the window, taskbar and
+icon correctly. AppImage uses its own entry with a bundle-relative executable;
+it must not reuse the system-package entry.
 
-2. To run your application in development mode, use the following command:
+The Linux tasks use `MOLE_DESKTOP_ID` for the launcher identity, separate from
+Android's `APP_ID`. CI invokes the Debian and AppImage packaging tasks in
+separate Wails commands so both artifacts are built.
 
-   ```
-   wails3 dev
-   ```
+System packages require the package manager's usual installation permission.
+The AppImage can be run from a user-owned directory without installing a system
+package. Linux runtime requirements are GTK 4 and WebKitGTK 6.0 (Debian 13+ or
+Ubuntu 24.04+).
 
-   This will start your application and enable hot-reloading for both frontend and backend changes.
+Windows, macOS and Linux use native window decorations. On Linux their appearance
+is controlled by the desktop environment and window manager, not a hard-coded
+distribution theme. The application's content retains the Mole theme.
 
-3. To build your application for production, use:
+## Optional system DNS
 
-   ```
-   wails3 build
-   ```
+Ordinary port forwarding and named HTTP routes under a `.localhost` domain work
+without administrator access. In Proxy, set a domain such as `dev.localhost`,
+add a route such as `web -> 3000`, and open `http://web.dev.localhost:7080` (or
+your configured `route_port`). Localhost-only configurations start the route
+proxy without binding the system DNS stub. The app reports DNS as **NOT REQUIRED**.
 
-   This will create a production-ready executable in the `build` directory.
+Custom domains such as `dev.lan` require system DNS integration for automatic
+name resolution. The Proxy tab offers this separately, using Polkit on Linux
+(`pkexec`) or the system authorization dialog on macOS. Only the DNS command is
+elevated; the GUI, CLI installation and daemon remain user processes. Cancelling
+leaves the app usable. After installation, an already-running daemon is restarted
+with the explicit user configuration; a stopped daemon stays stopped. Failed
+installation or reload is reported rather than shown as success.
 
-## Exploring Wails3 Features
+Without system DNS, the app does not offer broken OPEN links for custom domains.
+Use `.localhost` routes or the ordinary forwarded-port URLs instead. Remote
+wildcard split DNS (for example every name under `kena.lan`) still needs the
+system integration; `.localhost` aliases do not change the remote DNS.
 
-Now that you have your project set up, it's time to explore the features that Wails3 offers:
+## Development and packaging
 
-1. **Check out the examples**: The best way to learn is by example. Visit the `examples` directory in the `v3/examples` directory to see various sample applications.
+Use Go 1.26.4+, Node.js and Wails CLI `v3.0.0-beta.34`. Native Linux builds also
+need `libgtk-4-dev` and `libwebkitgtk-6.0-dev`.
 
-2. **Run an example**: To run any of the examples, navigate to the example's directory and use:
+From `desktop/`:
 
-   ```
-   go run .
-   ```
+```sh
+wails3 task bundle:cli
+wails3 build
+wails3 task linux:create:deb
+wails3 task linux:create:appimage
+```
 
-   Note: Some examples may be under development during the alpha phase.
+For development, run `wails3 dev`. The existing `build:server` task exposes the
+same backend/frontend over HTTP for browser-based inspection.
 
-3. **Explore the documentation**: Visit the [Wails3 documentation](https://v3.wails.io/) for in-depth guides and API references.
+## Branding assets
 
-4. **Join the community**: Have questions or want to share your progress? Join the [Wails Discord](https://discord.gg/JDdSxwjhGf) or visit the [Wails discussions on GitHub](https://github.com/wailsapp/wails/discussions).
+The canonical icon is `../landing/public/mole-mark.png`, shared with the landing
+page. `build/appicon-128.png` is its exact package-size copy. The larger app icon,
+tray images and Icon Composer source are checked-in derivatives, so normal
+builds do not require ImageMagick.
 
-## Project Structure
+When intentionally changing the mark, regenerate the derivatives from `desktop/`
+with ImageMagick available, then regenerate the platform icons:
 
-Take a moment to familiarize yourself with your project structure:
+```sh
+wails3 task common:generate:brand-assets
+wails3 task common:generate:icons
+```
 
-- `frontend/`: Contains your frontend code (HTML, CSS, JavaScript/TypeScript)
-- `main.go`: The entry point of your Go backend
-- `app.go`: Define your application structure and methods here
-- `wails.json`: Configuration file for your Wails project
-
-## Next Steps
-
-1. Modify the frontend in the `frontend/` directory to create your desired UI.
-2. Add backend functionality in `main.go`.
-3. Use `wails3 dev` to see your changes in real-time.
-4. When ready, build your application with `wails3 build`.
-
-Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+Wails generates Windows ICO and macOS ICNS on supported build hosts. The compiled
+macOS `Assets.car` is a build artifact, generated from the same Icon Composer
+source on macOS 26+; it is not checked in, so older builds fall back to the
+branded ICNS rather than shipping an obsolete asset catalog.

@@ -439,6 +439,10 @@ func runOut(timeout time.Duration, name string, args ...string) (string, error) 
 }
 
 func doctorDomains(rep *reporter, cfg *config.Config, live bool) {
+	if len(cfg.Domains) > 0 && !needsDNSStub(cfg.Domains) {
+		rep.add(info("system DNS", "not required for .localhost routes; use the route proxy port"))
+		return
+	}
 	if runtime.GOOS != "linux" {
 		rep.add(info("split DNS", "only supported on Linux"))
 		return
@@ -593,6 +597,10 @@ chromium:
 // resolver hands out a virtual IP, and the domain ports connect.
 func doctorName(rep *reporter, cfg *config.Config, p sshProbe, name string) {
 	title := name
+	if strings.HasSuffix(strings.ToLower(name), ".localhost") {
+		rep.add(info(title, fmt.Sprintf("localhost route: http://%s:%d (no system DNS required)", name, cfg.RoutePortOrDefault())))
+		return
+	}
 	if p != nil {
 		out, err := p.Run("getent ahosts " + shellQuote(name))
 		if errors.Is(err, errProbeTimeout) {

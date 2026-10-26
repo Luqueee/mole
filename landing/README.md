@@ -21,6 +21,10 @@ pnpm lint        # eslint
 pnpm format      # prettier
 ```
 
+ESLint checks authored JavaScript and TypeScript. The minified third-party
+libraries in `public/vendor/` are distributed unchanged and excluded from lint;
+the source rules remain enabled.
+
 ## Deploy
 
 The site is self-hosted on the `websites` box (LXC 300 on px2), the same one

@@ -19,10 +19,10 @@ release: "1"
 contents:
   - src: "./bin/mole"
     dst: "/usr/lib/mole/mole" # off PATH: the mole CLI owns the name
-  - src: "./build/appicon.png"
+  - src: "./build/appicon-128.png"
     dst: "/usr/share/icons/hicolor/128x128/apps/mole.png"
-  - src: "./build/linux/mole.desktop"
-    dst: "/usr/share/applications/mole.desktop"
+  - src: "./build/linux/dev.luqueee.mole.desktop"
+    dst: "/usr/share/applications/dev.luqueee.mole.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

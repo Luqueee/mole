@@ -119,6 +119,7 @@ export default function ProxyPage() {
   const submitOnEnter = (e: React.KeyboardEvent) => e.key === "Enter" && busy === "" && addRoute();
 
   const dns = info?.dns;
+  const rootless = !!info?.domains.length && info.domains.every((d) => d === "localhost" || d.endsWith(".localhost"));
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <SectionHead title="DOMAIN" hint="NAMES FOR REMOTE SERVICES LIVE UNDER IT" />
@@ -135,15 +136,16 @@ export default function ProxyPage() {
         {info?.warning && <div className="mt-2 text-warn">{info.warning}</div>}
       </div>
 
-      <SectionHead title="DNS" hint="MAKES THE SYSTEM RESOLVE THE DOMAIN THROUGH MOLE" />
+      <SectionHead title="DNS" hint="OPTIONAL SYSTEM-WIDE NAME RESOLUTION; NEEDS ADMIN AUTH" />
       <div className="flex items-center border-b border-line px-5 py-4">
-        <span className={`mr-4 size-2 ${dns?.installed ? "bg-live" : "bg-faint"}`} />
-        <span className="w-48 font-display text-2xl font-bold">{dns?.installed ? "INSTALLED" : dns?.supported === false ? "UNSUPPORTED" : "NOT INSTALLED"}</span>
+        <span className={`mr-4 size-2 ${rootless || dns?.installed ? "bg-live" : "bg-faint"}`} />
+        <span className="w-48 font-display text-2xl font-bold">{rootless ? "NOT REQUIRED" : dns?.installed ? "INSTALLED" : dns?.supported === false ? "UNSUPPORTED" : "NOT INSTALLED"}</span>
         <span className="flex-1 text-xs text-dim">
-          {dns?.installed ? "Routes open without a port." : dns?.detail || ""}
-          {dns?.supported && !dns.installed && domain && <span className="text-faint"> · ASKS FOR YOUR PASSWORD ONCE</span>}
+          {rootless ? `Localhost routes use port ${info?.routePort}. No system changes or administrator access needed.` : dns?.installed ? "Routes open without a port." : dns?.detail || "System DNS is not configured."}
+          {!rootless && !dns?.installed && <span className="text-faint"> · ROOTLESS: use a .localhost domain; other domains require optional system DNS setup.</span>}
+          {!rootless && dns?.supported && !dns.installed && domain && <span className="text-faint"> · ADMIN AUTHENTICATION DOES NOT REQUIRE RUNNING MOLE AS ROOT</span>}
         </span>
-        {dns?.supported && domain && (
+        {!rootless && dns?.supported && domain && (
           <div className="no-drag flex">
             <button disabled={busy !== ""} onClick={() => act("dns", dns.installed ? "reinstalled" : "installed", api.dnsInstall)} className="border border-line px-5 py-2 text-[11px] tracking-[0.2em] transition enabled:hover:bg-foreground enabled:hover:text-background disabled:opacity-40">
               {busy === "dns" ? "WORKING…" : dns.installed ? "REINSTALL" : "INSTALL"}
@@ -203,7 +205,7 @@ export default function ProxyPage() {
             {isLoose(r.target) && <span title="The certificate is not checked" className="border border-warn px-2 py-0.5 text-[10px] tracking-[0.2em] text-warn">UNVERIFIED</span>}
             {pretty(r.target)}
           </span>
-          <button onClick={() => act("open", "", () => api.routeOpen(r.name))} title={r.url} className="no-drag mr-6 flex items-center gap-2 text-[10px] tracking-[0.2em] text-dim transition hover:text-foreground">
+          <button disabled={!r.url || busy !== ""} onClick={() => act("open", "", () => api.routeOpen(r.name))} title={r.url || "System DNS is not installed; use a .localhost domain for rootless access"} className="no-drag mr-6 flex items-center gap-2 text-[10px] tracking-[0.2em] text-dim transition enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
             OPEN <ExternalLink size={13} />
           </button>
           <button aria-label={`Remove route ${r.name}`} onClick={() => act("route", `− ${r.name}`, () => api.routeRemove(r.name))} className="no-drag p-1 text-faint transition hover:text-bad">

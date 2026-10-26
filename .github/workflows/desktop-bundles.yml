@@ -44,7 +44,7 @@ jobs:
               desktop/bin/*installer.exe
           - name: Linux
             os: ubuntu-latest
-            task: linux:create:deb linux:create:appimage
+            task: linux:create:deb
             files: |
               desktop/bin/*.deb
               desktop/bin/*.AppImage
@@ -80,6 +80,8 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
+          # The runner's Azure mirror can stall large GTK/WebKit downloads.
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libfuse2
 
@@ -106,6 +108,10 @@ jobs:
 
       - name: Bundle
         run: wails3 task ${{ matrix.task }}
+
+      - name: Bundle Linux AppImage
+        if: runner.os == 'Linux'
+        run: wails3 task linux:create:appimage
 
       - name: Upload bundles
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

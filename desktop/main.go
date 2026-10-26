@@ -17,9 +17,10 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main function serves as the application's entry point. It initializes the application, creates a window,
-// and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
-// logs any error that might occur.
+//go:embed build/appicon.png
+var appIcon []byte
+
+// The desktop shell owns window decorations; only the webview content is themed.
 func main() {
 
 	// Create a new Wails application by providing the necessary options.
@@ -31,6 +32,10 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Mole",
 		Description: "Desktop control panel for mole",
+		Icon:        appIcon,
+		Linux: application.LinuxOptions{
+			ApplicationID: "dev.luqueee.mole",
+		},
 		Services: []application.Service{
 			application.NewService(svc),
 		},
@@ -42,23 +47,13 @@ func main() {
 		},
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "mole",
-		// Window sized to the golden ratio (1000 / 618 ≈ 1.618).
-		Width:     1180,
-		Height:    760,
-		MinWidth:  980,
-		MinHeight: 640,
-		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropNormal,
-			TitleBar:                application.MacTitleBarHiddenInset,
-		},
+		Title:            "Mole",
+		Width:            1180,
+		Height:           760,
+		MinWidth:         980,
+		MinHeight:        640,
+		Frameless:        false,
 		BackgroundColour: application.NewRGB(10, 10, 10),
 		URL:              "/",
 		// Files dropped on the Transfers tab's drop zone are sent to the remote.
