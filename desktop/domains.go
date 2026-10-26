@@ -52,6 +52,7 @@ const (
 	macResolverDir    = "/etc/resolver"
 	macResolverMarker = "# managed by mole"
 	macAnchorFile     = "/etc/pf.anchors/mole"
+	macLaunchDaemon   = "/Library/LaunchDaemons/dev.mole.dns.plist"
 	linuxNftFile      = "/etc/mole-dns.nft"
 	linuxUnitFile     = "/etc/systemd/system/mole-dns.service"
 )
@@ -81,6 +82,9 @@ func dnsStateAt(goos, root string, domains []string, routePort int) DNSState {
 		case !strings.Contains(string(rules), fmt.Sprintf("-> 127.0.0.1 port %d\n", routePort)):
 			missing = append(missing, fmt.Sprintf("pf redirect to port %d (the installed one points at another port)", routePort))
 		}
+		if _, err := os.Stat(filepath.Join(root, macLaunchDaemon)); err != nil {
+			missing = append(missing, "DNS LaunchDaemon")
+		}
 		st.Installed = len(missing) == 0
 		if !st.Installed {
 			st.Detail = "missing: " + strings.Join(missing, ", ")
@@ -93,27 +97,46 @@ func dnsStateAt(goos, root string, domains []string, routePort int) DNSState {
 			return st
 		}
 		nft, nftErr := os.ReadFile(filepath.Join(root, linuxNftFile))
-		_, unitErr := os.Stat(filepath.Join(root, linuxUnitFile))
+		unit, unitErr := os.ReadFile(filepath.Join(root, linuxUnitFile))
 		switch {
 		case nftErr != nil || unitErr != nil:
 			st.Detail = "mole-dns.service is not installed"
 		case !strings.Contains(string(nft), fmt.Sprintf("dnat to 127.0.0.1:%d\n", routePort)):
 			st.Detail = fmt.Sprintf("the installed redirect does not point at port %d", routePort)
 		default:
+			unitFields := strings.Fields(string(unit))
+			for _, domain := range domains {
+				want := "~" + domain
+				found := false
+				for _, field := range unitFields {
+					if field == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					st.Detail = "mole-dns.service does not route the current domains; reinstall DNS"
+					return st
+				}
+			}
 			st.Installed = true
 		}
 		return st
 	}
-	return DNSState{Detail: "not supported on " + goos + " yet: use the port URLs"}
+	return DNSState{Detail: "system DNS setup is not supported on " + goos + "; use a .localhost domain for rootless access"}
 }
 
-// routeURL is where a browser reaches a route: no port once the DNS install
-// has redirected port 80, the route proxy's own port before that.
+// routeURL uses the loopback route listener directly only when the host is
+// guaranteed to resolve locally. Other custom names need system DNS; showing
+// them with a port does not help because the proxy selects routes by Host.
 func routeURL(host string, installed bool, routePort int) string {
+	if strings.HasSuffix(strings.ToLower(host), ".localhost") {
+		return fmt.Sprintf("http://%s:%d", host, routePort)
+	}
 	if installed {
 		return "http://" + host
 	}
-	return fmt.Sprintf("http://%s:%d", host, routePort)
+	return ""
 }
 
 // GetDomains reports the domain, its routes (live when the daemon is up) and
@@ -131,6 +154,18 @@ func (m *MoleService) GetDomains() DomainInfo {
 		info.Warning = config.DomainAdvice(cfg.Domains[0])
 	}
 	info.DNS = dnsStateAt(runtime.GOOS, "", cfg.Domains, info.RoutePort)
+	if runtime.GOOS == "linux" && info.DNS.Installed {
+		if err := exec.Command("systemctl", "is-active", "--quiet", "mole-dns.service").Run(); err != nil {
+			info.DNS.Installed = false
+			info.DNS.Detail = "mole-dns.service is not active"
+		}
+	}
+	if runtime.GOOS == "darwin" && info.DNS.Installed {
+		if err := exec.Command("launchctl", "print", "system/dev.mole.dns").Run(); err != nil {
+			info.DNS.Installed = false
+			info.DNS.Detail = "DNS LaunchDaemon is not active"
+		}
+	}
 
 	list := routes.NewTable(cfg.Domains, cfg.Routes).List()
 	if cfg.AdminAddr != "" {
@@ -202,9 +237,13 @@ func (m *MoleService) RemoveRoute(name string) error {
 // URL, so the page cannot make the app open an arbitrary address.
 func (m *MoleService) OpenRoute(name string) error {
 	for _, r := range m.GetDomains().Routes {
-		if r.Name == name && r.URL != "" {
-			return openExternal(r.URL)
+		if r.Name != name {
+			continue
 		}
+		if r.URL == "" {
+			return fmt.Errorf("cannot open %q: system DNS is not installed; use a .localhost domain for rootless access", name)
+		}
+		return openExternal(r.URL)
 	}
 	return fmt.Errorf("no route named %q", name)
 }
@@ -238,8 +277,9 @@ func (m *MoleService) dnsAction(action string) error {
 	if err != nil {
 		return err
 	}
-	// root does not see the user's config: name it explicitly.
-	_, path, err := loadConfig()
+	// The privileged process must use the user's config explicitly. Keep its
+	// loaded admin address so install can reload an already-running daemon.
+	cfg, path, err := loadConfig()
 	if err != nil {
 		return err
 	}
@@ -254,12 +294,30 @@ func (m *MoleService) dnsAction(action string) error {
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(out.String())
-		if strings.Contains(msg, "User canceled") {
+		if strings.Contains(strings.ToLower(msg), "user canceled") || (exitCode(err) == 126 && runtime.GOOS == "linux") {
 			return fmt.Errorf("cancelled")
+		}
+		if msg == "" {
+			msg = err.Error()
 		}
 		return fmt.Errorf("mole dns %s: %s", action, msg)
 	}
+	if action == "install" && cfg.AdminAddr != "" {
+		if _, up := m.liveRoutes(cfg.AdminAddr); up {
+			if err := m.mole("restart", "-config", path); err != nil {
+				return fmt.Errorf("DNS was installed, but reloading the running mole daemon failed: %w", err)
+			}
+		}
+	}
 	return nil
+}
+
+// exitCode returns -1 when the process did not return an exit status.
+func exitCode(err error) int {
+	if e, ok := err.(*exec.ExitError); ok {
+		return e.ExitCode()
+	}
+	return -1
 }
 
 // privilegedCommand wraps argv so it runs as root, asking through the
@@ -271,7 +329,7 @@ func privilegedCommand(ctx context.Context, goos string, argv []string) (*exec.C
 		return exec.CommandContext(ctx, "osascript", "-e", script), nil
 	case "linux":
 		if _, err := exec.LookPath("pkexec"); err != nil {
-			return nil, fmt.Errorf("pkexec not found: run `sudo mole dns install -config PATH` in a terminal")
+			return nil, fmt.Errorf("pkexec not found: system DNS setup needs pkexec; use a .localhost domain for rootless access")
 		}
 		return exec.CommandContext(ctx, "pkexec", argv...), nil
 	}

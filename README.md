@@ -512,6 +512,25 @@ sudo mole dns install -config ~/.config/mole/config.yaml   # once: make the OS r
 The desktop app does all of it in the **Proxy** tab (domain, routes, a button per
 machine, HTTP/HTTPS, and the DNS install through the system password dialog).
 
+The app and CLI run as your normal user. System DNS is optional and asks for
+administrator authorization only when you enable it; do not run the GUI as
+root. After installing DNS, the app reloads an already-running daemon with the
+user's explicit configuration.
+
+For named routes without administrator access, use a `.localhost` domain:
+
+```bash
+mole domain set dev.localhost
+mole route add web 3000
+mole restart
+# Open http://web.dev.localhost:7080 (or your configured route_port).
+```
+
+Localhost-only configurations need no DNS stub or system changes. Browsers
+resolve the name to loopback and the proxy uses its Host header to choose the
+remote service. This is an alias for an explicit route, not transparent access
+to every name in a remote domain.
+
 A **target** is where the remote reaches the service:
 
 | Target | Meaning |
@@ -524,8 +543,9 @@ A **target** is where the remote reaches the service:
 How it works: a DNS stub answers `*.dev.lan` routes with `127.77.0.1`; the OS is
 pointed at the stub for that domain only (`sudo mole dns install`), and port 80
 of that one address is redirected to the proxy (`route_port`, default `7080`).
-Plain `localhost:80` is never captured. Without the install the proxy still
-works on `http://NAME.DOMAIN:ROUTE_PORT`, if the name resolves.
+Plain `localhost:80` is never captured. Without the install, use `.localhost`
+routes with their explicit proxy port. The app does not offer OPEN links for
+custom names whose required system DNS integration is missing.
 
 - The service receives its own address as `Host` (dev servers such as Vite or
   Ollama reject names they do not know); the name you typed travels in
@@ -714,7 +734,7 @@ mole version · mole help
 | `push`           | rule[] | `[]`                 | Local services exposed on the remote (`local`, optional `remote`, optional `bind`; default bind `127.0.0.1`) |
 | `transfer`       | object | see [Send files](#send-files-between-the-two-machines) | `inbox`, `receive`, `accept`, `port`, `max_size_mb` |
 | `nodes`          | map    | `{}`                 | Other machines to manage (`remote`, optional `ssh_port`, `bin`, `insecure`); see [Manage other machines](#manage-other-machines-nodes) |
-| `domains`        | string[] | `[]`               | DNS suffixes (e.g. `kena.lan`) resolved **on the remote**; needs `sudo mole dns install` |
+| `domains`        | string[] | `[]`               | DNS suffixes (e.g. `kena.lan`); transparent remote resolution needs system DNS, while `.localhost` named routes work without it |
 | `domain_ports`   | int[]  | `[80,443]`           | Ports forwarded for every name under `domains` (1–45535) |
 | `routes`         | map    | `{}`                 | Named services: `NAME: TARGET` (`3000`, `host:port`, `admin.corp`, `https://…`, `@node:port`); see [Name remote services](#name-remote-services-proxy) |
 | `route_port`     | int    | `7080`               | Local port of the route proxy (1024–65535); `dns install` redirects port 80 to it |

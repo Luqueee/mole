@@ -47,3 +47,24 @@ func TestRouteManagerSetRoute(t *testing.T) {
 		t.Error("a route to an unknown node was stored")
 	}
 }
+
+func TestNeedsDNSStub(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		domains []string
+		want    bool
+	}{
+		{"none", nil, false},
+		{"localhost", []string{"localhost"}, false},
+		{"local routes", []string{"dev.localhost", "tools.localhost"}, false},
+		{"system DNS", []string{"dev.lan"}, true},
+		{"mixed", []string{"dev.localhost", "dev.lan"}, true},
+		{"suffix boundary", []string{"notlocalhost", "localhost.example"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := needsDNSStub(tc.domains); got != tc.want {
+				t.Errorf("needsDNSStub(%q) = %v, want %v", tc.domains, got, tc.want)
+			}
+		})
+	}
+}

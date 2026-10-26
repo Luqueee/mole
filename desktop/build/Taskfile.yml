@@ -190,8 +190,29 @@ tasks:
     cmds:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
+  generate:brand-assets:
+    summary: Manually regenerates checked-in desktop assets from the landing mark (requires ImageMagick)
+    run: once
+    dir: build
+    sources:
+      - "../../landing/public/mole-mark.png"
+      - "appicon.png"
+      - "appicon-128.png"
+      - "appicon.icon/Assets/mole.png"
+      - "tray/color.png"
+      - "tray/template.png"
+    preconditions:
+      - sh: command -v magick >/dev/null 2>&1
+        msg: "ImageMagick is required to regenerate desktop icon assets."
+    cmds:
+      - cp ../../landing/public/mole-mark.png appicon-128.png
+      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 1024x1024 appicon.png
+      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 1024x1024 appicon.icon/Assets/mole.png
+      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 tray/color.png
+      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 -channel RGB -evaluate set 100% +channel tray/template.png
+
   generate:icons:
-    summary: Generates Windows `.ico` and Mac `.icns` from an image; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` from a `.icon` file (skipped on other platforms).
+    summary: Generates Windows `.ico` and Mac `.icns` from the checked-in branded desktop icon; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` (skipped on other platforms).
     run: once
     dir: build
     sources:

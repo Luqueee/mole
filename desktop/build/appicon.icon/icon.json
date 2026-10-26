@@ -1,6 +1,6 @@
 {
   "fill": {
-    "solid": "srgb:0.93333,0.90980,0.86275,1.00000"
+    "solid": "srgb:0.00000,0.00000,0.00000,0.00000"
   },
   "groups": [
     {
@@ -9,7 +9,7 @@
           "image-name": "mole.png",
           "name": "mole",
           "position": {
-            "scale": 0.8,
+            "scale": 1.0,
             "translation-in-points": [
               0.0,
               0.0

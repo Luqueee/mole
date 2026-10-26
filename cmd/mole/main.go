@@ -311,30 +311,10 @@ Either -remote or a config file with 'remote:' is required.`)
 	pushFwd.start(cfg.Push)
 	go hub.enableAtStart()
 
-	// Split-DNS: names under cfg.Domains resolve to virtual IPs and are
-	// forwarded by name, so the remote does the real DNS resolution.
+	// The Host-routing proxy also works without system DNS under .localhost.
 	var routeCtl *routeManager
 	if len(cfg.Domains) > 0 {
-		mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, stats.Hooks(proxy.DirPull), log)
-		defer mesh.Close()
-		stubAddr := meshdns.StubListenAddr()
-		pc, err := net.ListenPacket("udp", stubAddr)
-		if err != nil {
-			log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
-			return 1
-		}
-		defer pc.Close()
-		tl, err := net.Listen("tcp", stubAddr)
-		if err != nil {
-			log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
-			return 1
-		}
-		defer tl.Close()
-
-		// Named routes: the stub answers 127.0.0.1 for them and a Host-routing
-		// proxy forwards each request to its service on the remote.
 		table := routes.NewTable(cfg.Domains, cfg.Routes)
-		mesh.SetRoutes(table)
 		// Routes to other nodes go through a tunnel of their own, opened the
 		// first time one is used; the primary remote reuses mgr.
 		var pool *routes.Pool
@@ -356,9 +336,27 @@ Either -remote or a config file with 'remote:' is required.`)
 			log.Info("route proxy listening", "addr", rl.Addr().String(), "routes", len(cfg.Routes))
 		}
 
-		go mesh.ServeUDP(pc)
-		go mesh.ServeTCP(tl)
-		log.Info("dns stub listening", "addr", stubAddr, "domains", cfg.Domains, "ports", cfg.DomainPortsOrDefault())
+		if needsDNSStub(cfg.Domains) {
+			mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, stats.Hooks(proxy.DirPull), log)
+			defer mesh.Close()
+			mesh.SetRoutes(table)
+			stubAddr := meshdns.StubListenAddr()
+			pc, err := net.ListenPacket("udp", stubAddr)
+			if err != nil {
+				log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
+				return 1
+			}
+			defer pc.Close()
+			tl, err := net.Listen("tcp", stubAddr)
+			if err != nil {
+				log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
+				return 1
+			}
+			defer tl.Close()
+			go mesh.ServeUDP(pc)
+			go mesh.ServeTCP(tl)
+			log.Info("dns stub listening", "addr", stubAddr, "domains", cfg.Domains, "ports", cfg.DomainPortsOrDefault())
+		}
 	} else if len(cfg.Routes) > 0 {
 		log.Warn("routes: ignored, no domains: configured (`mole domain set NAME`)")
 	}
@@ -438,6 +436,17 @@ Either -remote or a config file with 'remote:' is required.`)
 		_ = adminSrv.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// Localhost names already resolve to loopback in browsers. They need only the
+// unprivileged route listener, not the OS-specific split-DNS address.
+func needsDNSStub(domains []string) bool {
+	for _, domain := range domains {
+		if domain != "localhost" && !strings.HasSuffix(domain, ".localhost") {
+			return true
+		}
+	}
+	return false
 }
 
 // loopbackPort returns the port of a listen address that occupies the
