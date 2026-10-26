@@ -48,12 +48,19 @@ func main() {
 	})
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "Mole",
-		Width:            1180,
-		Height:           760,
-		MinWidth:         980,
-		MinHeight:        640,
-		Frameless:        false,
+		Title:     "Mole",
+		Width:     1180,
+		Height:    760,
+		MinWidth:  980,
+		MinHeight: 640,
+		Frameless: false,
+		// The app header doubles as the title bar: the traffic lights sit inside
+		// it and its .drag region moves the window.
+		Mac: application.MacWindow{
+			InvisibleTitleBarHeight: 50,
+			Backdrop:                application.MacBackdropNormal,
+			TitleBar:                application.MacTitleBarHiddenInset,
+		},
 		BackgroundColour: application.NewRGB(10, 10, 10),
 		URL:              "/",
 		// Files dropped on the Transfers tab's drop zone are sent to the remote.
