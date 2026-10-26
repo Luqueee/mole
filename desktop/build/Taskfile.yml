@@ -206,7 +206,7 @@ tasks:
         msg: "ImageMagick is required to regenerate desktop icon assets."
     cmds:
       - cp ../../landing/public/mole-mark.png appicon-128.png
-      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 1024x1024 appicon.png
+      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 824x824 -background none -gravity center -extent 1024x1024 appicon.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 1024x1024 appicon.icon/Assets/mole.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 tray/color.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 -channel RGB -evaluate set 100% +channel tray/template.png
