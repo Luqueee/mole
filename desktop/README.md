@@ -4,6 +4,23 @@ The desktop app controls the Mole SSH forwarder. Run it as your normal user,
 never with `sudo`. The Setup tab installs the bundled CLI into a per-user
 location; it does not require an administrator.
 
+## SSH agent access
+
+Desktop launchers may not inherit `SSH_AUTH_SOCK` from your terminal. Set
+`IdentityAgent` for the host in your user `~/.ssh/config` to select its agent
+persistently; Mole uses that setting for both the destination and SSH jump
+hosts. For example, if your agent listens at `~/.ssh/agent.sock`:
+
+```sshconfig
+Host dev
+    IdentityAgent ~/.ssh/agent.sock
+```
+
+Use the actual socket provided by your agent. A configured socket overrides
+the inherited environment; `IdentityAgent none` disables the agent for that
+host. No root privileges, application-specific launcher override or private
+key copy is needed.
+
 ## Linux installation and window integration
 
 The Debian, RPM and Arch packages install the GUI at `/usr/lib/mole/mole`,

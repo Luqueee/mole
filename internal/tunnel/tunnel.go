@@ -73,7 +73,7 @@ var dialAgentFunc = dialAgent
 // New constructs a Manager and opens the first SSH connection using the
 // resolved remote (see ResolveRemote).
 func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
-	cfg, agentConn, err := buildSSHConfig(r.User, r.IdentityFiles, r.Addr, insecure, log)
+	cfg, agentConn, err := buildSSHConfig(r, insecure, log)
 	if err != nil {
 		return nil, err
 	}
@@ -545,8 +545,8 @@ func (m *Manager) Close() error {
 	return errors.Join(closeErrs...)
 }
 
-func buildSSHConfig(user string, identityFiles []string, addr string, insecure bool, log *slog.Logger) (*ssh.ClientConfig, net.Conn, error) {
-	methods, agentConn, err := authMethods(identityFiles)
+func buildSSHConfig(remote Remote, insecure bool, log *slog.Logger) (*ssh.ClientConfig, net.Conn, error) {
+	methods, agentConn, err := authMethods(remote.IdentityFiles, remote.IdentityAgent)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -566,13 +566,13 @@ func buildSSHConfig(user string, identityFiles []string, addr string, insecure b
 		if err != nil {
 			return nil, nil, err
 		}
-		hostKeyAlgorithms, err = knownHostKeyAlgorithms(khPath, addr, probeRemote(addr))
+		hostKeyAlgorithms, err = knownHostKeyAlgorithms(khPath, remote.Addr, probeRemote(remote.Addr))
 		if err != nil {
-			return nil, nil, fmt.Errorf("select host-key algorithms for %s: %w", addr, err)
+			return nil, nil, fmt.Errorf("select host-key algorithms for %s: %w", remote.Addr, err)
 		}
 	}
 	config := &ssh.ClientConfig{
-		User:              user,
+		User:              remote.User,
 		Auth:              methods,
 		HostKeyCallback:   hostKey,
 		HostKeyAlgorithms: hostKeyAlgorithms,
@@ -582,7 +582,7 @@ func buildSSHConfig(user string, identityFiles []string, addr string, insecure b
 	return config, agentConn, nil
 }
 
-func authMethods(identityFiles []string) ([]ssh.AuthMethod, net.Conn, error) {
+func authMethods(identityFiles []string, identityAgent string) ([]ssh.AuthMethod, net.Conn, error) {
 	var methods []ssh.AuthMethod
 	var agentConn net.Conn
 
@@ -601,21 +601,28 @@ func authMethods(identityFiles []string) ([]ssh.AuthMethod, net.Conn, error) {
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
 
-	// 1. ssh-agent (preferred).
-	//
-	// dialAgent is OS-specific (see agent_unix.go / agent_windows.go):
-	// it dials a Unix socket on Linux/macOS and a Windows named pipe
-	// on Windows. It fails silently (returns an error) when no agent
-	// is configured, which lets us fall through to direct key files.
-	if conn, err := dialAgentFunc(os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		if signers, err := agent.NewClient(conn).Signers(); err == nil && len(signers) > 0 {
-			methods = append(methods, ssh.PublicKeys(signers...))
-			agentConn = conn
-			// conn stays open for the lifetime of the SSH session —
-			// the ssh.PublicKeys wrapper above retains a reference
-			// and uses it for signing operations.
-		} else {
-			_ = conn.Close()
+	// A host's IdentityAgent overrides the inherited agent socket. An absent
+	// directive retains the platform default, including Windows' OpenSSH pipe.
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	useAgent := true
+	switch {
+	case strings.EqualFold(identityAgent, "none"):
+		useAgent = false
+	case identityAgent == "SSH_AUTH_SOCK":
+		useAgent = sock != ""
+	case identityAgent != "":
+		sock = expandHome(os.ExpandEnv(identityAgent))
+		useAgent = sock != ""
+	}
+	if useAgent {
+		if conn, err := dialAgentFunc(sock); err == nil {
+			if signers, err := agent.NewClient(conn).Signers(); err == nil && len(signers) > 0 {
+				methods = append(methods, ssh.PublicKeys(signers...))
+				agentConn = conn
+				// Signers retain this connection for subsequent SSH handshakes.
+			} else {
+				_ = conn.Close()
+			}
 		}
 	}
 
@@ -869,7 +876,7 @@ func dialRemoteContext(ctx context.Context, remote Remote, config *ssh.ClientCon
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		jumpConfig, agentConn, err := buildSSHConfig(jump.User, jump.IdentityFiles, jump.Addr, insecure, log)
+		jumpConfig, agentConn, err := buildSSHConfig(jump, insecure, log)
 		if err != nil {
 			return nil, err
 		}
@@ -932,6 +939,7 @@ type Remote struct {
 	User          string   // login user
 	Addr          string   // host:port to dial
 	IdentityFiles []string // key files from ssh_config, may be empty
+	IdentityAgent string   // agent socket from ssh_config; "none" disables it
 	ProxyJumps    []Remote // SSH hops, in connection order
 }
 
@@ -940,7 +948,7 @@ type Remote struct {
 //   - A spec containing '@' is parsed directly as user@host[:port].
 //   - Otherwise it's treated as an ssh_config Host alias and resolved
 //     with `ssh -G <alias>`, so ~/.ssh/config directives (HostName,
-//     User, Port, IdentityFile, Include, Match) are honoured. This is
+//     User, Port, IdentityFile, IdentityAgent, Include, Match) are honoured. This is
 //     why a bare alias like "dev" connects to the real host instead of
 //     trying to dial a literal "dev".
 func ResolveRemote(spec string, defaultPort int) (Remote, error) {
@@ -972,7 +980,7 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 		return Remote{}, fmt.Errorf("resolve ssh alias %q via 'ssh -G': %w", alias, err)
 	}
 
-	var host, user, port, proxyJump string
+	var host, user, port, proxyJump, identityAgent string
 	var ids []string
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
@@ -989,6 +997,8 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 			port = fields[1]
 		case "identityfile":
 			ids = append(ids, expandHome(strings.Join(fields[1:], " ")))
+		case "identityagent":
+			identityAgent = strings.Join(fields[1:], " ")
 		case "proxyjump":
 			proxyJump = strings.Join(fields[1:], " ")
 		}
@@ -1007,6 +1017,7 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 		User:          user,
 		Addr:          net.JoinHostPort(host, port),
 		IdentityFiles: ids,
+		IdentityAgent: identityAgent,
 		ProxyJumps:    proxyJumps,
 	}, nil
 }

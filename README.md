@@ -288,6 +288,15 @@ mole up --remote dev@workstation     # explicit user@host[:port]
 mole up --remote dev                 # alias from ~/.ssh/config (resolved via ssh -G)
 ```
 
+For aliases, Mole honours `IdentityAgent` from the effective `ssh -G` config
+for the destination and each `ProxyJump` host. A configured socket takes
+precedence over `SSH_AUTH_SOCK`, so a desktop launch does not need to inherit
+the terminal's environment. Socket paths support `~/` and environment-variable
+expansion; `IdentityAgent SSH_AUTH_SOCK` explicitly uses that variable, and
+`IdentityAgent none` disables agent authentication without disabling key files.
+Without the directive, the existing environment/platform agent default applies.
+The selected agent must already be running with the appropriate keys loaded.
+
 ### Pick the ports
 
 ```bash
