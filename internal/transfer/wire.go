@@ -7,11 +7,16 @@
 // (local to remote) or a TCP connection reached through a push forward
 // (remote to local).
 //
-//	sender   -> {"v":1,"token":"..","to":"sub","files":[{name,size,mode,mtime}...]}\n
-//	receiver -> {"ok":true,"dir":"/abs/inbox/sub"}\n        (or {"ok":false,"error":".."})
+//	sender   -> {"v":1,"token":"..","to":"sub","resume":true,"files":[{name,size,mode,mtime}...]}\n
+//	receiver -> {"ok":true,"dir":"/abs/inbox/sub","offsets":[n,...]}\n   (or {"ok":false,"error":".."})
 //	for each file:
-//	  sender   -> size raw bytes, then the 32-byte SHA-256 of those bytes
+//	  sender   -> size-offset raw bytes, then the 32-byte SHA-256 of ALL size bytes
 //	  receiver -> {"ok":true,"saved":"name (1)","bytes":N}\n
+//
+// offsets (one per file) says how many leading bytes of each file the
+// receiver already holds from an interrupted transfer; it is only sent when
+// the sender asked with resume, so a peer that predates it simply receives
+// every file from the start.
 package transfer
 
 import (
@@ -42,18 +47,20 @@ type FileInfo struct {
 }
 
 type hello struct {
-	V     int        `json:"v"`
-	Token string     `json:"token,omitempty"`
-	To    string     `json:"to,omitempty"`
-	Files []FileInfo `json:"files"`
+	V      int        `json:"v"`
+	Token  string     `json:"token,omitempty"`
+	To     string     `json:"to,omitempty"`
+	Resume bool       `json:"resume,omitempty"`
+	Files  []FileInfo `json:"files"`
 }
 
 type reply struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-	Dir   string `json:"dir,omitempty"`
-	Saved string `json:"saved,omitempty"`
-	Bytes int64  `json:"bytes,omitempty"`
+	OK      bool    `json:"ok"`
+	Error   string  `json:"error,omitempty"`
+	Dir     string  `json:"dir,omitempty"`
+	Saved   string  `json:"saved,omitempty"`
+	Bytes   int64   `json:"bytes,omitempty"`
+	Offsets []int64 `json:"offsets,omitempty"`
 }
 
 // RemoteError is a refusal or failure reported by the other end.

@@ -149,6 +149,7 @@ type progressUI struct {
 	name  string
 	start time.Time
 	last  time.Time
+	base  int64 // bytes already there when the transfer started (a resumed one)
 }
 
 func newProgress(name string) *progressUI {
@@ -164,7 +165,7 @@ func (p *progressUI) update(sent, size int64) {
 	if size > 0 {
 		pct = int(sent * 100 / size)
 	}
-	rate := float64(sent) / max(time.Since(p.start).Seconds(), 0.001)
+	rate := float64(sent-p.base) / max(time.Since(p.start).Seconds(), 0.001)
 	fmt.Fprintf(os.Stderr, "\r\x1b[K  %s  %3d%%  %s/s", p.name, pct, humanSize(int64(rate)))
 }
 

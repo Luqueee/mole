@@ -82,6 +82,8 @@ func main() {
 		os.Exit(runUnpush(args))
 	case "send", "ftp":
 		os.Exit(runSend(args))
+	case "get":
+		os.Exit(runGet(args))
 	case "inbox":
 		os.Exit(runInbox(args))
 	case "recv":
@@ -138,6 +140,7 @@ func printUsage() {
 		{"route", "Name a remote service: a.DOMAIN -> port (route add|rm|ls)"},
 		{"unpush", "Remove a push forward"},
 		{"send", "Send files to the other machine's inbox (picker when no files; alias: ftp)"},
+		{"get", "Download files from another machine over SSH (resumes if interrupted)"},
 		{"inbox", "Where received files land; accept incoming transfers (inbox -h)"},
 		{"node", "Other machines you manage: node add|ls|rm|ping; run a command there with -n NODE"},
 		{"init", "Generate a mole.yaml (interactive; run once per machine)"},
