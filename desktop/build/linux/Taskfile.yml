@@ -4,7 +4,7 @@ includes:
   common: ../Taskfile.yml
 
 vars:
-  APP_ID: dev.luqueee.mole
+  MOLE_DESKTOP_ID: dev.luqueee.mole
   # Signing configuration - edit these values for your project
   # PGP_KEY: "path/to/signing-key.asc"
   # SIGN_ROLE: "builder"  # Options: origin, maint, archive, builder
@@ -118,7 +118,7 @@ tasks:
       - task: generate:dotdesktop
         vars:
           EXEC: '{{.APP_NAME}}'
-          OUTPUTFILE: '{{.ROOT_DIR}}/build/linux/appimage/{{.APP_ID}}.desktop'
+          OUTPUTFILE: '{{.ROOT_DIR}}/build/linux/appimage/{{.MOLE_DESKTOP_ID}}.desktop'
     cmds:
       - cp "{{.APP_BINARY}}" "{{.APP_NAME}}"
       - cp ../../appicon.png "{{.APP_NAME}}.png"
@@ -127,7 +127,7 @@ tasks:
       APP_NAME: '{{.APP_NAME}}'
       APP_BINARY: '../../../bin/{{.APP_NAME}}'
       ICON: '{{.APP_NAME}}.png'
-      DESKTOP_FILE: '{{.APP_ID}}.desktop'
+      DESKTOP_FILE: '{{.MOLE_DESKTOP_ID}}.desktop'
       OUTPUT_DIR: '../../../bin'
 
   create:deb:
@@ -180,7 +180,7 @@ tasks:
       EXEC: '{{.EXEC | default (printf "/usr/lib/%s/%s" .APP_NAME .APP_NAME)}}'
       ICON: '{{.APP_NAME}}'
       CATEGORIES: 'Development;'
-      OUTPUTFILE: '{{.OUTPUTFILE | default (printf "%s/build/linux/%s.desktop" .ROOT_DIR .APP_ID)}}'
+      OUTPUTFILE: '{{.OUTPUTFILE | default (printf "%s/build/linux/%s.desktop" .ROOT_DIR .MOLE_DESKTOP_ID)}}'
 
   run:
     cmds:

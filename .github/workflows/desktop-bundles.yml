@@ -44,7 +44,7 @@ jobs:
               desktop/bin/*installer.exe
           - name: Linux
             os: ubuntu-latest
-            task: linux:create:deb linux:create:appimage
+            task: linux:create:deb
             files: |
               desktop/bin/*.deb
               desktop/bin/*.AppImage
@@ -108,6 +108,10 @@ jobs:
 
       - name: Bundle
         run: wails3 task ${{ matrix.task }}
+
+      - name: Bundle Linux AppImage
+        if: runner.os == 'Linux'
+        run: wails3 task linux:create:appimage
 
       - name: Upload bundles
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

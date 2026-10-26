@@ -13,6 +13,10 @@ ID matches the entry so Wayland desktops can associate the window, taskbar and
 icon correctly. AppImage uses its own entry with a bundle-relative executable;
 it must not reuse the system-package entry.
 
+The Linux tasks use `MOLE_DESKTOP_ID` for the launcher identity, separate from
+Android's `APP_ID`. CI invokes the Debian and AppImage packaging tasks in
+separate Wails commands so both artifacts are built.
+
 System packages require the package manager's usual installation permission.
 The AppImage can be run from a user-owned directory without installing a system
 package. Linux runtime requirements are GTK 4 and WebKitGTK 6.0 (Debian 13+ or
