@@ -39,7 +39,7 @@ import (
 	"github.com/Luqueee/mole/internal/tunnel"
 )
 
-const version = "0.8.2"
+const version = "0.8.3"
 
 func main() {
 	if len(os.Args) < 2 {
