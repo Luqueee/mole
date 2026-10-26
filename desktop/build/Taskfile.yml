@@ -200,7 +200,6 @@ tasks:
       - "appicon-128.png"
       - "appicon.icon/Assets/mole.png"
       - "tray/color.png"
-      - "tray/template.png"
     preconditions:
       - sh: command -v magick >/dev/null 2>&1
         msg: "ImageMagick is required to regenerate desktop icon assets."
@@ -209,7 +208,6 @@ tasks:
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 824x824 -background none -gravity center -extent 1024x1024 appicon.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 1024x1024 appicon.icon/Assets/mole.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 tray/color.png
-      - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 -channel RGB -evaluate set 100% +channel tray/template.png
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from the checked-in branded desktop icon; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` (skipped on other platforms).
