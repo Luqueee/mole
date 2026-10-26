@@ -8,7 +8,7 @@ import (
 )
 
 // dialAgent connects to the user's SSH agent via a Unix domain socket
-// at the path given by SSH_AUTH_SOCK.
+// selected from IdentityAgent or SSH_AUTH_SOCK.
 //
 // On non-Windows platforms the SSH agent is always exposed as a Unix
 // socket; if SSH_AUTH_SOCK is empty the agent is simply unavailable
