@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦫 mole
+# <img src="landing/public/mole-mark.png" alt="" width="64" height="64" align="absmiddle"> mole
 
 **Hit `localhost:3000` as if it were always running — even when the real service lives on another machine.**
 
@@ -9,7 +9,7 @@
 [![Single binary](https://img.shields.io/badge/deploy-single%20static%20binary-2ea043)](#-install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#-license)
 
-<img src="docs/mole-desktop.png" alt="mole desktop app — live tunnel, ports in flight, throughput and connection log" width="920">
+<img src="docs/mole-desktop.gif" alt="mole desktop app — live tunnel and connection log, the Nodes map, and file transfers" width="920">
 
 </div>
 
