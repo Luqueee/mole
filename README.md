@@ -9,6 +9,8 @@
 [![Single binary](https://img.shields.io/badge/deploy-single%20static%20binary-2ea043)](#-install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#-license)
 
+<img src="docs/mole-desktop.png" alt="mole desktop app — live tunnel, ports in flight, throughput and connection log" width="920">
+
 </div>
 
 ---
@@ -519,6 +521,10 @@ Nothing changes for existing setups: with no `nodes:`, mole behaves as before,
 and the config's own `remote:` also works as a node name (`mole -n <remote> ...`).
 Nodes are kept in the user-global config (`mole node add` writes it when no
 config exists), so any project sees them.
+
+<div align="center">
+  <img src="docs/mole-desktop-nodes.png" alt="mole desktop — Nodes tab: a live map of your machines with the state and latency of every link" width="920">
+</div>
 
 The desktop app has a **Nodes** tab for all of it: a map of your machines with
 the state and latency of every link, adding a node (with your `~/.ssh/config`
