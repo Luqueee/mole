@@ -1,15 +1,15 @@
-// Package clip shares a single clipboard image between two mole
-// processes over HTTP. The Mac runs Server; the LXC runs Client.
+// Package clip shares a single clipboard image between two mole processes
+// over HTTP. Server keeps the most recent image and serves it, Client fetches
+// it, and Watcher (macOS only) uploads each new clipboard image to a Server.
 //
-// The transport is a plain HTTP endpoint reachable over a private WireGuard
-// or Tailscale
-// link, not over mole's SSH tunnel: an earlier version of this code
-// tried to wire a reverse forward through tunnel.Manager, but
-// golang.org/x/crypto/ssh does not expose the ListenOn primitive needed
-// to open a remote-side listener, and rolling the tcpip-forward
-// message by hand was rejected as fragile for what is, at heart, a
-// one-shot screenshot push. WireGuard already gives us a private
-// routed path between the two hosts, so we use it directly.
+// The endpoint is plain HTTP with no authentication, so only trusted clients
+// should be able to reach it. The recommended setup keeps the server on
+// loopback (the default) and exposes it on the remote with a push forward,
+// which opens a remote-side listener through tunnel.Manager.Listen over the
+// existing SSH connection; the client on the remote then uses its own
+// loopback address. The server can instead bind a private network address
+// (for example Tailscale or WireGuard), but every host that can reach that
+// address can then read and replace the image.
 package clip
 
 import (

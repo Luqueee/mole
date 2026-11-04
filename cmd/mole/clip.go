@@ -1,5 +1,6 @@
-// mole clip — share clipboard images between a Mac and a remote
-// host (typically an LXC) over a private WireGuard or Tailscale link.
+// mole clip — share clipboard images between a Mac and a remote host.
+// The recommended transport is the SSH tunnel itself: serve on loopback and
+// expose the port on the remote with a push forward (`push: - local: 7777`).
 //
 // Two sub-modes:
 //
@@ -58,7 +59,7 @@ func runClip(args []string) int {
 
 func printClipUsage(w *os.File) {
 	color := cliColor(w)
-	fmt.Fprintf(w, "%s\n\n", cBold("mole clip — share clipboard images over a private WireGuard or Tailscale link", color))
+	fmt.Fprintf(w, "%s\n\n", cBold("mole clip — share clipboard images with the remote", color))
 	fmt.Fprintf(w, "  %s\n", cBold("USAGE", color))
 	fmt.Fprintf(w, "    mole clip %s\n", cDim("<serve|pull> [flags]", color))
 	fmt.Println()
@@ -68,7 +69,7 @@ func printClipUsage(w *os.File) {
 	fmt.Println()
 	fmt.Fprintf(w, "  %s\n", cBold("NOTES", color))
 	fmt.Fprintf(w, "    %s\n", cDim("  serve binds -listen (default "+config.DefaultClipListen+"). The endpoint has no auth;", color))
-	fmt.Fprintf(w, "    %s\n", cDim("  use a private Tailscale/WireGuard address when remote access is required.", color))
+	fmt.Fprintf(w, "    %s\n", cDim("  keep it on loopback and add a push forward (push: - local: 7777) so the remote reaches it through the tunnel.", color))
 	fmt.Fprintf(w, "    %s\n", cDim("  pull prints the image path on stdout and exits. Exit code 3 means", color))
 	fmt.Fprintf(w, "    %s\n", cDim("  'no image on the server yet'.", color))
 }
@@ -131,7 +132,7 @@ Flags:
 	defer ln.Close()
 	effectiveAddr := ln.Addr().String()
 	if isBroadClipBind(effectiveAddr) {
-		log.Warn("clip server has no authentication and is listening on all interfaces", "addr", effectiveAddr, "hint", "use loopback or a private Tailscale/WireGuard address")
+		log.Warn("clip server has no authentication and is listening on all interfaces", "addr", effectiveAddr, "hint", "keep it on loopback and expose it with a push forward (push: - local: 7777)")
 	}
 
 	srv := &http.Server{
