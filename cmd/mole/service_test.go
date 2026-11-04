@@ -220,7 +220,9 @@ func TestLaunchdInstall_FallsBackToLoad(t *testing.T) {
 	if err := l.install(run); err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if last := calls[len(calls)-1]; last != "launchctl load -w /Users/me/Library/LaunchAgents/dev.luqueee.mole.plist" {
+	// The plist path is built with filepath, so derive it the same way: on
+	// Windows (where this test also runs) the separators are backslashes.
+	if last := calls[len(calls)-1]; last != shellJoin([]string{"launchctl", "load", "-w", l.unitPath()}) {
 		t.Errorf("last command = %s, want the legacy load fallback (calls: %q)", last, calls)
 	}
 }
