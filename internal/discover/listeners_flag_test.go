@@ -115,6 +115,103 @@ func TestRemoteListeners(t *testing.T) {
 			wantPorts:         nil,
 			wantAuthoritative: false,
 		},
+		{
+			// ss -H prints nothing on an idle host: the one command whose
+			// empty output is a valid "nothing is listening".
+			name: "ss empty, netstat missing",
+			responses: map[string]fakeResponse{
+				"ss -tlnH": {out: []byte("\n")},
+			},
+			wantPorts:         nil,
+			wantAuthoritative: true,
+		},
+		{
+			// netstat always prints a header, so empty output from it
+			// proves nothing.
+			name: "ss missing, netstat prints nothing",
+			responses: map[string]fakeResponse{
+				"netstat -an -p tcp": {out: []byte("")},
+				"netstat -tln":       {out: []byte("")},
+			},
+			wantPorts:         nil,
+			wantAuthoritative: false,
+		},
+		{
+			// Linux without ss, nothing listening: the header vouches for
+			// the empty table.
+			name: "netstat header only",
+			responses: map[string]fakeResponse{
+				"netstat -tln": {out: []byte(fixtureLinuxNetstatNone)},
+			},
+			wantPorts:         nil,
+			wantAuthoritative: true,
+		},
+		{
+			// macOS: no ss; netstat -an -p tcp prints the BSD table.
+			name: "macOS netstat -an -p tcp",
+			responses: map[string]fakeResponse{
+				"netstat -an -p tcp": {out: []byte(fixtureMacNetstatAN)},
+				"netstat -tln":       {out: []byte(fixtureMacNetstatTLN)},
+			},
+			wantPorts:         []int{3000, 3774, 8080, 57621},
+			wantAuthoritative: true,
+		},
+		{
+			// The confirmed macOS bug: netstat -tln exits 0 with a table
+			// that has no servers in it. It used to be read as an
+			// authoritative empty result, pruning every forward; it must
+			// fall through to probing instead.
+			name: "macOS netstat -tln alone is not authoritative",
+			responses: map[string]fakeResponse{
+				"netstat -an -p tcp": {err: errFakeUnknownCmd},
+				"netstat -tln":       {out: []byte(fixtureMacNetstatTLN)},
+			},
+			wantPorts:         nil,
+			wantAuthoritative: false,
+		},
+		{
+			name: "FreeBSD netstat -an -p tcp",
+			responses: map[string]fakeResponse{
+				"netstat -an -p tcp": {out: []byte(fixtureFreeBSDNetstatAN)},
+			},
+			wantPorts:         []int{22, 5432},
+			wantAuthoritative: true,
+		},
+		{
+			// Windows OpenSSH: ss is not a command; netstat -tln prints
+			// usage; netstat -an -p tcp prints the Windows table.
+			name: "windows netstat -an -p tcp",
+			responses: map[string]fakeResponse{
+				"ss -tlnH":           {out: []byte("'ss' is not recognized as an internal or external command,\r\n"), err: errFakeUnknownCmd},
+				"netstat -an -p tcp": {out: []byte(fixtureWindowsNetstat)},
+				"netstat -tln":       {out: []byte(fixtureWindowsUsage)},
+			},
+			wantPorts:         []int{135, 3000, 5040},
+			wantAuthoritative: true,
+		},
+		{
+			// Every command "succeeds" but prints something that is not a
+			// listener table (a shell that exits 0 on errors, a banner).
+			name: "garbage from every command",
+			responses: map[string]fakeResponse{
+				"ss -tlnH":           {out: []byte("ss : The term 'ss' is not recognized as a cmdlet\n")},
+				"netstat -an -p tcp": {out: []byte(fixtureWindowsLocalised)},
+				"netstat -tln":       {out: []byte(fixtureWindowsUsage)},
+			},
+			wantPorts:         nil,
+			wantAuthoritative: false,
+		},
+		{
+			// ss output with a LISTEN row we cannot read is not trusted;
+			// the next tool's readable table is used instead.
+			name: "unreadable ss output falls through to netstat",
+			responses: map[string]fakeResponse{
+				"ss -tlnH":     {out: []byte("LISTEN 0 4096 somewhere 0.0.0.0:*\n")},
+				"netstat -tln": {out: []byte(netstatSample)},
+			},
+			wantPorts:         []int{3301, 5432, 8080},
+			wantAuthoritative: true,
+		},
 	}
 
 	for _, tt := range tests {

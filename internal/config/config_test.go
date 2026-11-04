@@ -708,3 +708,117 @@ func TestSaveIntoAnEmptyOrCommentOnlyFile(t *testing.T) {
 		t.Fatal("a list at the top level was overwritten")
 	}
 }
+
+func TestParsePortRange(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    PortRange
+		wantErr string
+	}{
+		{in: "", want: PortRange{}},
+		{in: "  ", want: PortRange{}},
+		{in: "1024-49151", want: PortRange{Lo: 1024, Hi: 49151}},
+		{in: " 3000 - 3999 ", want: PortRange{Lo: 3000, Hi: 3999}},
+		{in: "1-65535", want: PortRange{Lo: 1, Hi: 65535}},
+		{in: "8080-8080", want: PortRange{Lo: 8080, Hi: 8080}},
+		{in: "8080", wantErr: "want a range LO-HI"},
+		{in: "abc-100", wantErr: `start "abc" is not a port number`},
+		{in: "100-", wantErr: `end "" is not a port number`},
+		{in: "-100", wantErr: `start "" is not a port number`},
+		{in: "1-2-3", wantErr: `end "2-3" is not a port number`},
+		{in: "0-100", wantErr: "between 1 and 65535"},
+		{in: "1000-70000", wantErr: "between 1 and 65535"},
+		{in: "5000-4000", wantErr: "start 5000 is greater than end 4000"},
+	}
+	for _, tt := range tests {
+		got, err := ParsePortRange(tt.in)
+		if tt.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("ParsePortRange(%q) error = %v, want it to mention %q", tt.in, err, tt.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("ParsePortRange(%q) = %+v, %v; want %+v", tt.in, got, err, tt.want)
+		}
+	}
+}
+
+func TestPortRangeContains(t *testing.T) {
+	var all PortRange
+	for _, p := range []int{1, 22, 49152, 65535} {
+		if !all.Contains(p) {
+			t.Errorf("zero PortRange does not contain %d", p)
+		}
+	}
+	r := PortRange{Lo: 1024, Hi: 49151}
+	for p, want := range map[int]bool{1023: false, 1024: true, 5432: true, 49151: true, 49152: false} {
+		if got := r.Contains(p); got != want {
+			t.Errorf("%v.Contains(%d) = %v, want %v", r, p, got, want)
+		}
+	}
+	if r.String() != "1024-49151" || all.String() != "" {
+		t.Errorf("String() = %q / %q", r.String(), all.String())
+	}
+}
+
+func TestLoad_DiscoverRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mole.yaml")
+	if err := os.WriteFile(path, []byte("remote: dev\ndiscover_range: 1024-49151\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.DiscoverPortRange(); got != (PortRange{Lo: 1024, Hi: 49151}) {
+		t.Errorf("DiscoverPortRange() = %+v", got)
+	}
+
+	// Unset: no filtering, the documented default.
+	if got := Default().DiscoverPortRange(); got != (PortRange{}) || !got.Contains(65000) {
+		t.Errorf("default DiscoverPortRange() = %+v, want the zero range", got)
+	}
+}
+
+func TestLoad_RejectsInvalidDiscoverRange(t *testing.T) {
+	for _, value := range []string{`"8080"`, `"0-100"`, `"9000-3000"`, `"1-99999"`, `"a-b"`, `8080`} {
+		path := filepath.Join(t.TempDir(), "mole.yaml")
+		if err := os.WriteFile(path, []byte("remote: dev\ndiscover_range: "+value+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), "discover_range") {
+			t.Errorf("discover_range: %s: Load error = %v, want a discover_range error", value, err)
+		}
+	}
+}
+
+func TestSave_DiscoverRangeRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mole.yaml")
+	if err := os.WriteFile(path, []byte("remote: dev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DiscoverRange = "3000-9999"
+	if err := Save(path, cfg, "discover_range"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.DiscoverRange != "3000-9999" {
+		t.Errorf("DiscoverRange after round trip = %q", got.DiscoverRange)
+	}
+	// A full snapshot keeps it too.
+	if err := Save(path, got); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Load(path); err != nil || again.DiscoverRange != "3000-9999" {
+		t.Errorf("after full save: %q, %v", again.DiscoverRange, err)
+	}
+}

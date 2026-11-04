@@ -22,8 +22,8 @@ import (
 )
 
 // DefaultClipListen is the least-exposure bind address for the unauthenticated
-// clipboard endpoint. Use an explicit private interface address for remote
-// access over Tailscale or WireGuard.
+// clipboard endpoint. To reach it from the remote, keep it on loopback and add
+// a push forward for the port, so the traffic goes through the SSH tunnel.
 const DefaultClipListen = "127.0.0.1:7777"
 
 // Config holds the runtime configuration for mole.
@@ -66,6 +66,12 @@ type Config struct {
 	// AutoDiscover is enabled. Overrides the built-in defaults.
 	DiscoverPorts []int `yaml:"discover_ports"`
 
+	// DiscoverRange, when set ("LO-HI", inclusive, e.g. "1024-49151"),
+	// limits which listeners found by enumerating the remote are
+	// auto-forwarded. Empty forwards every listener. Ports in Ports or
+	// DiscoverPorts are forwarded regardless; ExcludePorts still applies.
+	DiscoverRange string `yaml:"discover_range"`
+
 	// ExcludePorts are never auto-forwarded (system/reserved ports like
 	// SSH, SMTP, DNS). Auto-discovery skips them. Setting this in the
 	// config replaces the built-in default; an empty list excludes
@@ -87,15 +93,15 @@ type Config struct {
 	// trusted networks for throwaway hosts. Equivalent to `--insecure`.
 	Insecure bool `yaml:"insecure"`
 
-	// ClipURL is the HTTP endpoint of the clip server on the Mac
-	// (e.g. http://100.64.0.10:7777), as reachable from the LXC over
-	// Tailscale or WireGuard. Read by `mole clip pull`.
+	// ClipURL is the HTTP endpoint of the clip server as reachable from this
+	// machine: http://127.0.0.1:7777 when the serving side pushes the port
+	// through the tunnel (recommended). Read by `mole clip pull`.
 	ClipURL string `yaml:"clip_url"`
 
 	// ClipListen is the address the clip server binds on the Mac.
-	// It defaults to loopback because the endpoint has no authentication.
-	// Set it to an explicit private Tailscale or WireGuard address for
-	// remote access. Read by `mole clip serve`.
+	// It defaults to loopback because the endpoint has no authentication;
+	// expose it to the remote with a push forward rather than a network
+	// address. Read by `mole clip serve`.
 	ClipListen string `yaml:"clip_listen"`
 
 	// ClipIntervalMs controls the clipboard poll cadence on the Mac.
@@ -472,6 +478,9 @@ func Load(path string) (*Config, error) {
 		}
 		cfg.Routes[name] = norm
 	}
+	if _, err := ParsePortRange(cfg.DiscoverRange); err != nil {
+		return nil, fmt.Errorf("parse config %q: discover_range: %w", path, err)
+	}
 	if err := cfg.Transfer.Validate(); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
@@ -621,7 +630,7 @@ func stripYAMLComments(data []byte) []byte {
 
 var configFields = map[string]bool{
 	"remote": true, "ports": true, "push": true, "domains": true, "domain_ports": true, "routes": true, "route_port": true, "auto_discover": true,
-	"discover_ports": true, "exclude_ports": true, "admin_addr": true,
+	"discover_ports": true, "discover_range": true, "exclude_ports": true, "admin_addr": true,
 	"log_level": true, "ssh_port": true, "insecure": true,
 	"clip_url": true, "clip_listen": true, "clip_interval_ms": true,
 	"transfer": true, "nodes": true,
@@ -678,6 +687,7 @@ func updateMapping(m *yaml.Node, cfg *Config, selected map[string]bool) error {
 		{"route_port", cfg.RoutePort, cfg.RoutePort != 0},
 		{"auto_discover", cfg.AutoDiscover, cfg.AutoDiscover},
 		{"discover_ports", nonNilPorts(cfg.DiscoverPorts), len(cfg.DiscoverPorts) > 0},
+		{"discover_range", cfg.DiscoverRange, cfg.DiscoverRange != ""},
 		{"exclude_ports", nonNilPorts(cfg.ExcludePorts), len(cfg.ExcludePorts) > 0},
 		{"admin_addr", cfg.AdminAddr, cfg.AdminAddr != ""},
 		{"log_level", cfg.LogLevel, cfg.LogLevel != ""},
@@ -910,6 +920,65 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return nil
+}
+
+// PortRange is an inclusive range of TCP ports. The zero PortRange means
+// "no range": it contains every port.
+type PortRange struct {
+	Lo, Hi int
+}
+
+// Contains reports whether port p is in r.
+func (r PortRange) Contains(p int) bool {
+	if r == (PortRange{}) {
+		return true
+	}
+	return p >= r.Lo && p <= r.Hi
+}
+
+// String returns r as "LO-HI", or "" for the zero range.
+func (r PortRange) String() string {
+	if r == (PortRange{}) {
+		return ""
+	}
+	return strconv.Itoa(r.Lo) + "-" + strconv.Itoa(r.Hi)
+}
+
+// ParsePortRange parses an inclusive "LO-HI" port range such as
+// "1024-49151", with 1 <= LO <= HI <= 65535. An empty (or blank) string is
+// the zero PortRange, which contains every port.
+func ParsePortRange(s string) (PortRange, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return PortRange{}, nil
+	}
+	loStr, hiStr, found := strings.Cut(s, "-")
+	if !found {
+		return PortRange{}, fmt.Errorf("%q: want a range LO-HI, e.g. \"1024-49151\"", s)
+	}
+	lo, err := strconv.Atoi(strings.TrimSpace(loStr))
+	if err != nil {
+		return PortRange{}, fmt.Errorf("%q: start %q is not a port number", s, strings.TrimSpace(loStr))
+	}
+	hi, err := strconv.Atoi(strings.TrimSpace(hiStr))
+	if err != nil {
+		return PortRange{}, fmt.Errorf("%q: end %q is not a port number", s, strings.TrimSpace(hiStr))
+	}
+	if lo < 1 || lo > 65535 || hi < 1 || hi > 65535 {
+		return PortRange{}, fmt.Errorf("%q: ports must be between 1 and 65535", s)
+	}
+	if lo > hi {
+		return PortRange{}, fmt.Errorf("%q: start %d is greater than end %d", s, lo, hi)
+	}
+	return PortRange{Lo: lo, Hi: hi}, nil
+}
+
+// DiscoverPortRange returns the parsed DiscoverRange. Load has already
+// rejected an invalid value; for a Config built by hand, an invalid or
+// empty one yields the zero range, which filters nothing.
+func (c *Config) DiscoverPortRange() PortRange {
+	r, _ := ParsePortRange(c.DiscoverRange)
+	return r
 }
 
 // ParsePorts converts a comma-separated port list ("3000,5173,8080")
