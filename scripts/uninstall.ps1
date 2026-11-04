@@ -3,7 +3,8 @@ scripts/uninstall.ps1 - remove a previously installed mole binary (Windows)
 
 Removes the binary that scripts/install.ps1 would have placed, and
 optionally removes its folder from the user PATH. Safe to run even if
-mole isn't installed (exits 0 in that case).
+mole isn't installed (exits 0 in that case). There is no login service to
+remove: `mole service` is not supported on Windows.
 
 Usage:
   pwsh -ExecutionPolicy Bypass -File scripts\uninstall.ps1

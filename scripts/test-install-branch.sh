@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # scripts/test-install-branch.sh — check that install.sh builds the ref it is
 # asked for, says so in `mole version`, and refuses to fall back to another.
+# It then runs scripts/test-install-release.sh, which checks the default:
+# installing a release archive.
 #
 # It needs no network: MOLE_REPO points the installer at a throwaway copy of
 # this repository, with a branch and a tag made up for the test.
@@ -95,9 +97,14 @@ for bad in '--upload-pack=touch /tmp/x' 'a b' '../../etc' '-x' 'a;b' 'a$(id)'; d
 done
 check "no binary came from a rejected ref" test ! -e "$TMP/bin-bad/mole"
 
-echo "== no MOLE_VERSION: the default branch, as before"
-install_ref "" "$TMP/bin-default/mole" >"$TMP/out-default.txt" 2>&1 || true
+echo "== MOLE_REPO without MOLE_VERSION: its default branch, built (releases are Luqueee/mole's only)"
+# A copy of the installer outside any clone, as `curl | sh` and `mole update` run it.
+mkdir -p "$TMP/installer"
+cp "$ROOT/scripts/install.sh" "$TMP/installer/install.sh"
+env -u MOLE_VERSION MOLE_REPO="$TMP/origin.git" INSTALL_DIR="$TMP/bin-default/mole" NO_COLOR=1 \
+	bash "$TMP/installer/install.sh" --no-verify >"$TMP/out-default.txt" 2>&1 || true
 check "the default branch installs" test -x "$TMP/bin-default/mole"
+check "built from the remote, not a release" grep -qF "cloning $TMP/origin.git" "$TMP/out-default.txt"
 
 echo "== from a clone: the local branch and commit"
 git clone -q "$ROOT" "$TMP/clone"
@@ -183,6 +190,14 @@ else
 	check "it fails instead of downloading" true
 fi
 check "and says what is needed" grep -q "is required" "$TMP/out-godl4.txt"
+
+echo "== the release path (scripts/test-install-release.sh)"
+cd "$ROOT"
+if "$ROOT/scripts/test-install-release.sh"; then
+	check "every release-path check passes" true
+else
+	check "every release-path check passes" false
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then

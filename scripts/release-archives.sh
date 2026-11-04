@@ -16,10 +16,11 @@
 #
 # It refuses to run unless the version in cmd/mole/main.go is the one asked for
 # and the working tree has no uncommitted changes, so an archive always
-# corresponds to a commit. Publishing is a separate, deliberate step:
+# corresponds to a commit. Releases are published by CI: pushing a tag runs
+# .github/workflows/release.yml, which calls this script, attests the archives
+# and creates the GitHub release:
 #
 #   git tag v0.4.0 && git push origin v0.4.0
-#   gh release create v0.4.0 dist/release-0.4.0/* --title "mole v0.4.0" --notes-file NOTES.md
 
 set -euo pipefail
 
@@ -31,6 +32,9 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 OUT="${2:-$ROOT/dist/release-$VERSION}"
+# Absolute, so it still names the same place from inside the staging
+# directories below (a relative outdir broke the zip step).
+case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
 cd "$ROOT"
 
 if ! grep -qF "const version = \"$VERSION\"" cmd/mole/main.go; then

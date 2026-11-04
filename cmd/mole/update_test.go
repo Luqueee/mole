@@ -34,34 +34,19 @@ func TestInstallerURL(t *testing.T) {
 }
 
 func TestUpdateEnv(t *testing.T) {
-	has := func(env []string, kv string) bool {
-		for _, e := range env {
-			if e == kv {
-				return true
-			}
-		}
-		return false
-	}
-	has2 := func(env []string, prefix string) bool {
-		for _, e := range env {
-			if strings.HasPrefix(e, prefix) {
-				return true
-			}
-		}
-		return false
-	}
-	if env := updateEnv("/bin/mole", "", ""); !has(env, "INSTALL_DIR=/bin/mole") || has2(env, "MOLE_VERSION=") || has2(env, "MOLE_BRANCH=") {
+	// The latest release: no version, and never a clone in the working directory.
+	if env := updateEnv("/bin/mole", "", ""); !envHas(env, "INSTALL_DIR=/bin/mole") || !envHas(env, "MOLE_RELEASE_ONLY=1") || envHasPrefix(env, "MOLE_VERSION=") || envHasPrefix(env, "MOLE_BRANCH=") {
 		t.Errorf("latest: %v", env)
 	}
-	if env := updateEnv("/bin/mole", "v0.1.1", ""); !has(env, "MOLE_VERSION=v0.1.1") {
+	if env := updateEnv("/bin/mole", "v0.1.1", ""); !envHas(env, "MOLE_VERSION=v0.1.1") {
 		t.Errorf("version: %v", env)
 	}
 	env := updateEnv("/bin/mole", "", "feat/x")
 	if runtime.GOOS == "windows" {
-		if !has(env, "MOLE_BRANCH=feat/x") || has2(env, "MOLE_VERSION=") {
+		if !envHas(env, "MOLE_BRANCH=feat/x") || envHasPrefix(env, "MOLE_VERSION=") {
 			t.Errorf("branch on windows: %v", env)
 		}
-	} else if !has(env, "MOLE_VERSION=feat/x") || has2(env, "MOLE_BRANCH=") {
+	} else if !envHas(env, "MOLE_VERSION=feat/x") || envHasPrefix(env, "MOLE_BRANCH=") {
 		t.Errorf("branch on unix: %v", env)
 	}
 }
@@ -91,13 +76,97 @@ func TestBuildUpdateCommandDownloadsToAFileAndChecksIt(t *testing.T) {
 	if script := cmd.Args[len(cmd.Args)-1]; !strings.Contains(script, "/main/scripts/install.sh") || strings.Contains(script, "--no-verify") {
 		t.Errorf("latest: %s", script)
 	}
+	if !envHas(cmd.Env, "MOLE_RELEASE_ONLY=1") || envHasPrefix(cmd.Env, "MOLE_VERSION=") {
+		t.Errorf("latest: the installer is not told to install the latest release: %v", cmd.Env[len(cmd.Env)-2:])
+	}
+}
+
+func envHas(env []string, kv string) bool {
+	for _, e := range env {
+		if e == kv {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasPrefix(env []string, prefix string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestIsReleaseTag(t *testing.T) {
+	for _, ok := range []string{"v0.1.0", "v0.6.1", "v10.20.30"} {
+		if !isReleaseTag(ok) {
+			t.Errorf("%q is a release tag", ok)
+		}
+	}
+	for _, bad := range []string{"", "main", "0.6.1", "v0.6", "v0.6.1-rc1", "desktop-v0.8.4", "v0.6.1\n", "feat/v0.6.1", "v0.6.1.2"} {
+		if isReleaseTag(bad) {
+			t.Errorf("%q is not a release tag", bad)
+		}
+	}
 }
 
 func TestSourceRef(t *testing.T) {
-	if got := sourceRef("", "feat/x"); got != "branch feat/x" {
-		t.Errorf("branch: %q", got)
+	for _, c := range []struct{ ref, branch, want string }{
+		{"", "", "latest release"},
+		{"", "feat/x", "branch feat/x"},
+		{"v0.1.1", "", "release v0.1.1"},
+		{"main", "", "main (built from source)"},
+	} {
+		if got := sourceRef(c.ref, c.branch); got != c.want {
+			t.Errorf("sourceRef(%q, %q) = %q, want %q", c.ref, c.branch, got, c.want)
+		}
 	}
-	if got := sourceRef("v0.1.1", ""); got != "v0.1.1" {
-		t.Errorf("version: %q", got)
+}
+
+// A dry run says what it would install, and changes nothing.
+func TestUpdateDryRunSaysWhatItInstalls(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Unix installer command")
+	}
+	if _, err := fetchCommand(); err != nil {
+		t.Skip("no curl or wget here:", err)
+	}
+	t.Setenv("MOLE_RAW_URL", "")
+	t.Setenv("NO_COLOR", "1")
+	for _, c := range []struct {
+		args []string
+		want []string
+		not  []string
+	}{
+		{nil, []string{"would install:  latest release", "/main/scripts/install.sh", "INSTALL_DIR ="}, []string{"MOLE_VERSION", "MOLE_RELEASE_ONLY", "main)"}},
+		{[]string{"-version", "v0.6.1"}, []string{"would install:  release v0.6.1", "MOLE_VERSION = v0.6.1"}, nil},
+		{[]string{"-branch", "feat/x"}, []string{"would install:  branch feat/x", "refs/heads/feat/x/scripts/install.sh", "MOLE_VERSION = feat/x"}, nil},
+	} {
+		var code int
+		out, _ := capture(t, func() { code = runUpdate(append(c.args, "-dry-run")) })
+		if code != 0 {
+			t.Errorf("%v: exit %d\n%s", c.args, code, out)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%v: dry run lacks %q:\n%s", c.args, w, out)
+			}
+		}
+		for _, n := range c.not {
+			if strings.Contains(out, n) {
+				t.Errorf("%v: dry run shows %q:\n%s", c.args, n, out)
+			}
+		}
+	}
+}
+
+func TestUpdateRejectsABadVersion(t *testing.T) {
+	var code int
+	_, errOut := capture(t, func() { code = runUpdate([]string{"-version", "a;b", "-dry-run"}) })
+	if code != 2 || !strings.Contains(errOut, "invalid git ref") {
+		t.Errorf("exit %d: %s", code, errOut)
 	}
 }
