@@ -43,7 +43,10 @@ jobs:
             files: |
               desktop/bin/*installer.exe
           - name: Linux
-            os: ubuntu-latest
+            # Pinned: on ubuntu-latest (26.04, GTK 4.22) linuxdeploy's gtk
+            # plugin fails ("cannot stat 'gtk-4.0'"), and an AppImage built
+            # against an older glibc also runs on more distributions.
+            os: ubuntu-24.04
             task: linux:create:deb
             files: |
               desktop/bin/*.deb
