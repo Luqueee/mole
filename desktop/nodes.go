@@ -129,6 +129,7 @@ func runMole(ctx context.Context, args ...string) (cliRun, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 	err = cmd.Run()
+	invalidateConfig() // `mole node add/rm` edit the config
 	r := cliRun{Stdout: stdout.String(), Stderr: stderr.String()}
 	var ee *exec.ExitError
 	switch {
@@ -475,6 +476,7 @@ func startJob(args []string) (uint64, error) {
 	go func() {
 		defer cancel()
 		err := cmd.Run()
+		invalidateConfig()
 		job.mu.Lock()
 		defer job.mu.Unlock()
 		job.done, job.ended = true, time.Now()

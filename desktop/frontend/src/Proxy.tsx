@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { ArrowRight, ExternalLink, Plus, X } from "lucide-react";
 import { api, type DomainInfo } from "./api";
+import { usePoll } from "./usePoll";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const validDomain = (d: string) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(d);
@@ -57,22 +58,12 @@ export default function ProxyPage() {
   const [rhttps, setRhttps] = useState(false); // speak TLS to the target
   const [rloose, setRloose] = useState(false); // ...without checking its certificate
 
-  const load = useCallback(async () => {
+  const load = usePoll(async () => {
     try {
       setInfo(await api.domains());
     } catch { /* keep the last view */ }
-  }, []);
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 2000);
-    return () => clearInterval(t);
-  }, [load]);
-  useEffect(() => {
-    const loadNodes = () => api.nodes().then((l) => setNodes(l.nodes.map((n) => n.name))).catch(() => {});
-    loadNodes();
-    const t = setInterval(loadNodes, 5000);
-    return () => clearInterval(t);
-  }, []);
+  }, 2000);
+  usePoll(() => api.nodes().then((l) => setNodes(l.nodes.map((n) => n.name))).catch(() => {}), 5000);
 
   // One privileged or restarting action at a time: they can take a while (the
   // system password dialog) and must not overlap.
