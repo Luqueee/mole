@@ -141,6 +141,10 @@ type Server struct {
 	routeCtl RouteController // optional: named routes
 
 	transferCtl TransferController // optional: file transfer
+
+	// unavailable, when set, is why the endpoints that act through the
+	// controllers cannot answer yet (see WithUnavailable).
+	unavailable string
 }
 
 // RouteInfo describes one named route (a.mole.lan → a service on the remote).
@@ -182,7 +186,7 @@ type PushInfo struct {
 	Local  int    `json:"local"`
 	Remote int    `json:"remote"`
 	Bind   string `json:"bind"`
-	State  string `json:"state"` // "active" | "failed"
+	State  string `json:"state"` // "active" | "failed"; "connecting" before the daemon is connected
 	Error  string `json:"error,omitempty"`
 }
 
@@ -218,28 +222,55 @@ func (s *Server) WithPortController(ctl PortController) *Server {
 	return s
 }
 
-// Handler returns the HTTP handler for the admin endpoints.
+// WithUnavailable is for a daemon that serves its admin API before the
+// components it controls exist (mole while its first SSH connection is being
+// made): every endpoint that acts through a controller — /ports/discover,
+// /ports/push, /routes and /transfer — answers 503 Service Unavailable with
+// reason, whether or not that controller is set, while /status, /health and
+// /events answer as usual. The guard and the Content-Type checks apply exactly
+// as they do once the daemon is ready.
+func (s *Server) WithUnavailable(reason string) *Server {
+	s.unavailable = reason
+	return s
+}
+
+// Handler returns the HTTP handler for the admin endpoints. It refuses
+// requests from web browsers (see guard), and the endpoints that read a JSON
+// body require Content-Type application/json (415 otherwise).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/events", s.handleEvents)
-	if s.portsCtl != nil {
-		mux.HandleFunc("POST /ports/discover", s.handlePortAdd)
-		mux.HandleFunc("DELETE /ports/discover/", s.handlePortDelete)
+	starting := s.unavailable != ""
+	if s.portsCtl != nil || starting {
+		mux.HandleFunc("POST /ports/discover", requireBody(s.ready(s.handlePortAdd), ContentTypeJSON))
+		mux.HandleFunc("DELETE /ports/discover/", s.ready(s.handlePortDelete))
 	}
-	if s.pushCtl != nil {
-		mux.HandleFunc("POST /ports/push", s.handlePushAdd)
-		mux.HandleFunc("DELETE /ports/push/", s.handlePushDelete)
+	if s.pushCtl != nil || starting {
+		mux.HandleFunc("POST /ports/push", requireBody(s.ready(s.handlePushAdd), ContentTypeJSON))
+		mux.HandleFunc("DELETE /ports/push/", s.ready(s.handlePushDelete))
 	}
-	if s.routeCtl != nil {
-		mux.HandleFunc("POST /routes", s.handleRouteSet)
-		mux.HandleFunc("DELETE /routes/", s.handleRouteDelete)
+	if s.routeCtl != nil || starting {
+		mux.HandleFunc("POST /routes", requireBody(s.ready(s.handleRouteSet), ContentTypeJSON))
+		mux.HandleFunc("DELETE /routes/", s.ready(s.handleRouteDelete))
 	}
-	if s.transferCtl != nil {
+	if s.transferCtl != nil || starting {
 		s.mountTransfer(mux)
 	}
-	return mux
+	return guard(mux)
+}
+
+// ready returns h, or while the server is unavailable (see WithUnavailable) a
+// handler that answers 503 with the reason.
+func (s *Server) ready(h http.HandlerFunc) http.HandlerFunc {
+	if s.unavailable == "" {
+		return h
+	}
+	reason := s.unavailable
+	return func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, reason, http.StatusServiceUnavailable)
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {

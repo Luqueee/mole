@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
 	"github.com/Luqueee/mole/internal/transfer"
 )
@@ -248,6 +249,7 @@ func uploadToDaemon(ctx context.Context, addr string, f transfer.File, to string
 		return transfer.Result{}, err
 	}
 	req.ContentLength = f.Size
+	req.Header.Set("Content-Type", admin.ContentTypeFile)
 	if f.Size == 0 {
 		req.Body = http.NoBody
 	}

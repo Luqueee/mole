@@ -21,7 +21,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,6 +30,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
 )
 
@@ -191,7 +192,7 @@ func daemonLive(addr string) bool {
 func adminPostPort(addr string, port int) error {
 	body := fmt.Sprintf(`{"port":%d}`, port)
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Post("http://"+addr+"/ports/discover", "application/json", strings.NewReader(body))
+	resp, err := client.Post("http://"+addr+"/ports/discover", admin.ContentTypeJSON, strings.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -373,9 +374,3 @@ func resolveOrCreateConfigPath(path string) (string, error) {
 	// Nothing found — create a fresh config in cwd.
 	return "./mole.yaml", nil
 }
-
-// errNotFound is a sentinel used in tests. Not currently
-// returned by production code, but kept here so the helper above
-// can grow a "not found" branch in the future without churning
-// callers.
-var errNotFound = errors.New("config: no mole.yaml found")

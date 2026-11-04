@@ -36,6 +36,9 @@ func TestRouteEndpoints(t *testing.T) {
 
 	do := func(method, path, body string) (int, string) {
 		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", ContentTypeJSON)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

@@ -34,17 +34,22 @@ func (s *Server) WithTransferController(ctl TransferController) *Server {
 }
 
 func (s *Server) mountTransfer(mux *http.ServeMux) {
-	mux.HandleFunc("PUT /transfer/send", s.handleTransferSend)
-	mux.HandleFunc("GET /transfer/log", s.handleTransferLog)
-	mux.HandleFunc("GET /transfer/pending", s.handleTransferPending)
-	mux.HandleFunc("POST /transfer/pending/{id}", s.handleTransferDecide)
-	mux.HandleFunc("PUT /transfer/receive", s.handleTransferReceive)
+	// The file upload also accepts a request without a Content-Type, which is
+	// what mole 0.8.4 and older send. That is safe: PUT is never a CORS simple
+	// request, so a browser has to pass a preflight first, and guard refuses
+	// it (it carries an Origin).
+	mux.HandleFunc("PUT /transfer/send", requireBody(s.ready(s.handleTransferSend), ContentTypeFile, ""))
+	mux.HandleFunc("GET /transfer/log", s.ready(s.handleTransferLog))
+	mux.HandleFunc("GET /transfer/pending", s.ready(s.handleTransferPending))
+	mux.HandleFunc("POST /transfer/pending/{id}", requireBody(s.ready(s.handleTransferDecide), ContentTypeJSON))
+	mux.HandleFunc("PUT /transfer/receive", requireBody(s.ready(s.handleTransferReceive), ContentTypeJSON))
 }
 
 // handleTransferSend takes one file as the request body (Content-Length is
-// its size) and sends it to the remote's inbox. The file travels through the
-// request, never as a path the daemon opens itself, so the API cannot be used
-// to make the daemon read files the caller cannot.
+// its size, Content-Type application/octet-stream) and sends it to the
+// remote's inbox. The file travels through the request, never as a path the
+// daemon opens itself, so the API cannot be used to make the daemon read
+// files the caller cannot.
 //
 //	PUT /transfer/send?name=a.txt&size=12&mode=420&mtime=1700000000&to=sub
 //

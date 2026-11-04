@@ -60,7 +60,7 @@ func TestEventsCarryDirectionAndPort(t *testing.T) {
 	var got []Event
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		rec := httptest.NewRecorder()
-		New(stats, nil).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/events", nil))
+		New(stats, nil).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9999/events", nil))
 		var body struct{ Events []Event }
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)

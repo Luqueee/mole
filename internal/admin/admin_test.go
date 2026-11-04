@@ -511,7 +511,7 @@ func TestEventsSince(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	New(st, nil).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/events?since="+strconv.FormatUint(last-1, 10), nil))
+	New(st, nil).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9999/events?since="+strconv.FormatUint(last-1, 10), nil))
 	var body struct {
 		Events []Event `json:"events"`
 		Last   uint64  `json:"last"`

@@ -19,6 +19,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/transfer"
 )
 
@@ -173,6 +174,7 @@ func uploadFile(ctx context.Context, addr, path, to string) (transfer.Result, er
 		return transfer.Result{}, err
 	}
 	req.ContentLength = f.Size
+	req.Header.Set("Content-Type", admin.ContentTypeFile)
 	resp, err := (&http.Client{}).Do(req) // no timeout: a transfer takes as long as it takes
 	if err != nil {
 		return transfer.Result{}, fmt.Errorf("mole is not running: %w", err)
@@ -260,7 +262,7 @@ func (m *MoleService) adminJSON(addr, method, path string, body any) error {
 		return err
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", admin.ContentTypeJSON)
 	}
 	resp, err := m.client.Do(req)
 	if err != nil {
