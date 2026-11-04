@@ -1,0 +1,71 @@
+name: Release CLI
+
+# Publishes a CLI release when a version tag such as v0.9.0 is pushed. The
+# pattern requires a digit after the v, so the desktop app's desktop-v* tags
+# (see desktop-bundles.yml) never match: tag filters match the whole tag name.
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+permissions: {}
+
+concurrency:
+  group: mole-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and upload its assets
+      id-token: write # sign the provenance attestations
+      attestations: write # store them
+    steps:
+      # Full history and tags, to find the previous CLI tag for the notes.
+      - name: Check out the tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # No build cache: release binaries are built from scratch, never from a
+      # cache another workflow run wrote.
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Test
+        run: go test ./...
+
+      # Refuses to run unless cmd/mole/main.go carries this version and the
+      # tree is clean. The output directory must be absolute: the script zips
+      # the Windows archives from inside a staging directory.
+      - name: Build archives
+        run: ./scripts/release-archives.sh "${GITHUB_REF_NAME#v}" "$GITHUB_WORKSPACE/dist/release"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/release/mole_*.tar.gz
+            dist/release/mole_*.zip
+
+      # A stable release is marked latest explicitly: the installers resolve
+      # releases/latest and need a CLI release there, not a desktop one. The
+      # notes start at the previous CLI tag, not at the newest desktop release.
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --title "mole $GITHUB_REF_NAME" --verify-tag --generate-notes)
+          if prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_REF_NAME^" 2>/dev/null)"; then
+            args+=(--notes-start-tag "$prev")
+          fi
+          case "$GITHUB_REF_NAME" in
+            *-*) args+=(--prerelease --latest=false) ;;
+            *) args+=(--latest) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" dist/release/mole_* dist/release/SHA256SUMS "${args[@]}"

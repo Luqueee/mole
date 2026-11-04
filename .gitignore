@@ -2,6 +2,8 @@
 /dist/
 /mole
 /mole.exe
+/desktop/desktop
+/desktop/desktop.exe
 
 # Test output
 *.test
@@ -9,3 +11,5 @@
 
 # Local config overrides
 mole.local.yaml
+# Personal editor/agent tooling
+/.omp/

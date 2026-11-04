@@ -322,7 +322,7 @@ func newMockAdmin(t *testing.T) *httptest.Server {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		if m.active[req.Port] {
-			http.Error(w, "already", 409)
+			http.Error(w, "already", http.StatusConflict)
 			return
 		}
 		m.active[req.Port] = true
