@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -76,6 +77,10 @@ func (d *deadConn) NewSession() (*ssh.Session, error) {
 	return nil, errors.New("dead transport")
 }
 
+func (d *deadConn) SendRequest(string, bool, []byte) (bool, []byte, error) {
+	return false, nil, io.EOF
+}
+
 func (d *deadConn) Close() error {
 	atomic.AddInt64(&d.closed, 1)
 	return nil
@@ -100,6 +105,9 @@ func (c *runBlockingConn) NewSession() (*ssh.Session, error) {
 	close(c.started)
 	<-c.release
 	return nil, io.EOF
+}
+func (*runBlockingConn) SendRequest(string, bool, []byte) (bool, []byte, error) {
+	return false, nil, io.EOF
 }
 func (c *runBlockingConn) Close() error { c.closed.Add(1); return nil }
 
@@ -156,28 +164,13 @@ func (l *liveConn) NewSession() (*ssh.Session, error) {
 	return nil, errors.New("unused")
 }
 
+// SendRequest answers like a server that does not implement the request:
+// a failure reply, which still proves the transport is alive.
+func (l *liveConn) SendRequest(string, bool, []byte) (bool, []byte, error) {
+	return false, nil, nil
+}
+
 func (l *liveConn) Close() error { return nil }
-
-type blockingContextConn struct {
-	started chan struct{}
-	once    sync.Once
-}
-
-func (c *blockingContextConn) Dial(network, addr string) (net.Conn, error) {
-	return nil, errors.New("unexpected context-free dial")
-}
-
-func (c *blockingContextConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	c.once.Do(func() { close(c.started) })
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-func (c *blockingContextConn) NewSession() (*ssh.Session, error) {
-	return nil, errors.New("unused")
-}
-
-func (c *blockingContextConn) Close() error { return nil }
 
 type trackedLiveConn struct {
 	liveConn
@@ -223,46 +216,6 @@ type fakeAddr string
 
 func (a fakeAddr) Network() string { return "test" }
 func (a fakeAddr) String() string  { return string(a) }
-
-func TestManager_DialContextCancellation(t *testing.T) {
-	client := &blockingContextConn{started: make(chan struct{})}
-	persistent := &trackedLiveConn{}
-	m := &Manager{
-		addr:   "x:22",
-		log:    discardLogger(),
-		client: persistent,
-		dialContext: func(context.Context) (sshConn, error) {
-			return client, nil
-		},
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := m.DialContext(ctx, "tcp", "127.0.0.1:3000")
-		errCh <- err
-	}()
-
-	select {
-	case <-client.started:
-	case <-time.After(time.Second):
-		t.Fatal("context-aware dial did not start")
-	}
-	cancel()
-
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("DialContext() error = %v, want context cancellation", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("DialContext() did not return after cancellation")
-	}
-	if got := persistent.closed.Load(); got != 0 {
-		t.Fatalf("persistent SSH client closed %d times, want 0", got)
-	}
-}
 
 func TestDialSSHChannelContextClosesTemporaryTransport(t *testing.T) {
 	transport := &blockingSSHTransport{
@@ -455,5 +408,172 @@ func TestManager_DialReusesLiveClientNoRedial(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&redials); got != 0 {
 		t.Errorf("redials = %d, want 0 (a healthy client must not trigger reconnect)", got)
+	}
+}
+
+// blackHoleConn models a transport whose peer vanished without a reset:
+// keepalives and channel opens get no answer until the client is closed.
+type blackHoleConn struct {
+	probed    chan struct{} // closed on the first keepalive
+	closed    chan struct{}
+	probeOnce sync.Once
+	closeOnce sync.Once
+	closes    atomic.Int64
+	request   atomic.Value // "name wantReply" of the first global request
+}
+
+func newBlackHoleConn() *blackHoleConn {
+	return &blackHoleConn{probed: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (c *blackHoleConn) Dial(string, string) (net.Conn, error) {
+	<-c.closed
+	return nil, io.EOF
+}
+
+func (c *blackHoleConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return c.Dial(network, addr)
+}
+
+func (c *blackHoleConn) NewSession() (*ssh.Session, error) {
+	<-c.closed
+	return nil, io.EOF
+}
+
+func (c *blackHoleConn) SendRequest(name string, wantReply bool, _ []byte) (bool, []byte, error) {
+	c.probeOnce.Do(func() {
+		c.request.Store(fmt.Sprintf("%s %v", name, wantReply))
+		close(c.probed)
+	})
+	<-c.closed
+	return false, nil, io.EOF
+}
+
+func (c *blackHoleConn) Close() error {
+	c.closes.Add(1)
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+
+func TestManagerWatch_UnansweredKeepaliveClosesAndReconnects(t *testing.T) {
+	hung := newBlackHoleConn()
+	fresh := &trackedLiveConn{}
+	var redials atomic.Int64
+	m := &Manager{addr: "x:22", log: discardLogger(), client: hung}
+	m.dialContext = func(context.Context) (sshConn, error) { redials.Add(1); return fresh, nil }
+
+	// A forward stuck opening a channel on the dead transport.
+	dialed := make(chan error, 1)
+	go func() {
+		conn, err := m.Dial("tcp", "127.0.0.1:3000")
+		if conn != nil {
+			_ = conn.Close()
+		}
+		dialed <- err
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watchDone := make(chan struct{})
+	go func() { m.Watch(ctx, 20*time.Millisecond); close(watchDone) }()
+
+	select {
+	case <-hung.probed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not send a keepalive")
+	}
+	select {
+	case err := <-dialed:
+		if err != nil {
+			t.Fatalf("pending Dial = %v, want it to succeed on the replacement transport", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a Dial blocked on the dead transport was not released")
+	}
+	cancel()
+	select {
+	case <-watchDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not stop")
+	}
+
+	if got := hung.request.Load(); got != keepaliveRequest+" true" {
+		t.Fatalf("probe = %v, want a %s request that wants a reply", got, keepaliveRequest)
+	}
+	if got := hung.closes.Load(); got != 1 {
+		t.Fatalf("dead transport closed %d times, want 1", got)
+	}
+	if got := redials.Load(); got != 1 {
+		t.Fatalf("redials = %d, want 1", got)
+	}
+	m.mu.RLock()
+	current := m.client
+	m.mu.RUnlock()
+	if current != fresh {
+		t.Fatalf("current client = %T, want the replacement", current)
+	}
+	if got := fresh.closed.Load(); got != 0 {
+		t.Fatalf("replacement transport closed %d times", got)
+	}
+}
+
+func TestManagerWatch_KeepaliveErrorReconnects(t *testing.T) {
+	dead := newDeadConn(0)
+	reconnected := make(chan struct{})
+	var once sync.Once
+	m := &Manager{addr: "x:22", log: discardLogger(), client: dead}
+	m.dialContext = func(context.Context) (sshConn, error) {
+		once.Do(func() { close(reconnected) })
+		return &liveConn{}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Watch(ctx, time.Millisecond)
+	select {
+	case <-reconnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a failed keepalive did not reconnect")
+	}
+	if got := atomic.LoadInt64(&dead.closed); got != 1 {
+		t.Fatalf("dead transport closed %d times, want 1", got)
+	}
+}
+
+// countingProbeConn answers keepalives with a failure reply, as servers
+// that do not implement the request do.
+type countingProbeConn struct {
+	trackedLiveConn
+	probes chan struct{}
+}
+
+func (c *countingProbeConn) SendRequest(string, bool, []byte) (bool, []byte, error) {
+	select {
+	case c.probes <- struct{}{}:
+	default:
+	}
+	return false, nil, nil
+}
+
+func TestManagerWatch_FailureReplyMeansAlive(t *testing.T) {
+	conn := &countingProbeConn{probes: make(chan struct{}, 16)}
+	var redials atomic.Int64
+	m := &Manager{addr: "x:22", log: discardLogger(), client: conn}
+	m.dialContext = func(context.Context) (sshConn, error) { redials.Add(1); return &liveConn{}, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.Watch(ctx, time.Millisecond); close(done) }()
+	for range 3 {
+		select {
+		case <-conn.probes:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Watch stopped probing")
+		}
+	}
+	cancel()
+	<-done
+	if got := redials.Load(); got != 0 {
+		t.Fatalf("redials = %d, want 0 for a transport that answers keepalives", got)
+	}
+	if got := conn.closed.Load(); got != 0 {
+		t.Fatalf("live transport closed %d times", got)
 	}
 }

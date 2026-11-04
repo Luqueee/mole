@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 )
 
 // sshConn is the subset of *ssh.Client the Manager depends on.
@@ -32,6 +31,8 @@ type sshConn interface {
 	Dial(network, addr string) (net.Conn, error)
 	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 	NewSession() (*ssh.Session, error)
+	// SendRequest sends a global request; Watch uses it as a keepalive.
+	SendRequest(name string, wantReply bool, payload []byte) (bool, []byte, error)
 	Close() error
 }
 
@@ -73,6 +74,10 @@ var dialAgentFunc = dialAgent
 // New constructs a Manager and opens the first SSH connection using the
 // resolved remote (see ResolveRemote).
 func New(r Remote, insecure bool, log *slog.Logger) (*Manager, error) {
+	warnUnsupported(r, log)
+	for _, jump := range r.ProxyJumps {
+		warnUnsupported(jump, log)
+	}
 	cfg, agentConn, err := buildSSHConfig(r, insecure, log)
 	if err != nil {
 		return nil, err
@@ -270,37 +275,6 @@ func (m *Manager) Dial(network, addr string) (net.Conn, error) {
 	return client.Dial(network, addr)
 }
 
-// DialContext opens a TCP connection through a temporary SSH transport while
-// respecting ctx. The temporary transport is intentional: x/crypto/ssh
-// cannot cancel one in-flight direct-tcpip channel without closing the whole
-// client, which would tear down unrelated active forwards on m.client.
-func (m *Manager) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	if ctx == nil {
-		return nil, errors.New("tunnel: nil dial context")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if m.dialContext == nil {
-		return nil, errors.New("tunnel: context-aware SSH dial is not configured")
-	}
-	client, err := m.dialContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := client.DialContext(ctx, network, addr)
-	if err != nil {
-		_ = client.Close()
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		_ = conn.Close()
-		_ = client.Close()
-		return nil, err
-	}
-	return &ownedConn{Conn: conn, owner: client}, nil
-}
-
 // ProbeDialer is a temporary, context-aware SSH transport used for one
 // discovery sweep. It is separate from the manager's persistent client so a
 // cancelled sweep cannot interrupt active forwards.
@@ -491,11 +465,26 @@ func (s *Stream) Wait() error {
 // Stderr returns the tail of the command's stderr.
 func (s *Stream) Stderr() string { return strings.TrimSpace(s.stderr.String()) }
 
+// keepaliveRequest is the global request OpenSSH's ServerAliveInterval
+// sends. Servers that do not implement it still answer with a failure
+// reply, and any reply proves the transport is alive.
+const keepaliveRequest = "keepalive@openssh.com"
+
+// maxProbeTimeout bounds how long Watch waits for a keepalive reply.
+const maxProbeTimeout = 10 * time.Second
+
 // Watch periodically verifies the SSH connection and reconnects if it
 // has died. Runs until ctx is cancelled. Reconnection goes through the
 // shared singleflight path, so a Watch-detected drop and a Dial-detected
 // drop can't double-redial.
+//
+// The probe is a keepalive global request with a deadline. On a
+// black-holed TCP connection (sleep, network change) nothing ever answers,
+// and every channel open on the client would wait for the kernel to give
+// up on retransmissions. A probe that gets no reply in time closes the
+// client, which fails those pending opens, and then reconnects.
 func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
+	timeout := min(interval, maxProbeTimeout)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -507,22 +496,59 @@ func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
 			c := m.client
 			m.mu.RUnlock()
 			if c == nil {
-				if _, err := m.reconnect(nil); err != nil {
+				if _, err := m.reconnectContext(ctx, nil); err != nil {
 					m.log.Debug("reconnect failed", "err", err)
 				}
 				continue
 			}
-			// Probe by opening a session and immediately closing it.
-			sess, err := c.NewSession()
-			if err != nil {
-				m.log.Debug("ssh health check failed", "err", err)
-				if _, rerr := m.reconnect(c); rerr != nil {
-					m.log.Debug("reconnect failed", "err", rerr)
-				}
+			err := probe(ctx, c, timeout)
+			if err == nil {
 				continue
 			}
-			_ = sess.Close()
+			if ctx.Err() != nil {
+				return
+			}
+			m.log.Debug("ssh health check failed", "err", err)
+			m.dropClient(c)
+			if _, rerr := m.reconnectContext(ctx, c); rerr != nil {
+				m.log.Debug("reconnect failed", "err", rerr)
+			}
 		}
+	}
+}
+
+// probe sends a keepalive on c and waits at most timeout for the reply.
+// The request goroutine ends when a reply arrives or c is closed; Watch
+// closes c on timeout, and Manager.Close closes it otherwise.
+func probe(ctx context.Context, c sshConn, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := c.SendRequest(keepaliveRequest, true, nil)
+		done <- err
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return fmt.Errorf("no keepalive reply within %s", timeout)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// dropClient closes c and clears it as the current client. If c has
+// already been replaced, installClient closed it then, so nothing is done.
+func (m *Manager) dropClient(c sshConn) {
+	m.mu.Lock()
+	current := m.client == c
+	if current {
+		m.client = nil
+	}
+	m.mu.Unlock()
+	if current {
+		_ = c.Close()
 	}
 }
 
@@ -546,7 +572,7 @@ func (m *Manager) Close() error {
 }
 
 func buildSSHConfig(remote Remote, insecure bool, log *slog.Logger) (*ssh.ClientConfig, net.Conn, error) {
-	methods, agentConn, err := authMethods(remote.IdentityFiles, remote.IdentityAgent)
+	signers, agentConn, err := identitySigners(remote, log)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -556,97 +582,22 @@ func buildSSHConfig(remote Remote, insecure bool, log *slog.Logger) (*ssh.Client
 			_ = agentConn.Close()
 		}
 	}()
-	hostKey, err := hostKeyCallback(insecure, log)
+	hostKey, hostKeyAlgorithms, err := hostKeyCallback(remote, insecure, log)
 	if err != nil {
 		return nil, nil, err
 	}
-	var hostKeyAlgorithms []string
-	if !insecure {
-		khPath, err := knownHostsPath()
-		if err != nil {
-			return nil, nil, err
-		}
-		hostKeyAlgorithms, err = knownHostKeyAlgorithms(khPath, remote.Addr, probeRemote(remote.Addr))
-		if err != nil {
-			return nil, nil, fmt.Errorf("select host-key algorithms for %s: %w", remote.Addr, err)
-		}
-	}
 	config := &ssh.ClientConfig{
-		User:              remote.User,
-		Auth:              methods,
+		User: remote.User,
+		// One AuthMethod for every key: x/crypto/ssh tries each method
+		// name once, so a second "publickey" method would never be
+		// consulted after the first one's keys were all rejected.
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signers...)},
 		HostKeyCallback:   hostKey,
 		HostKeyAlgorithms: hostKeyAlgorithms,
 		Timeout:           10 * time.Second,
 	}
 	keepAgentConn = agentConn != nil
 	return config, agentConn, nil
-}
-
-func authMethods(identityFiles []string, identityAgent string) ([]ssh.AuthMethod, net.Conn, error) {
-	var methods []ssh.AuthMethod
-	var agentConn net.Conn
-
-	// 0. Explicit identity files from ssh_config (resolved via
-	//    `ssh -G` when the remote is a Host alias). These reflect the
-	//    user's intent for this host, so try them first.
-	for _, path := range identityFiles {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		signer, err := ssh.ParsePrivateKey(data)
-		if err != nil {
-			continue
-		}
-		methods = append(methods, ssh.PublicKeys(signer))
-	}
-
-	// A host's IdentityAgent overrides the inherited agent socket. An absent
-	// directive retains the platform default, including Windows' OpenSSH pipe.
-	sock := os.Getenv("SSH_AUTH_SOCK")
-	useAgent := true
-	switch {
-	case strings.EqualFold(identityAgent, "none"):
-		useAgent = false
-	case identityAgent == "SSH_AUTH_SOCK":
-		useAgent = sock != ""
-	case identityAgent != "":
-		sock = expandHome(os.ExpandEnv(identityAgent))
-		useAgent = sock != ""
-	}
-	if useAgent {
-		if conn, err := dialAgentFunc(sock); err == nil {
-			if signers, err := agent.NewClient(conn).Signers(); err == nil && len(signers) > 0 {
-				methods = append(methods, ssh.PublicKeys(signers...))
-				agentConn = conn
-				// Signers retain this connection for subsequent SSH handshakes.
-			} else {
-				_ = conn.Close()
-			}
-		}
-	}
-
-	// 2. Default key files under ~/.ssh.
-	home, err := os.UserHomeDir()
-	if err == nil {
-		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"} {
-			path := filepath.Join(home, ".ssh", name)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			signer, err := ssh.ParsePrivateKey(data)
-			if err != nil {
-				continue
-			}
-			methods = append(methods, ssh.PublicKeys(signer))
-		}
-	}
-
-	if len(methods) == 0 {
-		return nil, nil, errors.New("no SSH auth methods: set up ssh-agent or ~/.ssh/id_*")
-	}
-	return methods, agentConn, nil
 }
 
 // jumpSSHConn keeps every transport in a ProxyJump chain alive for the
@@ -671,6 +622,10 @@ func (c *jumpSSHConn) NewSession() (*ssh.Session, error) {
 
 func (c *jumpSSHConn) Listen(network, addr string) (net.Listener, error) {
 	return c.client.Listen(network, addr)
+}
+
+func (c *jumpSSHConn) SendRequest(name string, wantReply bool, payload []byte) (bool, []byte, error) {
+	return c.client.SendRequest(name, wantReply, payload)
 }
 
 func (c *jumpSSHConn) Close() error {
@@ -710,30 +665,12 @@ func (c *contextSSHConn) Listen(network, addr string) (net.Listener, error) {
 	return c.client.Listen(network, addr)
 }
 
+func (c *contextSSHConn) SendRequest(name string, wantReply bool, payload []byte) (bool, []byte, error) {
+	return c.client.SendRequest(name, wantReply, payload)
+}
+
 func (c *contextSSHConn) Close() error {
 	return c.client.Close()
-}
-
-// ownedConn keeps the temporary SSH transport alive for the lifetime of the
-// forwarded connection. Closing the returned connection closes both the SSH
-// channel and its dedicated transport.
-type ownedConn struct {
-	net.Conn
-	owner sshConn
-	once  sync.Once
-	err   error
-}
-
-func (c *ownedConn) Close() error {
-	c.once.Do(func() {
-		if err := c.Conn.Close(); err != nil {
-			c.err = err
-		}
-		if err := c.owner.Close(); c.err == nil {
-			c.err = err
-		}
-	})
-	return c.err
 }
 
 // dialSSHChannelContext opens one direct-tcpip channel on a temporary SSH
@@ -928,12 +865,6 @@ func closeSSHAgentConns(conns []net.Conn) {
 	}
 }
 
-func closeSSHAgentConn(conn net.Conn) {
-	if conn != nil {
-		_ = conn.Close()
-	}
-}
-
 // Remote holds resolved SSH connection parameters.
 type Remote struct {
 	User          string   // login user
@@ -941,6 +872,43 @@ type Remote struct {
 	IdentityFiles []string // key files from ssh_config, may be empty
 	IdentityAgent string   // agent socket from ssh_config; "none" disables it
 	ProxyJumps    []Remote // SSH hops, in connection order
+
+	// IdentitiesOnly offers only IdentityFiles keys, including agent keys
+	// that match one of them (ssh_config IdentitiesOnly).
+	IdentitiesOnly bool
+	// UserKnownHostsFiles are consulted for host keys; new keys are
+	// recorded in the first. Nil means ~/.ssh/known_hosts; "none" entries
+	// are ignored.
+	UserKnownHostsFiles []string
+	// GlobalKnownHostsFiles are consulted but never written.
+	GlobalKnownHostsFiles []string
+	// StrictHostKeyChecking is the ssh_config value. "yes" (printed as
+	// "true" by ssh -G) rejects unknown hosts; any other value trusts them
+	// on first use. A changed key is always rejected.
+	StrictHostKeyChecking string
+	// HostKeyAlias replaces the host name in known_hosts lookups and
+	// records.
+	HostKeyAlias string
+	// HashKnownHosts records new known_hosts entries with hashed names.
+	HashKnownHosts bool
+
+	// ProxyCommand and CertificateFiles are not supported. They are kept
+	// so New can warn instead of silently ignoring them.
+	ProxyCommand     string
+	CertificateFiles []string
+}
+
+// warnUnsupported logs the ssh_config directives that mole resolves but
+// cannot honour, so a connection that differs from plain ssh is explained.
+func warnUnsupported(r Remote, log *slog.Logger) {
+	if r.ProxyCommand != "" {
+		log.Warn("ssh_config ProxyCommand is not supported: connecting directly instead; use ProxyJump for SSH hops",
+			"host", r.Addr, "proxycommand", r.ProxyCommand)
+	}
+	if len(r.CertificateFiles) > 0 {
+		log.Warn("ssh_config CertificateFile is not supported: offering plain keys only",
+			"host", r.Addr, "certificatefile", strings.Join(r.CertificateFiles, " "))
+	}
 }
 
 // ResolveRemote turns a remote spec into concrete connection params.
@@ -948,7 +916,8 @@ type Remote struct {
 //   - A spec containing '@' is parsed directly as user@host[:port].
 //   - Otherwise it's treated as an ssh_config Host alias and resolved
 //     with `ssh -G <alias>`, so ~/.ssh/config directives (HostName,
-//     User, Port, IdentityFile, IdentityAgent, Include, Match) are honoured. This is
+//     User, Port, IdentityFile, IdentityAgent, IdentitiesOnly,
+//     known-hosts settings, Include, Match) are honoured. This is
 //     why a bare alias like "dev" connects to the real host instead of
 //     trying to dial a literal "dev".
 func ResolveRemote(spec string, defaultPort int) (Remote, error) {
@@ -971,36 +940,85 @@ func ResolveRemote(spec string, defaultPort int) (Remote, error) {
 // feature (Include, Match, canonicalisation) works without us
 // re-implementing the parser.
 func resolveAlias(alias string, defaultPort int) (Remote, error) {
+	// An alias is a command-line argument to ssh: one that starts with '-'
+	// would be read as an option (e.g. -oProxyCommand=...). "--" below
+	// already prevents that; rejecting it gives a clearer error.
+	if strings.HasPrefix(alias, "-") {
+		return Remote{}, fmt.Errorf("invalid ssh host alias %q: it must not start with '-'", alias)
+	}
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		return Remote{}, fmt.Errorf("remote %q looks like an ssh host alias but 'ssh' is not on PATH to resolve it; use user@host[:port] instead", alias)
 	}
-	out, err := exec.Command(sshBin, "-G", alias).Output()
+	out, err := exec.Command(sshBin, "-G", "--", alias).Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
+				return Remote{}, fmt.Errorf("resolve ssh alias %q via 'ssh -G': %w: %s", alias, err, msg)
+			}
+		}
 		return Remote{}, fmt.Errorf("resolve ssh alias %q via 'ssh -G': %w", alias, err)
 	}
 
-	var host, user, port, proxyJump, identityAgent string
-	var ids []string
+	remote, proxyJump := parseSSHConfig(alias, out, defaultPort)
+	proxyJumps, err := resolveProxyJumps(proxyJump, defaultPort)
+	if err != nil {
+		return Remote{}, fmt.Errorf("resolve ProxyJump for %q: %w", alias, err)
+	}
+	remote.ProxyJumps = proxyJumps
+	return remote, nil
+}
+
+// parseSSHConfig reads `ssh -G` output (one "keyword value..." per line)
+// into a Remote. The ProxyJump value is returned unresolved.
+func parseSSHConfig(alias string, out []byte, defaultPort int) (Remote, string) {
+	var r Remote
+	var host, port, proxyJump string
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
 		if len(fields) < 2 {
 			continue
 		}
+		value := strings.Join(fields[1:], " ")
 		switch strings.ToLower(fields[0]) {
 		case "hostname":
 			host = fields[1]
 		case "user":
-			user = fields[1]
+			r.User = fields[1]
 		case "port":
 			port = fields[1]
 		case "identityfile":
-			ids = append(ids, expandHome(strings.Join(fields[1:], " ")))
+			r.IdentityFiles = append(r.IdentityFiles, expandHome(value))
 		case "identityagent":
-			identityAgent = strings.Join(fields[1:], " ")
+			r.IdentityAgent = value
+		case "identitiesonly":
+			r.IdentitiesOnly = isYes(fields[1])
 		case "proxyjump":
-			proxyJump = strings.Join(fields[1:], " ")
+			proxyJump = value
+		case "proxycommand":
+			if !strings.EqualFold(value, "none") {
+				r.ProxyCommand = value
+			}
+		case "certificatefile":
+			if !strings.EqualFold(value, "none") {
+				r.CertificateFiles = append(r.CertificateFiles, expandHome(value))
+			}
+		// ssh -G prints file lists space-separated (quoting is lost), so
+		// paths containing spaces cannot be represented.
+		case "userknownhostsfile":
+			r.UserKnownHostsFiles = expandHomeAll(fields[1:])
+		case "globalknownhostsfile":
+			r.GlobalKnownHostsFiles = expandHomeAll(fields[1:])
+		case "stricthostkeychecking":
+			r.StrictHostKeyChecking = strings.ToLower(fields[1])
+		case "hostkeyalias":
+			if !strings.EqualFold(value, "none") {
+				r.HostKeyAlias = value
+			}
+		case "hashknownhosts":
+			r.HashKnownHosts = isYes(fields[1])
 		}
 	}
 	if host == "" {
@@ -1009,17 +1027,21 @@ func resolveAlias(alias string, defaultPort int) (Remote, error) {
 	if port == "" {
 		port = strconv.Itoa(defaultPort)
 	}
-	proxyJumps, err := resolveProxyJumps(proxyJump, defaultPort)
-	if err != nil {
-		return Remote{}, fmt.Errorf("resolve ProxyJump for %q: %w", alias, err)
+	r.Addr = net.JoinHostPort(host, port)
+	return r, proxyJump
+}
+
+// isYes reports whether an ssh -G flag value is enabled.
+func isYes(v string) bool {
+	return strings.EqualFold(v, "yes") || strings.EqualFold(v, "true")
+}
+
+func expandHomeAll(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, expandHome(p))
 	}
-	return Remote{
-		User:          user,
-		Addr:          net.JoinHostPort(host, port),
-		IdentityFiles: ids,
-		IdentityAgent: identityAgent,
-		ProxyJumps:    proxyJumps,
-	}, nil
+	return out
 }
 
 // expandHome expands a leading "~/" (or bare "~") to the user's home

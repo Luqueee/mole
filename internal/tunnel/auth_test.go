@@ -262,7 +262,8 @@ func TestIdentityAgentForAliasAndProxyJump(t *testing.T) {
 	_, targetPort, _ := net.SplitHostPort(targetAddr)
 	_, jumpPort, _ := net.SplitHostPort(jumpAddr)
 	fixture := fmt.Sprintf(`#!/bin/sh
-case "$2" in
+[ "$1" = -G ] && [ "$2" = -- ] || exit 2
+case "$3" in
   target) printf 'user test\nhostname 127.0.0.1\nport %s\nidentityagent %s/target.sock\nproxyjump jump\n' ;;
   jump) printf 'user test\nhostname 127.0.0.1\nport %s\nidentityagent %s/jump.sock\nproxyjump none\n' ;;
   *) exit 1 ;;
