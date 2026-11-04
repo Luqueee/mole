@@ -3,7 +3,12 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -33,3 +38,31 @@ func terminate(pid int) error {
 	}
 	return proc.Signal(syscall.SIGTERM)
 }
+
+// processImage returns the executable (path or name) pid runs: the
+// /proc/<pid>/exe link on Linux, the ps(1) command name elsewhere.
+func processImage(pid int) (string, error) {
+	if runtime.GOOS == "linux" {
+		dir := "/proc/" + strconv.Itoa(pid)
+		if exe, err := os.Readlink(dir + "/exe"); err == nil {
+			return exe, nil
+		}
+		comm, err := os.ReadFile(dir + "/comm")
+		return strings.TrimSpace(string(comm)), err
+	}
+	ps := "/bin/ps"
+	if _, err := os.Stat(ps); err != nil {
+		ps = "ps"
+	}
+	args := []string{"-o", "comm=", "-p", strconv.Itoa(pid)}
+	switch runtime.GOOS {
+	case "darwin", "dragonfly", "freebsd", "netbsd", "openbsd":
+		args = append([]string{"-ww"}, args...) // never truncate a long path
+	}
+	out, err := exec.Command(ps, args...).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// watchStopRequests is a no-op on Unix: `mole down` sends SIGTERM, which
+// the signal context already observes.
+func watchStopRequests(context.CancelFunc) {}

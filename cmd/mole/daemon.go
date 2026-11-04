@@ -8,6 +8,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -33,9 +35,10 @@ func daemonize(upArgs []string) int {
 		return 1
 	}
 
-	// Refuse to start a second instance if one is already running.
-	if pid, ok := readPid(); ok && processAlive(pid) {
-		fmt.Fprintf(os.Stderr, "mole is already running (pid %d). Use 'mole down' to stop it.\n", pid)
+	// Refuse to start a second instance if one is already running. The
+	// child re-checks under the instance lock, which settles races.
+	if d := findDaemon(); d.running {
+		fmt.Fprintln(os.Stderr, alreadyRunningMessage(d.pid))
 		return 1
 	}
 
@@ -68,17 +71,19 @@ func daemonize(upArgs []string) int {
 		fmt.Fprintln(os.Stderr, "error: failed to start background process:", err)
 		return 1
 	}
+	// The child writes the pidfile itself once it holds the instance lock
+	// (see claimInstance), so a child that loses a start race never
+	// overwrites the running server's pidfile.
 	pid := cmd.Process.Pid
-	if err := writePid(pid); err != nil {
-		fmt.Fprintln(os.Stderr, "warn: could not write pidfile:", err)
-	}
 	// A child that dies at once (no remote configured, bad config, a port in
 	// use) must not be reported as started: wait a moment and say why.
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited) }()
 	select {
 	case <-exited:
-		_ = os.Remove(pidPath())
+		if held, err := lockHeld(); err == nil && !held {
+			removePidFile(pid) // it died before it could clean up
+		}
 		fmt.Fprintln(os.Stderr, "error: mole exited right after starting:")
 		fmt.Fprint(os.Stderr, newLogLines(logPath(), logStart))
 		return 1
@@ -86,6 +91,9 @@ func daemonize(upArgs []string) int {
 	}
 
 	fmt.Printf("mole started in background (pid %d)\n", pid)
+	if strings.Contains(newLogLines(logPath(), logStart), connectRetryMessage) {
+		fmt.Println("  note:   the remote is not reachable yet; mole keeps retrying (see 'mole logs')")
+	}
 	fmt.Printf("  logs:   %s\n", logPath())
 	fmt.Printf("  status: mole status\n")
 	fmt.Printf("  stop:   mole down\n")
@@ -110,25 +118,80 @@ func newLogLines(path string, offset int64) string {
 	return "  " + strings.Join(lines, "\n  ") + "\n"
 }
 
-// runDown stops a backgrounded mole by signalling the PID in the
-// pidfile and removing it.
-func runDown(_ []string) int {
-	pid, ok := readPid()
-	if !ok {
-		fmt.Fprintln(os.Stderr, "mole is not running (no pidfile found)")
-		return 1
-	}
-	if !processAlive(pid) {
-		fmt.Fprintf(os.Stderr, "mole is not running (stale pidfile for pid %d); cleaning up\n", pid)
-		_ = os.Remove(pidPath())
-		return 1
-	}
+// stopTimeout bounds how long `mole down` and `mole restart` wait for the
+// server to exit after asking it to stop.
+const stopTimeout = 5 * time.Second
+
+// errStillRunning reports a server that outlived stopTimeout.
+var errStillRunning = fmt.Errorf("still running %s after the stop request", stopTimeout)
+
+// stopDaemon asks pid to shut down and waits for it to exit.
+func stopDaemon(pid int) error {
 	if err := terminate(pid); err != nil {
-		fmt.Fprintf(os.Stderr, "error: could not stop mole (pid %d): %v\n", pid, err)
+		return err
+	}
+	if !waitExit(pid, stopTimeout) {
+		return errStillRunning
+	}
+	return nil
+}
+
+// waitExit polls until pid has exited or timeout elapses and reports
+// whether it exited.
+func waitExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for processAlive(pid) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return true
+}
+
+// stopContext extends sigCtx, the run's SIGINT/SIGTERM context, with the
+// platform's other stop request (`mole down` on Windows, which has no
+// SIGTERM). After the first signal it restores the default handling, so a
+// second Ctrl+C ends a slow shutdown at once.
+func stopContext(sigCtx context.Context, stopSignals context.CancelFunc) (context.Context, context.CancelFunc) {
+	go func() {
+		<-sigCtx.Done()
+		stopSignals()
+	}()
+	ctx, cancel := context.WithCancel(sigCtx)
+	watchStopRequests(cancel)
+	return ctx, cancel
+}
+
+// runDown stops the running mole (backgrounded, or in the foreground of
+// another terminal or a service manager), waits for it to exit and removes
+// its pidfile. Only a process known to be the mole server is signalled.
+func runDown(_ []string) int {
+	d := findDaemon()
+	if !d.running {
+		if d.stalePid != 0 {
+			fmt.Fprintf(os.Stderr, "mole is not running (stale pidfile for pid %d); cleaning up\n", d.stalePid)
+			removePidFile(d.stalePid)
+		} else {
+			fmt.Fprintln(os.Stderr, "mole is not running (no pidfile found)")
+		}
 		return 1
 	}
-	_ = os.Remove(pidPath())
-	fmt.Printf("mole stopped (pid %d)\n", pid)
+	if d.pid == 0 {
+		fmt.Fprintf(os.Stderr, "mole is running, but its pid is unknown (%s is missing or stale); stop it where it was started\n", pidPath())
+		return 1
+	}
+	if err := stopDaemon(d.pid); err != nil {
+		if errors.Is(err, errStillRunning) {
+			fmt.Fprintf(os.Stderr, "error: mole (pid %d) is %v; see 'mole logs'\n", d.pid, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: could not stop mole (pid %d): %v\n", d.pid, err)
+		}
+		return 1
+	}
+	removePidFile(d.pid)
+	fmt.Printf("mole stopped (pid %d)\n", d.pid)
+	printServiceNoteAfterDown(d.pid)
 	return 0
 }
 
@@ -142,7 +205,9 @@ func runDown(_ []string) int {
 //     what to reconnect to. Tell the user to run `mole init` or
 //     `mole up -remote X` first.
 //  3. If a daemon is running, runDown-equivalent: signal the PID
-//     from the pidfile and wait for it to exit.
+//     from the pidfile and wait for it to exit. A daemon run by the
+//     login service (`mole service install`) is restarted through the
+//     service manager instead, so it stays supervised.
 //  4. daemonize with the same config + remote.
 //
 // This is the operation the user reaches for when they want
@@ -172,33 +237,29 @@ func runRestart(args []string) int {
 	}
 
 	// Stop the running daemon if any. We use the same primitive as
-	// `mole down`: read pidfile, signal, remove. If no daemon is
-	// running, print a note and proceed to start one (so `mole
+	// `mole down`: find the server, signal it, wait for it to exit. If no
+	// daemon is running, print a note and proceed to start one (so `mole
 	// restart` doubles as `mole up -d` when nothing is up yet).
-	if pid, ok := readPid(); ok {
-		if !processAlive(pid) {
-			fmt.Fprintf(os.Stderr, "stale pidfile (pid %d not running); cleaning up\n", pid)
-			_ = os.Remove(pidPath())
-		} else {
-			if err := terminate(pid); err != nil {
-				fmt.Fprintf(os.Stderr, "could not stop pid %d: %v\n", pid, err)
-				return 1
-			}
-			// Wait for the process to actually exit. SIGTERM gives
-			// it a moment; up to ~2s is plenty for a Go program
-			// tearing down SSH tunnels and HTTP listeners.
-			for i := 0; i < 20; i++ {
-				if !processAlive(pid) {
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
-			if processAlive(pid) {
-				fmt.Fprintf(os.Stderr, "pid %d did not exit within 2s; refusing to start a second instance\n", pid)
-				return 1
-			}
+	d := findDaemon()
+	switch {
+	case d.running && d.pid == 0:
+		fmt.Fprintf(os.Stderr, "mole is running, but its pid is unknown (%s is missing or stale); stop it where it was started\n", pidPath())
+		return 1
+	case d.running:
+		// A server the login service runs is restarted by the service
+		// manager, so it stays supervised.
+		if handled, code := restartManagedService(d.pid); handled {
+			return code
 		}
-	} else {
+		if err := stopDaemon(d.pid); err != nil {
+			fmt.Fprintf(os.Stderr, "could not stop pid %d: %v; refusing to start a second instance\n", d.pid, err)
+			return 1
+		}
+		removePidFile(d.pid)
+	case d.stalePid != 0:
+		fmt.Fprintf(os.Stderr, "stale pidfile (pid %d not running); cleaning up\n", d.stalePid)
+		removePidFile(d.stalePid)
+	default:
 		fmt.Fprintln(os.Stderr, "note: no mole up running; starting one")
 	}
 
