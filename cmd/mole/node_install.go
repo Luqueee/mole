@@ -56,7 +56,7 @@ func nodeInstall(configPath, name, branch string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	where := "latest main"
+	where := "latest release"
 	if branch != "" {
 		where = "branch " + branch
 	}
@@ -70,7 +70,7 @@ func nodeInstall(configPath, name, branch string) int {
 	if code != 0 {
 		fmt.Fprintf(os.Stderr, "mole node: the installer failed on %s (exit %d)\n", name, code)
 		if strings.TrimSpace(os.Getenv("MOLE_DEBUG")) == "" {
-			fmt.Fprintln(os.Stderr, "(it needs git and curl or wget on the node)")
+			fmt.Fprintln(os.Stderr, "(it needs curl or wget, tar and sha256sum or shasum on the node; building a branch also needs git)")
 		}
 		return code
 	}

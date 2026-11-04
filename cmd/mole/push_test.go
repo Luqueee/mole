@@ -286,3 +286,13 @@ func TestPushCLIPersistsConfig(t *testing.T) {
 		t.Fatalf("after unpush = %+v", cfg.Push)
 	}
 }
+
+func TestLiveApplyHint(t *testing.T) {
+	connecting := errors.New("POST /ports/push: 503 Service Unavailable: mole is still connecting to dev")
+	if got := liveApplyHint(connecting); !strings.Contains(got, "mole restart") {
+		t.Fatalf("hint while connecting = %q, want a restart hint", got)
+	}
+	if got := liveApplyHint(errors.New("POST /ports/push: 500 Internal Server Error: bind failed")); !strings.Contains(got, "next reconnect") {
+		t.Fatalf("hint for a failed bind = %q, want the reconnect retry hint", got)
+	}
+}

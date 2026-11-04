@@ -12,7 +12,9 @@
 #   .\scripts\install.ps1 -Init                   # also run mole init
 #
 # Environment variables:
-#   MOLE_VERSION    release tag to install (default: latest release)
+#   MOLE_VERSION    release tag to install (default: the newest published
+#                   vX.Y.Z release; the desktop app's desktop-v* are skipped)
+#   GITHUB_TOKEN    sent to the GitHub API, for its rate limit
 #   MOLE_BRANCH     git branch or tag to download and build with Go, to try
 #                   something that is not released (needs Go; overrides the rest)
 #   MOLE_SRC        path to an existing local clone to build with Go
@@ -188,13 +190,27 @@ if ($projectRoot) {
         default { Die "unsupported Windows architecture: $arch" }
     }
     $headers = @{ 'User-Agent' = 'mole-installer' }
+    # A token raises the API's rate limit (CI runners share addresses). It is
+    # sent to the API only, not with the download.
+    $apiHeaders = @{ 'User-Agent' = 'mole-installer'; 'Accept' = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN) { $apiHeaders['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
     $api = 'https://api.github.com/repos/Luqueee/mole/releases'
     if ($env:MOLE_VERSION) {
         $tag = $env:MOLE_VERSION
         if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { Die 'MOLE_VERSION must be a release tag such as v0.1.0 on Windows' }
-        $release = Invoke-RestMethod -Headers $headers -Uri "$api/tags/$tag"
+        $release = Invoke-RestMethod -Headers $apiHeaders -Uri "$api/tags/$tag"
     } else {
-        $release = Invoke-RestMethod -Headers $headers -Uri "$api/latest"
+        # Not /releases/latest: the desktop app's releases (desktop-v*) share
+        # the repository and are often the latest one, without CLI archives.
+        # The newest published (not draft, not prerelease) vX.Y.Z release is.
+        # Assigned before piping: Windows PowerShell 5.1 would pass the whole
+        # JSON array down the pipeline as one object.
+        $releases = Invoke-RestMethod -Headers $apiHeaders -Uri "${api}?per_page=100"
+        $release = $releases |
+            Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -match '^v[0-9]+\.[0-9]+\.[0-9]+$' } |
+            Sort-Object -Property { [version]$_.tag_name.TrimStart('v') } -Descending |
+            Select-Object -First 1
+        if (-not $release) { Die 'found no published mole release' }
     }
     $name = "mole_$($release.tag_name.TrimStart('v'))_windows_$arch.zip"
     $asset = @($release.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1

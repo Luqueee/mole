@@ -1,10 +1,10 @@
 module github.com/Luqueee/mole/desktop
 
-go 1.26.4
+go 1.26.10
 
 require (
 	github.com/wailsapp/wails/v3 v3.0.0-beta.34
-	golang.org/x/crypto v0.57.0
+	golang.org/x/crypto v0.58.0
 )
 
 require gopkg.in/yaml.v3 v3.0.1 // indirect

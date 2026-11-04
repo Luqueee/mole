@@ -33,13 +33,11 @@ import (
 	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
 	"github.com/Luqueee/mole/internal/discover"
-	"github.com/Luqueee/mole/internal/meshdns"
 	"github.com/Luqueee/mole/internal/proxy"
-	"github.com/Luqueee/mole/internal/routes"
 	"github.com/Luqueee/mole/internal/tunnel"
 )
 
-const version = "0.8.4"
+const version = "0.9.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -72,6 +70,8 @@ func main() {
 		os.Exit(runUpdate(args))
 	case "restart":
 		os.Exit(runRestart(args))
+	case "service":
+		os.Exit(runService(args))
 	case "clip":
 		os.Exit(runClip(args))
 	case "ports":
@@ -132,6 +132,7 @@ func printUsage() {
 		{"logs", "Show the background daemon log (colourised; -f to follow)"},
 		{"update", "Update mole in place to the latest release"},
 		{"restart", "Stop and re-launch a backgrounded mole using the same config"},
+		{"service", "Start mole at login and keep it running (service install|uninstall|status)"},
 		{"ports", "Manage the auto-discover port list (add/remove/list)"},
 		{"push", "Expose a local port on the remote (push list|LOCAL[:REMOTE])"},
 		{"doctor", "Diagnose config, SSH, push and split DNS (doctor [name...])"},
@@ -160,285 +161,31 @@ func printUsage() {
 	fmt.Println()
 }
 
+// runUp runs `mole up`: the forwarder in the foreground (see upServer for
+// its lifecycle), or with -d a detached copy of itself.
 func runUp(args []string) int {
-	fs := flag.NewFlagSet("up", flag.ExitOnError)
-	var (
-		configPath = fs.String("config", "", "path to YAML config (default: ./mole.yaml, then user-global)")
-		remote     = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
-		ports      = fs.String("ports", "", "comma-separated ports to forward")
-		autoDisc   = fs.Bool("auto-discover", false, "probe remote for common dev ports")
-		adminAddr  = fs.String("admin", "", "admin HTTP address (default 127.0.0.1:9999; empty to disable)")
-		logLevel   = fs.String("log-level", "", "debug|info|warn|error")
-		detach     = fs.Bool("d", false, "run in the background (daemon)")
-		detachLong = fs.Bool("detach", false, "alias for -d")
-		insecure   = fs.Bool("insecure", false, "disable SSH host key verification (UNSAFE; dev only)")
-	)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `Usage: mole up [flags]
-
-Flags:
-  -config         path to YAML config (default: ./mole.yaml, then user-global)
-  -remote         SSH target, e.g. dev@workstation[:port]
-  -ports          comma-separated ports to forward (e.g. 3000,5173)
-  -auto-discover  probe remote for common dev ports
-  -admin          admin HTTP address (empty to disable)
-  -log-level      debug|info|warn|error
-  -insecure       disable SSH host key verification (UNSAFE; dev only)
-  -d, -detach     run in the background (daemon); stop with 'mole down'
-
-Either -remote or a config file with 'remote:' is required.`)
-	}
-	if err := fs.Parse(args); err != nil {
+	flags, err := parseUpFlags(args, os.Stderr)
+	if err != nil {
+		// As with flag.ExitOnError: the flag package has printed why.
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 
 	// Background mode: re-exec detached and return control to the shell.
 	// The child carries MOLE_DAEMONIZED=1 and falls through to run the
 	// forwarder in the foreground of its own session.
-	if (*detach || *detachLong) && os.Getenv("MOLE_DAEMONIZED") == "" {
+	if flags.detached() && os.Getenv("MOLE_DAEMONIZED") == "" {
 		return daemonize(stripDetachFlags(args))
 	}
-	// When we are the detached child, clean up the pidfile on exit.
-	if os.Getenv("MOLE_DAEMONIZED") != "" {
-		defer os.Remove(pidPath())
-	}
-
-	// When no explicit -config is given, search the standard locations
-	// (project-local ./mole.yaml, then user-global) so a config written
-	// by `mole init -global` is picked up automatically.
-	resolvedPath := *configPath
-	if resolvedPath == "" {
-		resolvedPath = config.Find()
-	}
-	cfg, err := config.Load(resolvedPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "config error:", err)
-		return 1
-	}
-
-	// CLI overrides.
-	if *remote != "" {
-		cfg.Remote = *remote
-	}
-	if *ports != "" {
-		cfg.Ports = config.ParsePorts(*ports)
-	}
-	if *autoDisc {
-		cfg.AutoDiscover = true
-	}
-	if *adminAddr != "" {
-		cfg.AdminAddr = *adminAddr
-	}
-	if *logLevel != "" {
-		cfg.LogLevel = *logLevel
-	}
-	if *insecure {
-		cfg.Insecure = true
-	}
-
-	if cfg.Remote == "" {
-		fmt.Fprintln(os.Stderr, "error: -remote is required (or set 'remote:' in config)")
-		return 1
-	}
-
-	log := newLogger(cfg.LogLevel)
-
-	rem, err := tunnel.ResolveRemote(cfg.Remote, cfg.SSHPort)
-	if err != nil {
-		log.Error("invalid remote", "err", err)
-		return 1
-	}
-
-	log.Info("connecting to remote", "remote", cfg.Remote, "ssh_addr", rem.Addr, "user", rem.User)
-	mgr, err := tunnel.New(rem, cfg.Insecure, log)
-	if err != nil {
-		log.Error("ssh connect failed", "err", err)
-		return 1
-	}
-	defer mgr.Close()
-
-	stats := admin.NewStats()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Push forwards (local -> remote). Remote listeners die with the SSH
-	// connection, so the reconnect hook must be registered before Watch
-	// starts, or a reconnect during startup would be missed.
-	pushFwd := newPushForwarder(mgr, log, stats.Hooks(proxy.DirPush))
-	defer pushFwd.closeAll()
-	mgr.OnReconnect(pushFwd.reopenAll)
-
-	// File transfer: sending to the remote's inbox always works; receiving
-	// from the remote needs transfer.receive (see `mole inbox receive on`).
-	hub := newTransferHub(log, cfg.Remote, resolvedPath, cfg.Transfer, mgr, pushFwd, config.StateDir())
-	defer hub.close()
-	mgr.OnReconnect(hub.onReconnect)
-
-	// Watch SSH connection and auto-reconnect.
-	go mgr.Watch(ctx, 10*time.Second)
-
-	// Build the exclude set up front so the forwarder can use it
-	// (the admin API's live-add path consults it via
-	// AddDiscover). If auto-discover is off we still need the map
-	// for symmetry — it's just empty.
-	exclude := make(map[int]bool, len(cfg.ExcludePorts))
-	for _, p := range cfg.ExcludePorts {
-		exclude[p] = true
-	}
-	// A remote service on the admin API's own port must not be forwarded onto
-	// it: the sweep below runs before the admin server binds, so the forward
-	// would win the port and every client of the admin API (the desktop app,
-	// `mole status`) would be talking to the remote service instead.
-	if p, ok := loopbackPort(cfg.AdminAddr); ok {
-		exclude[p] = true
-	}
-
-	// The forwarder owns the per-port listeners and can add new ones at
-	// runtime, which is what makes periodic auto-discovery work.
-	fwd := &forwarder{
-		active:      make(map[int]net.Listener),
-		failed:      make(map[int]bool),
-		pinned:      make(map[int]bool, len(cfg.Ports)),
-		mgr:         mgr,
-		remoteLabel: cfg.Remote,
-		log:         log,
-		exclude:     exclude,
-		hooks:       stats.Hooks(proxy.DirPull),
-	}
-	defer fwd.closeAll()
-	// A port that is pushed to the same number on the remote is never also
-	// pulled: the two would feed each other forever.
-	fwd.loops = pushFwd.loopsPort
-	pushFwd.onLoop = func(port int) { _ = fwd.RemoveDiscover(port) }
-
-	pushFwd.start(cfg.Push)
-	go hub.enableAtStart()
-
-	// The Host-routing proxy also works without system DNS under .localhost.
-	var routeCtl *routeManager
-	if len(cfg.Domains) > 0 {
-		table := routes.NewTable(cfg.Domains, cfg.Routes)
-		// Routes to other nodes go through a tunnel of their own, opened the
-		// first time one is used; the primary remote reuses mgr.
-		var pool *routes.Pool
-		pool = routes.NewPool(mgr, func(name string) (routes.NodeConn, error) {
-			return openNodeTunnel(pool.Context(), resolvedPath, name, log)
-		}, log)
-		defer pool.Close()
-		routeCtl = &routeManager{table: table, hasNode: func(name string) bool { return nodeConfigured(resolvedPath, name) }}
-		routePort := cfg.RoutePortOrDefault()
-		if rl, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(routePort))); err != nil {
-			log.Warn("route proxy bind failed; named routes will not answer", "port", routePort, "err", err)
-		} else {
-			defer rl.Close()
-			go func() {
-				if err := routes.New(table, pool, stats.Hooks(proxy.DirPull), log).Serve(rl); err != nil {
-					log.Warn("route proxy terminated", "err", err)
-				}
-			}()
-			log.Info("route proxy listening", "addr", rl.Addr().String(), "routes", len(cfg.Routes))
-		}
-
-		if needsDNSStub(cfg.Domains) {
-			mesh := meshdns.New(cfg.Domains, cfg.DomainPortsOrDefault(), mgr, stats.Hooks(proxy.DirPull), log)
-			defer mesh.Close()
-			mesh.SetRoutes(table)
-			stubAddr := meshdns.StubListenAddr()
-			pc, err := net.ListenPacket("udp", stubAddr)
-			if err != nil {
-				log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
-				return 1
-			}
-			defer pc.Close()
-			tl, err := net.Listen("tcp", stubAddr)
-			if err != nil {
-				log.Error("dns stub bind failed", "addr", stubAddr, "err", err)
-				return 1
-			}
-			defer tl.Close()
-			go mesh.ServeUDP(pc)
-			go mesh.ServeTCP(tl)
-			log.Info("dns stub listening", "addr", stubAddr, "domains", cfg.Domains, "ports", cfg.DomainPortsOrDefault())
-		}
-	} else if len(cfg.Routes) > 0 {
-		log.Warn("routes: ignored, no domains: configured (`mole domain set NAME`)")
-	}
-
-	// Forward any explicitly-configured ports up front. These are pinned:
-	// auto-discovery's pruning never closes them, even if the remote
-	// service is momentarily down.
-	for _, p := range cfg.Ports {
-		fwd.pinned[p] = true
-		fwd.ensure(p)
-	}
-
-	if cfg.AutoDiscover {
-		// Initial sweep, then keep re-discovering so dev servers that
-		// come up after launch are forwarded automatically — no need to
-		// restart mole when you start your dev server.
-		discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
-		go func() {
-			t := time.NewTicker(15 * time.Second)
-			defer t.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					discoverInto(ctx, fwd, mgr, cfg.DiscoverPorts, exclude, log)
-				}
-			}
-		}()
-	}
-
-	// An empty set is fine: ports and pushes can be added at runtime
-	// (mole ports add, mole push, the desktop app).
-	if !cfg.AutoDiscover && len(fwd.ports()) == 0 && len(cfg.Push) == 0 && len(cfg.Domains) == 0 {
-		log.Info("nothing to forward yet; add ports or pushes at runtime (`mole ports add`, `mole push`)")
-	}
-
-	// Admin HTTP API.
-	var adminSrv *http.Server
-	if cfg.AdminAddr != "" {
-		info := map[string]any{
-			"remote":        cfg.Remote,
-			"auto_discover": cfg.AutoDiscover,
-			"domains":       cfg.Domains,
-		}
-		srv := admin.New(stats, info).
-			WithPorts(fwd.ports).
-			WithPortController(fwd).
-			WithPushController(pushFwd).
-			WithTransferController(hub)
-		if routeCtl != nil {
-			srv = srv.WithRouteController(routeCtl)
-		}
-		adminSrv = &http.Server{
-			Addr:              cfg.AdminAddr,
-			Handler:           srv.Handler(),
-			ReadHeaderTimeout: 5 * time.Second,
-		}
-		go func() {
-			log.Info("admin listening", "addr", cfg.AdminAddr)
-			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Warn("admin server stopped", "err", err)
-			}
-		}()
-	}
-
-	log.Info("mole up. Press Ctrl+C to stop.")
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	log.Info("shutting down")
-
-	cancel()
-	if adminSrv != nil {
-		shutdownCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
-		defer c()
-		_ = adminSrv.Shutdown(shutdownCtx)
-	}
-	return 0
+	// SIGINT/SIGTERM (and `mole down` on Windows) stop the run at any stage,
+	// including while the first connection waits for the network.
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	stopCtx, stopRun := stopContext(sigCtx, stopSignals)
+	defer stopRun()
+	return newUpServer(flags).run(stopCtx)
 }
 
 // Localhost names already resolve to loopback in browsers. They need only the
@@ -480,6 +227,7 @@ type forwarder struct {
 	active map[int]net.Listener
 	failed map[int]bool // ports whose bind failed (warned once already)
 	pinned map[int]bool // explicitly-configured ports; never auto-pruned
+	closed bool         // closeAll ran: no new listeners
 
 	// exclude is consulted by AddDiscover (the live-add path) so
 	// the admin API returns 409 Conflict for excluded ports
@@ -508,6 +256,9 @@ func (f *forwarder) ensure(p int) error {
 // ensureLocked is the lock-held implementation of ensure. It lets live
 // mutation check and create a listener as one atomic operation.
 func (f *forwarder) ensureLocked(p int) error {
+	if f.closed {
+		return errForwarderClosed
+	}
 	if _, ok := f.active[p]; ok {
 		return nil
 	}
@@ -576,10 +327,16 @@ func (f *forwarder) retain(keep map[int]bool) {
 	}
 }
 
-// closeAll shuts down every active listener.
+// errForwarderClosed is returned by ensure after closeAll.
+var errForwarderClosed = errors.New("the forwarder is shut down")
+
+// closeAll shuts down every active listener. The forwarder opens none
+// afterwards, so a discovery sweep still running at shutdown cannot leave a
+// listener behind.
 func (f *forwarder) closeAll() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.closed = true
 	for p, ln := range f.active {
 		_ = ln.Close()
 		delete(f.active, p)
@@ -640,12 +397,19 @@ func (f *forwarder) RemoveDiscover(port int) error {
 // any port is found); when that enumeration is authoritative it also
 // prunes ports that have since died (see forwarder.retain). It falls back
 // to probing the fixed candidate list — add-only, no pruning — when
-// ss/netstat aren't available, since a probe can't prove a port is gone.
-func discoverInto(ctx context.Context, fwd *forwarder, mgr *tunnel.Manager, candidates []int, exclude map[int]bool, log *slog.Logger) {
+// ss/netstat aren't available or print nothing it can read, since a probe
+// can't prove a port is gone.
+//
+// inRange is discover_range: an enumerated listener outside it is not
+// forwarded on its own. It never applies to ports the user named — the
+// candidates (discover_ports, which `mole ports add` writes) and pinned
+// ports — nor to the probe fallback, which only probes candidates.
+func discoverInto(ctx context.Context, fwd *forwarder, mgr *tunnel.Manager, candidates []int, exclude map[int]bool, inRange func(port int) bool, log *slog.Logger) {
 	found, authoritative := discover.RemoteListeners(mgr, log)
 	if !authoritative {
-		// Couldn't enumerate (tool missing or transport down). Probe the
-		// candidate list and only add — never prune on a guess.
+		// Couldn't enumerate (tool missing, unreadable output, or
+		// transport down). Probe the candidate list and only add — never
+		// prune on a guess.
 		probed, err := discover.ProbeWithFactory(ctx, func(probeCtx context.Context) (discover.SweepDialer, error) {
 			return mgr.NewProbeDialer(probeCtx)
 		}, candidates, log)
@@ -660,27 +424,83 @@ func discoverInto(ctx context.Context, fwd *forwarder, mgr *tunnel.Manager, cand
 		}
 		return
 	}
-	keep := make(map[int]bool, len(found))
-	for _, p := range found {
-		if exclude[p] {
-			continue
+	named := make(map[int]bool, len(candidates))
+	for _, p := range candidates {
+		named[p] = true
+	}
+	forward, keep, skipped := planListeners(found, exclude, func(p int) bool {
+		if inRange(p) || named[p] {
+			return true
 		}
-		keep[p] = true
+		fwd.mu.Lock()
+		defer fwd.mu.Unlock()
+		return fwd.pinned[p]
+	})
+	if len(skipped) > 0 {
+		log.Debug("listeners outside discover_range not forwarded", "ports", skipped)
+	}
+	for _, p := range forward {
 		fwd.ensure(p)
 	}
 	fwd.retain(keep)
 }
 
+// planListeners turns an authoritative listener enumeration into the ports
+// to forward and the set forwarder.retain must keep. Excluded ports are
+// neither. A listener is forwarded when eligible(p); one that is not
+// (outside discover_range) is reported in skipped but still kept, so a
+// port already forwarded at the user's request — added live with `mole
+// ports add` — is not pruned while it keeps listening.
+func planListeners(found []int, exclude map[int]bool, eligible func(port int) bool) (forward []int, keep map[int]bool, skipped []int) {
+	keep = make(map[int]bool, len(found))
+	for _, p := range found {
+		if exclude[p] {
+			continue
+		}
+		keep[p] = true
+		if eligible(p) {
+			forward = append(forward, p)
+		} else {
+			skipped = append(skipped, p)
+		}
+	}
+	return forward, keep, skipped
+}
+
 func runStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	addr := fs.String("admin", "127.0.0.1:9999", "admin API address")
+	addrFlag := fs.String("admin", "", "admin API address (default: admin_addr from the config)")
+	configPath := fs.String("config", "", "path to YAML config (default: ./mole.yaml, then user-global)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	resp, err := http.Get("http://" + *addr + "/status")
+	// Without -admin, use the address mole up listens on: admin_addr from the
+	// same config it reads.
+	addr := *addrFlag
+	if addr == "" {
+		path := resolveConfigPathReadOnly(*configPath)
+		cfg, err := config.Load(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "config error:", err)
+			return 1
+		}
+		if cfg.AdminAddr == "" {
+			where := "no config file was found"
+			if path != "" {
+				where = "admin_addr is not set in " + path
+			}
+			fmt.Fprintf(os.Stderr, "mole status: the admin API is disabled (%s).\n", where)
+			fmt.Fprintln(os.Stderr, "Set admin_addr: 127.0.0.1:9999 in the config and restart mole, or pass -admin ADDR if mole up was started with -admin.")
+			return 1
+		}
+		addr = cfg.AdminAddr
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + addr + "/status")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "could not reach admin API at", *addr, ":", err)
+		fmt.Fprintln(os.Stderr, "could not reach admin API at", addr, ":", err)
 		fmt.Fprintln(os.Stderr, "is mole running?")
 		return 1
 	}
@@ -697,7 +517,10 @@ func runStatus(args []string) int {
 	return 0
 }
 
-func newLogger(level string) *slog.Logger {
+func newLogger(level string) *slog.Logger { return newLoggerTo(os.Stderr, level) }
+
+// newLoggerTo returns a text logger writing to w at level.
+func newLoggerTo(w io.Writer, level string) *slog.Logger {
 	var lvl slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -709,6 +532,6 @@ func newLogger(level string) *slog.Logger {
 	default:
 		lvl = slog.LevelInfo
 	}
-	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})
+	h := slog.NewTextHandler(w, &slog.HandlerOptions{Level: lvl})
 	return slog.New(h)
 }

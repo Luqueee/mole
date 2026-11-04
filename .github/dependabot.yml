@@ -1,0 +1,71 @@
+# Weekly dependency updates. Minor and patch updates of each ecosystem arrive
+# as one grouped pull request; major updates come one per pull request so they
+# can be reviewed on their own. Security updates are not delayed by the
+# cooldown, which otherwise skips versions released in the last week (the same
+# window desktop/frontend/.npmrc and pnpm use).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: deps
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  # Requires the root module through `replace => ../`; bump shared modules in
+  # both go.mod files together.
+  - package-ecosystem: gomod
+    directory: /desktop
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: deps(desktop)
+    groups:
+      desktop-go:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /desktop/frontend
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: deps(desktop)
+    groups:
+      desktop-frontend:
+        update-types: [minor, patch]
+
+  # pnpm: Dependabot updates landing/pnpm-lock.yaml.
+  - package-ecosystem: npm
+    directory: /landing
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: deps(landing)
+    groups:
+      landing:
+        update-types: [minor, patch]
+
+  # Actions stay pinned by commit SHA; Dependabot moves the SHA and its
+  # version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        update-types: [minor, patch]

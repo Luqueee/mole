@@ -1,15 +1,17 @@
 // `mole update` — self-update by re-running the official installer.
 //
-// The Unix installer builds from source; the Windows installer downloads a
-// verified release archive unless run from a local clone. Update
+// Both installers download the latest CLI release's archive for this platform
+// and check its SHA-256 (Unix: against the release's SHA256SUMS; Windows:
+// against the digest GitHub reports); a branch is built from source. Update
 // re-runs the very same installer, but pins the destination to *this*
 // binary's own path via INSTALL_DIR so the running copy is replaced in
-// place — wherever it happens to live.
+// place — wherever it happens to live — and sets MOLE_RELEASE_ONLY so a mole
+// clone in the working directory is not built instead.
 //
 // Usage:
 //
-//	mole update                 # update to latest main (Unix) / release (Windows)
-//	mole update -version v0.1.0  # pin a specific version
+//	mole update                 # update to the latest release
+//	mole update -version v0.1.0  # install a specific release
 //	mole update -branch feat/x   # build and install a branch, to try it out
 //	mole update -dry-run         # print the command without running it
 package main
@@ -20,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -46,7 +49,7 @@ func installerURL(script, branch string) string {
 func runUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	var (
-		ref      = fs.String("version", "", "version to install (default: latest)")
+		ref      = fs.String("version", "", "release tag to install (default: the latest release)")
 		branch   = fs.String("branch", "", "git branch (or tag) to build from source and install")
 		dryRun   = fs.Bool("dry-run", false, "print the installer command without running it")
 		noVerify = fs.Bool("no-verify", false, "skip the post-install version check")
@@ -59,14 +62,15 @@ func runUpdate(args []string) int {
 		fmt.Fprintf(os.Stderr, "    %s\n", commandLine("update [flags]", c))
 		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("DESCRIPTION", c))
 		fmt.Fprintln(os.Stderr, "    Updates mole in place by re-running the official installer")
-		fmt.Fprintln(os.Stderr, "    against this binary's own location.")
+		fmt.Fprintln(os.Stderr, "    against this binary's own location. It installs the latest")
+		fmt.Fprintln(os.Stderr, "    release's prebuilt archive, checked against its SHA-256.")
 		fmt.Fprintf(os.Stderr, "\n  %s\n", cBold("FLAGS", c))
-		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -version <ref>", c), "version to install (Windows: release tag; Unix: git ref)")
+		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -version <tag>", c), "release to install, e.g. v0.6.1 (Unix: another git ref is built from source)")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -branch <name>", c), "build that branch (or tag) from source and install it (needs git; Go is fetched when missing)")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -dry-run", c), "print the installer command instead of running it")
 		fmt.Fprintf(os.Stderr, "    %s  %s\n", cGreen("  -no-verify", c), "skip the installer's post-install version check")
-		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'git' and 'curl'/'wget' on Unix (Go is downloaded if missing), or PowerShell on Windows,", c))
-		fmt.Fprintf(os.Stderr, "  %s\n", cDim("plus network access to github.com.", c))
+		fmt.Fprintf(os.Stderr, "\n  %s\n", cDim("Requires 'curl'/'wget', 'tar' and 'sha256sum'/'shasum' on Unix, or PowerShell on Windows,", c))
+		fmt.Fprintf(os.Stderr, "  %s\n", cDim("plus network access to github.com. -branch also needs git (Unix) or Go (Windows).", c))
 		fmt.Fprintln(os.Stderr)
 	}
 	if err := fs.Parse(args); err != nil {
@@ -81,6 +85,17 @@ func runUpdate(args []string) int {
 	if *branch != "" {
 		if err := validRef(*branch); err != nil {
 			fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), err)
+			return 2
+		}
+	}
+	if *ref != "" {
+		if err := validRef(*ref); err != nil {
+			fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), err)
+			return 2
+		}
+		// The Windows installer only knows releases; a ref is built with -branch.
+		if runtime.GOOS == "windows" && !isReleaseTag(*ref) {
+			fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "-version takes a release tag such as v0.6.1 on Windows; build a branch or tag with -branch")
 			return 2
 		}
 	}
@@ -104,13 +119,13 @@ func runUpdate(args []string) int {
 		return 1
 	}
 
-	// The Unix installer builds from source and fetches Go itself when it is
-	// missing. The Windows installer uses a release archive and needs Go only
-	// for MOLE_SRC or a branch.
+	// Both installers install a release archive. The Unix one builds a branch
+	// from source and fetches Go itself when it is missing; the Windows one
+	// needs Go for MOLE_SRC or a branch.
 	if runtime.GOOS == "windows" && (os.Getenv("MOLE_SRC") != "" || *branch != "") {
 		if _, err := exec.LookPath("go"); err != nil {
 			fmt.Fprintln(os.Stderr, cRed("  ✗ update:", color), "'go' is not installed or not on PATH.")
-			fmt.Fprintln(os.Stderr, "        Install Go 1.26.4+ from https://go.dev/dl/ and re-run.")
+			fmt.Fprintln(os.Stderr, "        Install Go 1.26.10+ from https://go.dev/dl/ and re-run.")
 			return 1
 		}
 	}
@@ -123,6 +138,7 @@ func runUpdate(args []string) int {
 
 	if *dryRun {
 		fmt.Printf("\n  %s\n", cDim("─ dry-run ─", color))
+		fmt.Printf("  %s  %s\n", cDim("would install:", color), cBold(sourceRef(*ref, *branch), color))
 		fmt.Printf("  %s  %s %s\n", cDim("would run:", color), cCyan(cmd.Path, color), cCyan(quoteArgs(cmd.Args[1:]), color))
 		for _, kv := range updateEnv(exe, *ref, *branch) {
 			if k, v, _ := strings.Cut(kv, "="); k != "MOLE_RELEASE_ONLY" {
@@ -167,10 +183,18 @@ func validRef(ref string) error {
 	return nil
 }
 
+// releaseTag is the shape of a CLI release's tag. The desktop app's releases
+// (desktop-v*) live in the same repository and are not it.
+var releaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// isReleaseTag reports whether ref names a CLI release, which the installers
+// download rather than build.
+func isReleaseTag(ref string) bool { return releaseTag.MatchString(ref) }
+
 // buildUpdateCommand assembles the platform-specific installer invocation.
 // INSTALL_DIR pins the destination to the current binary's path. ref is a
-// version (a git ref on Unix, a release tag on Windows) and branch a git
-// branch to build from source (on Windows through MOLE_BRANCH, since
+// release tag (on Unix any other git ref is built from source) and branch a
+// git branch to build from source (on Windows through MOLE_BRANCH, since
 // MOLE_VERSION means a release there). The parent environment is inherited
 // so GO, MOLE_SRC, MOLE_REPO and friends still work.
 func buildUpdateCommand(dest, ref, branch string, noVerify bool) (*exec.Cmd, error) {
@@ -214,12 +238,11 @@ func buildUpdateCommand(dest, ref, branch string, noVerify bool) (*exec.Cmd, err
 }
 
 // updateEnv is what the installer is told through the environment: where to
-// put the binary, and which version or branch to install.
+// put the binary, and which version or branch to install. MOLE_RELEASE_ONLY
+// keeps the installer from building a mole clone that happens to be the
+// working directory instead of installing the release.
 func updateEnv(dest, ref, branch string) []string {
-	env := []string{"INSTALL_DIR=" + dest}
-	if runtime.GOOS == "windows" {
-		env = append(env, "MOLE_RELEASE_ONLY=1")
-	}
+	env := []string{"INSTALL_DIR=" + dest, "MOLE_RELEASE_ONLY=1"}
 	switch {
 	case branch != "" && runtime.GOOS == "windows":
 		env = append(env, "MOLE_BRANCH="+branch)
@@ -252,17 +275,17 @@ func powershellPath() (string, error) {
 	return "", fmt.Errorf("PowerShell not found on PATH; cannot run the Windows installer")
 }
 
+// sourceRef says what an update installs, for its header and dry run.
 func sourceRef(ref, branch string) string {
-	if branch != "" {
+	switch {
+	case branch != "":
 		return "branch " + branch
+	case ref == "":
+		return "latest release"
+	case isReleaseTag(ref):
+		return "release " + ref
 	}
-	if ref == "" {
-		if runtime.GOOS == "windows" {
-			return "latest release"
-		}
-		return "latest (main)"
-	}
-	return ref
+	return ref + " (built from source)"
 }
 
 // quoteArgs renders a slice of args as a single space-joined string for

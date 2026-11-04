@@ -2,10 +2,16 @@
 # scripts/install.sh — install mole (Unix: Linux, macOS, FreeBSD).
 #
 # What this script does:
-#   1. Locates the source: uses the local repo if it is one, otherwise
-#      clones https://github.com/Luqueee/mole into a temp dir.
-#   2. Builds the binary with `go build -trimpath`. If Go is missing or too
-#      old, downloads the version the source needs into ~/.cache/mole/go
+#   1. Picks what to install. By default that is the latest mole release: the
+#      prebuilt archive for this OS and CPU, checked against the release's
+#      SHA256SUMS. That needs only curl or wget, tar and sha256sum or shasum
+#      (no git, no Go). It builds from source instead inside a mole clone, for
+#      MOLE_SRC or MOLE_REPO, for a MOLE_VERSION that is not a vX.Y.Z release
+#      tag (a branch, say), and when a release has no archive for this
+#      platform (it says so).
+#   2. A source build clones https://github.com/Luqueee/mole (unless it is a
+#      local clone) and runs `go build -trimpath`. If Go is missing or too old,
+#      it downloads the version the source needs into ~/.cache/mole/go
 #      (MOLE_NO_GO_DOWNLOAD=1 refuses to).
 #   3. Copies it to the right place (root → /usr/local/bin, otherwise
 #      $HOME/.local/bin). Override with --prefix or INSTALL_DIR.
@@ -18,8 +24,8 @@
 # inside the binary itself, shared with the Windows installer.
 #
 # Usage:
-#   ./scripts/install.sh                       # from a clone
-#   curl -fsSL .../install.sh | sh             # one-liner
+#   curl -fsSL .../install.sh | sh             # one-liner: the latest release
+#   ./scripts/install.sh                       # from a clone: builds it
 #   ./scripts/install.sh --prefix /opt         # custom prefix
 #   INSTALL_DIR=~/bin/mole ./scripts/install.sh
 #
@@ -36,10 +42,10 @@ set -eu
 (set -o pipefail) 2>/dev/null && set -o pipefail
 
 # Resolve a filesystem path to this script, when there is one. Used
-# only by resolve_source() to detect "am I running from inside a clone"
-# (script_dir/.. is the repo). In a piped invocation
-# (`curl ... | sh`) there is no file behind the script and SELF stays
-# empty — that's fine, resolve_source() then falls through to cloning.
+# only to detect "am I running from inside a clone" (script_dir/.. is
+# the repo). In a piped invocation (`curl ... | sh`) there is no file
+# behind the script and SELF stays empty — that's fine, the installer
+# then installs a release (or clones, for a source build).
 #
 # IMPORTANT: do NOT read stdin here. When the script is piped to `sh`,
 # the interpreter reads the script body *from stdin* as it executes.
@@ -69,13 +75,30 @@ else
 fi
 
 # MOLE_REPO points at another remote (a fork, or a local repository to try the
-# installer against). MOLE_VERSION is a git ref: a branch or a tag.
-REPO="${MOLE_REPO:-https://github.com/Luqueee/mole.git}"
+# installer against) and always means a source build. MOLE_VERSION is a release
+# tag (vX.Y.Z: its archive is installed) or any other git ref (built).
+GITHUB_REPO="Luqueee/mole"
+REPO="${MOLE_REPO:-https://github.com/$GITHUB_REPO.git}"
 BINARY="mole"
 DEFAULT_REF="main"
 VERSION_REF="${MOLE_VERSION:-$DEFAULT_REF}"
+# A ref asked for by name must exist: never fall back to the default branch.
+STRICT_REF="no"
+[ -n "${MOLE_VERSION:-}" ] && STRICT_REF="yes"
 
-# The ref ends up in a `git clone --branch` and in a linker flag: keep it plain.
+# Where releases are looked up and downloaded from. Tests (or a mirror) point
+# these elsewhere, file:// included; GITHUB_TOKEN only ever goes to the real API.
+DEFAULT_API_URL="https://api.github.com/repos/$GITHUB_REPO"
+API_URL="${MOLE_API_URL:-$DEFAULT_API_URL}"
+API_URL="${API_URL%/}"
+RELEASE_URL="${MOLE_RELEASE_URL:-https://github.com/$GITHUB_REPO/releases/download}"
+RELEASE_URL="${RELEASE_URL%/}"
+# Build provenance: auto checks it with `gh attestation verify` when gh is
+# installed and signed in (a failure is only a warning), require insists on it,
+# off skips it. The SHA-256 check against SHA256SUMS is always made.
+ATTESTATION="${MOLE_ATTESTATION:-auto}"
+
+# The ref ends up in a `git clone --branch`, a URL and a linker flag: keep it plain.
 if [ -n "${MOLE_VERSION:-}" ]; then
 	case "$VERSION_REF" in
 	-*|*..*|*[!A-Za-z0-9._/@+-]*)
@@ -84,6 +107,13 @@ if [ -n "${MOLE_VERSION:-}" ]; then
 		;;
 	esac
 fi
+case "$ATTESTATION" in
+auto|require|off) ;;
+*)
+	echo "error: invalid MOLE_ATTESTATION '$ATTESTATION' (auto, require or off)" >&2
+	exit 1
+	;;
+esac
 
 # Colour setup — only when stderr is a TTY and NO_COLOR is unset.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -112,10 +142,14 @@ usage() {
 install mole (Unix: Linux, macOS, FreeBSD).
 
 What this script does:
-  1. Locates the source: uses the local repo if it is one, otherwise
-     clones https://github.com/Luqueee/mole into a temp dir.
-  2. Builds the binary with `go build -trimpath`. If Go is missing or too
-     old, it downloads the version the source needs (checked against go.dev's
+  1. Installs the latest mole release by default: the prebuilt archive for
+     this OS and CPU, checked against the release's SHA256SUMS. That needs
+     curl or wget, tar, and sha256sum or shasum; no git or Go. Inside a mole
+     clone, for MOLE_SRC or MOLE_REPO, for a MOLE_VERSION that is not a
+     vX.Y.Z release tag, and when a release has no archive for this platform,
+     it builds from source instead (git and Go 1.26.10+).
+  2. A source build runs `go build -trimpath`. If Go is missing or too old,
+     it downloads the version the source needs (checked against go.dev's
      checksum) into ~/.cache/mole/go; MOLE_NO_GO_DOWNLOAD=1 refuses to.
   3. Copies it to the right place (root -> /usr/local/bin, otherwise
      $HOME/.local/bin). Override with --prefix or INSTALL_DIR.
@@ -124,17 +158,23 @@ What this script does:
      and to run `mole init` to configure.
 
 Usage:
-  ./scripts/install.sh                       # from a clone
-  curl -fsSL .../install.sh | sh             # one-liner
+  curl -fsSL .../install.sh | sh             # one-liner: the latest release
+  ./scripts/install.sh                       # from a clone: builds it
   ./scripts/install.sh --prefix /opt         # custom prefix
   INSTALL_DIR=~/bin/mole ./scripts/install.sh
-  MOLE_VERSION=feat/x curl -fsSL .../install.sh | sh   # build a branch or tag
+  curl -fsSL .../install.sh | MOLE_VERSION=v0.6.1 sh   # a given release
+  curl -fsSL .../install.sh | MOLE_VERSION=feat/x sh   # build a branch
 
 Environment:
-  MOLE_VERSION   git ref (branch or tag) to build; if it does not exist the
-                 install fails instead of falling back to main
-  MOLE_REPO      git remote to clone (a fork, or a local repository)
-  INSTALL_DIR    full path of the installed binary
+  MOLE_VERSION       a release tag (vX.Y.Z) to install, or a git ref (branch
+                     or tag) to build; a ref that does not exist is an error
+  MOLE_REPO          git remote to build from (a fork, or a local repository)
+  MOLE_SRC           local clone to build from
+  INSTALL_DIR        full path of the installed binary
+  GITHUB_TOKEN       sent to api.github.com when looking up the latest release
+  MOLE_ATTESTATION   auto (default), require or off: check the archive's build
+                     provenance with `gh attestation verify`
+  MOLE_RELEASE_ONLY  ignore a mole clone in the working directory
 
 Options:
   --prefix <dir>      install under <dir>/bin/mole
@@ -177,18 +217,21 @@ while [ $# -gt 0 ]; do
 done
 
 # ---------------------------------------------------------------------------
-# Step 1: locate or fetch the source
+# Helpers
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT=""
-CLEANUP_DIR=""
-CLONED="no"
-
+# One scratch directory for downloads and clones, removed on the way out.
+TMP_ROOT=""
+ensure_tmp() {
+	[ -n "$TMP_ROOT" ] || TMP_ROOT="$(mktemp -d)"
+}
 cleanup() {
-	[ -n "$CLEANUP_DIR" ] && [ -d "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR"
+	[ -n "$TMP_ROOT" ] && [ -d "$TMP_ROOT" ] && rm -rf "$TMP_ROOT"
 	return 0
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 is_mole_repo() {
 	local d="$1"
@@ -197,73 +240,13 @@ is_mole_repo() {
 	[ -d "$d/cmd/mole" ] || return 1
 }
 
-resolve_source() {
-	if [ -n "${MOLE_SRC:-}" ] && is_mole_repo "$MOLE_SRC"; then
-		PROJECT_ROOT="$MOLE_SRC"; return 0
-	fi
-	# A ref asked for by name means that ref, not whatever checkout happens to
-	# be here (the working directory, or the clone this script lives in).
-	if [ -z "${MOLE_VERSION:-}" ]; then
-		if is_mole_repo "$PWD"; then
-			PROJECT_ROOT="$PWD"; return 0
-		fi
-		resolve_from_script_dir && return 0
-	fi
-	if ! command -v git >/dev/null 2>&1; then
-		die "no mole repo in CWD and 'git' not available to clone one"
-	fi
-	clone_ref
+# is_release_tag REF: REF names a CLI release (vX.Y.Z), whose archive can be
+# downloaded instead of built.
+is_release_tag() {
+	printf '%s\n' "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
-# Use the clone this script was run from, when there is one.
-resolve_from_script_dir() {
-	local script_dir=""
-	# $SELF was resolved at the top of the script and points at a
-	# real file path in every supported invocation (file or piped),
-	# so we no longer need a bash-only BASH_SOURCE guard here.
-	if [ -n "$SELF" ] && [ -f "$SELF" ]; then
-		script_dir="$(cd "$(dirname "$SELF")" && pwd 2>/dev/null || true)"
-	fi
-	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
-		PROJECT_ROOT="$(cd "$script_dir/.." && pwd)"; return 0
-	fi
-	return 1
-}
-
-clone_ref() {
-	local tmp
-	tmp="$(mktemp -d)"
-	step "cloning $REPO (ref: $VERSION_REF) into $tmp/mole"
-	CLEANUP_DIR="$tmp"
-	if ! git clone --depth 1 --branch "$VERSION_REF" "$REPO" "$tmp/mole" >/dev/null 2>&1; then
-		# A ref asked for by name must be the one installed: falling back to
-		# main would hand someone testing a branch the wrong code, silently.
-		if [ -n "${MOLE_VERSION:-}" ] && [ "$VERSION_REF" != "$DEFAULT_REF" ]; then
-			hint="$(git ls-remote --heads --tags "$REPO" 2>/dev/null | sed 's#.*refs/\(heads\|tags\)/##' | grep -iF -- "${VERSION_REF##*/}" | head -5 | tr '\n' ' ' || true)"
-			die "ref '$VERSION_REF' not found in $REPO${hint:+ (similar: $hint)}"
-		fi
-		warn "ref '$VERSION_REF' not found, falling back to the default branch"
-		rm -rf "$tmp/mole"
-		git clone --depth 1 "$REPO" "$tmp/mole" >/dev/null
-	fi
-	CLONED="yes"
-	PROJECT_ROOT="$tmp/mole"
-}
-
-resolve_source
-
-step "using source: $PROJECT_ROOT"
-
-# ---------------------------------------------------------------------------
-# Step 2: build
-# ---------------------------------------------------------------------------
-
-# The Go version the source asks for (the `go` line of go.mod).
-go_wanted() {
-	awk '$1 == "go" { print $2; exit }' "$PROJECT_ROOT/go.mod" 2>/dev/null
-}
-
-# version_ge A B: dotted version A is at least B (1.26.4 >= 1.26, 1.25.0 < 1.26.4).
+# version_ge A B: dotted version A is at least B (1.26.10 >= 1.26, 1.25.0 < 1.26.10).
 version_ge() {
 	awk -v a="$1" -v b="$2" 'BEGIN {
 		na = split(a, x, "."); nb = split(b, y, ".")
@@ -285,12 +268,319 @@ fetch_to() { # fetch_to URL FILE
 	fi
 }
 
+# http_get URL FILE [api]: download URL into FILE with curl or wget. Returns 0
+# on success, 4 when there is no such file (HTTP 404, or a missing file://
+# path) and 1 for any other failure. With "api" it asks for the GitHub API's
+# JSON and sends GITHUB_TOKEN, but only to the real API: a MOLE_API_URL that
+# points elsewhere never sees the token. The token travels in a config read
+# from stdin (curl) or a private wgetrc, never on a command line that other
+# users could read with ps.
+http_get() {
+	local url="$1" out="$2" api="${3:-}" token="" code="" rc=0 hdr wrc
+	rm -f "$out"
+	if [ "$api" = api ] && [ -n "${GITHUB_TOKEN:-}" ] && [ "$API_URL" = "$DEFAULT_API_URL" ]; then
+		token="$GITHUB_TOKEN"
+	fi
+	if command -v curl >/dev/null 2>&1; then
+		code="$(
+			{
+				[ -n "$token" ] && printf 'header = "Authorization: Bearer %s"\n' "$token"
+				[ "$api" = api ] && printf 'header = "Accept: application/vnd.github+json"\n'
+				true
+			} | curl -sSL --retry 2 -K - -w '%{http_code}' -o "$out" "$url"
+		)" || rc=$?
+		case "$rc:$code" in
+		0:2??|0:000) return 0 ;; # 000: a file:// URL
+		0:404|37:*) return 4 ;;  # 37: a file:// path that does not exist
+		0:*) echo "  HTTP $code from $url" >&2 ;;
+		esac
+		return 1
+	fi
+	if command -v wget >/dev/null 2>&1; then
+		hdr="$out.headers"
+		wrc="$out.wgetrc"
+		(
+			umask 077
+			{
+				[ -n "$token" ] && printf 'header = Authorization: Bearer %s\n' "$token"
+				[ "$api" = api ] && printf 'header = Accept: application/vnd.github+json\n'
+				true
+			} >"$wrc"
+		)
+		WGETRC="$wrc" wget -q -S -O "$out" "$url" 2>"$hdr" || rc=$?
+		code="$(awk '$1 ~ /^HTTP\// { c = $2 } END { print c }' "$hdr" 2>/dev/null || true)"
+		rm -f "$hdr" "$wrc"
+		[ "$rc" -eq 0 ] && return 0
+		[ "$code" = 404 ] && return 4
+		[ -n "$code" ] && echo "  HTTP $code from $url" >&2
+		return 1
+	fi
+	die "neither curl nor wget is installed; install one of them and re-run"
+}
+
+# sha256_of FILE: its SHA-256, in lowercase hex.
 sha256_of() {
 	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum "$1" | awk '{ print $1 }'
+		sha256sum "$1" | awk '{ print tolower($1) }'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{ print tolower($1) }'
+	elif command -v sha256 >/dev/null 2>&1; then
+		sha256 -q "$1" | tr 'A-F' 'a-f' # FreeBSD
+	elif command -v openssl >/dev/null 2>&1; then
+		openssl dgst -sha256 "$1" | awk '{ print tolower($NF) }'
 	else
-		shasum -a 256 "$1" | awk '{ print $1 }'
+		return 1
 	fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 1: decide what to install
+# ---------------------------------------------------------------------------
+
+MODE=""         # "release" (a prebuilt archive) or "source" (a build)
+PROJECT_ROOT="" # the source to build, once known
+CLONED="no"
+REL_TAG=""      # the release to install, e.g. v0.6.1
+REL_OS=""
+REL_ARCH=""
+REL_MISSING=""  # why the release could not be used, when it could not
+BIN=""          # the binary to install, once there is one
+
+# Use the clone this script was run from, when there is one.
+resolve_from_script_dir() {
+	local script_dir=""
+	# $SELF was resolved at the top of the script and is empty in a
+	# piped invocation, so there is nothing to look at then.
+	if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+		script_dir="$(cd "$(dirname "$SELF")" && pwd 2>/dev/null || true)"
+	fi
+	if [ -n "$script_dir" ] && is_mole_repo "$script_dir/.."; then
+		PROJECT_ROOT="$(cd "$script_dir/.." && pwd)"; return 0
+	fi
+	return 1
+}
+
+# A mole clone around us: the working directory, or the one this script is in.
+resolve_local_checkout() {
+	if is_mole_repo "$PWD"; then
+		PROJECT_ROOT="$PWD"; return 0
+	fi
+	resolve_from_script_dir
+}
+
+choose_mode() {
+	if [ -n "${MOLE_SRC:-}" ]; then
+		is_mole_repo "$MOLE_SRC" || die "MOLE_SRC is not a mole source directory: $MOLE_SRC"
+		PROJECT_ROOT="$MOLE_SRC"
+		MODE="source"
+		return 0
+	fi
+	# A version asked for by name means that version, not whatever checkout
+	# happens to be here; `mole update` sets MOLE_RELEASE_ONLY for the same reason.
+	if [ -z "${MOLE_VERSION:-}" ] && [ -z "${MOLE_RELEASE_ONLY:-}" ] && resolve_local_checkout; then
+		MODE="source"
+		return 0
+	fi
+	# Releases come from Luqueee/mole only: another remote is always built.
+	if [ -n "${MOLE_REPO:-}" ]; then
+		MODE="source"
+		return 0
+	fi
+	if [ -n "${MOLE_VERSION:-}" ] && ! is_release_tag "$MOLE_VERSION"; then
+		MODE="source"
+		return 0
+	fi
+	MODE="release"
+}
+
+# release_tags FILE: the versions (without the v) of the CLI releases in a page
+# of GitHub's release list that are published (no drafts, no prereleases) and
+# tagged vX.Y.Z; the desktop app's releases (desktop-v*) share the repository
+# and its "latest release". Only three fields are read, which every release
+# object has exactly once and none of its nested objects (assets, author) has,
+# so they come in groups of three, one group per release, and no JSON parser is
+# needed. A JSON string cannot hold an unescaped quote, so release notes that
+# mention "tag_name" cannot pass for the field.
+release_tags() {
+	{ grep -oE '"(tag_name|draft|prerelease)"[[:space:]]*:[[:space:]]*("[^"]*"|true|false)' "$1" || true; } |
+		awk '
+		{
+			k = $0; sub(/^"/, "", k); sub(/".*$/, "", k)
+			v = $0; sub(/^[^:]*:[ \t]*/, "", v); gsub(/"/, "", v)
+			if (k in rec) bad = 1
+			rec[k] = v; n++
+			if (n == 3) {
+				if (rec["draft"] == "false" && rec["prerelease"] == "false" && rec["tag_name"] ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/)
+					print substr(rec["tag_name"], 2)
+				split("", rec); n = 0
+			}
+		}
+		END { exit (bad || n) ? 1 : 0 }'
+}
+
+# Set REL_TAG to the newest published CLI release.
+find_latest_release() {
+	local page=1 file vers rc msg hint=""
+	ensure_tmp
+	file="$TMP_ROOT/releases.json"
+	[ -n "${GITHUB_TOKEN:-}" ] || hint=" (rate-limited? set GITHUB_TOKEN, or MOLE_VERSION to a release tag)"
+	step "looking up the latest mole release"
+	while [ "$page" -le 10 ]; do
+		rc=0
+		http_get "$API_URL/releases?per_page=100&page=$page" "$file" api || rc=$?
+		if [ "$rc" -ne 0 ]; then
+			msg="$(sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" 2>/dev/null | head -n 1 || true)"
+			die "could not list the releases at $API_URL/releases${msg:+: $msg}$hint"
+		fi
+		# An empty page: there are no more releases.
+		grep -q '"tag_name"' "$file" || break
+		vers="$(release_tags "$file")" || die "could not read the release list from $API_URL/releases"
+		if [ -n "$vers" ]; then
+			REL_TAG="v$(printf '%s\n' "$vers" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
+			ok "latest release: $REL_TAG"
+			return 0
+		fi
+		page=$((page + 1))
+	done
+	die "found no published mole release at $API_URL/releases (set MOLE_VERSION to a branch or tag to build it from source)"
+}
+
+# Set REL_OS and REL_ARCH to the platform's release archive, or leave them
+# empty when releases have none for it (the archives are what
+# scripts/release-archives.sh builds).
+release_platform() {
+	REL_OS=""
+	REL_ARCH=""
+	case "$(uname -s)" in
+	Linux) REL_OS=linux ;;
+	Darwin) REL_OS=darwin ;;
+	FreeBSD) REL_OS=freebsd ;;
+	esac
+	case "$(uname -m)" in
+	x86_64|amd64) REL_ARCH=amd64 ;;
+	aarch64|arm64) REL_ARCH=arm64 ;;
+	esac
+	# A shell running under Rosetta says x86_64 on an Apple silicon Mac:
+	# install the native build.
+	if [ "$REL_OS" = darwin ] && [ "$REL_ARCH" = amd64 ] &&
+		[ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+		REL_ARCH=arm64
+	fi
+}
+
+# Check the archive's build provenance with the GitHub CLI (MOLE_ATTESTATION).
+verify_attestation() { # verify_attestation FILE
+	local name out
+	name="$(basename "$1")"
+	case "$ATTESTATION" in
+	off) return 0 ;;
+	auto)
+		command -v gh >/dev/null 2>&1 || return 0
+		gh auth status >/dev/null 2>&1 || return 0
+		;;
+	require)
+		command -v gh >/dev/null 2>&1 || die "MOLE_ATTESTATION=require needs the GitHub CLI (gh) to check $name"
+		;;
+	esac
+	if out="$(gh attestation verify "$1" --repo "$GITHUB_REPO" 2>&1)"; then
+		ok "verified the build provenance of $name (gh attestation verify)"
+	elif [ "$ATTESTATION" = require ]; then
+		die "gh attestation verify could not verify $name: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"
+	else
+		warn "gh could not verify the build provenance of $name (older releases have none); relying on its SHA-256"
+	fi
+}
+
+# Download REL_TAG's archive for this platform, check it against the release's
+# SHA256SUMS and unpack it: BIN is then the binary. A release without that
+# archive sets REL_MISSING instead; anything else that goes wrong (a checksum
+# that does not match, no SHA256SUMS or no line for the archive in it, a failed
+# download) stops the install.
+download_release() {
+	local ver file dir want got rc
+	ver="${REL_TAG#v}"
+	file="mole_${ver}_${REL_OS}_${REL_ARCH}.tar.gz"
+	ensure_tmp
+	dir="$TMP_ROOT/release"
+	rm -rf "$dir"
+	mkdir -p "$dir/x"
+	step "downloading $file ($REL_TAG)"
+	rc=0
+	http_get "$RELEASE_URL/$REL_TAG/$file" "$dir/$file" || rc=$?
+	if [ "$rc" -eq 4 ]; then
+		REL_MISSING="release $REL_TAG has no $file"
+		return 0
+	fi
+	[ "$rc" -eq 0 ] || die "could not download $RELEASE_URL/$REL_TAG/$file"
+	rc=0
+	http_get "$RELEASE_URL/$REL_TAG/SHA256SUMS" "$dir/SHA256SUMS" || rc=$?
+	[ "$rc" -eq 0 ] || die "could not download the SHA256SUMS of $REL_TAG; refusing to install an archive it cannot check"
+	want="$(awk -v f="$file" '$2 == f || $2 == "*" f { print tolower($1); exit }' "$dir/SHA256SUMS")"
+	case "$want" in
+	*[!0-9a-f]*|"") die "the SHA256SUMS of $REL_TAG has no checksum for $file; refusing to install it" ;;
+	esac
+	[ "${#want}" -eq 64 ] || die "the SHA256SUMS of $REL_TAG has no valid checksum for $file; refusing to install it"
+	got="$(sha256_of "$dir/$file")" || die "no sha256sum, shasum, sha256 or openssl to check $file with"
+	if [ "$got" != "$want" ]; then
+		die "$file does not match its checksum in the release's SHA256SUMS (got $got, want $want); not installing it"
+	fi
+	ok "verified the SHA-256 of $file"
+	verify_attestation "$dir/$file"
+	tar -xzf "$dir/$file" -C "$dir/x" "$BINARY" || die "could not unpack $BINARY from $file"
+	if [ ! -f "$dir/x/$BINARY" ] || [ -h "$dir/x/$BINARY" ]; then
+		die "$file holds no $BINARY binary"
+	fi
+	BIN="$dir/x/$BINARY"
+}
+
+# A release that cannot be installed as an archive is built from its tag.
+fall_back_to_source() { # fall_back_to_source REASON
+	warn "$1: building $REL_TAG from source instead (needs git, and Go is fetched when missing)"
+	VERSION_REF="$REL_TAG"
+	STRICT_REF="yes"
+	MODE="source"
+}
+
+install_release() {
+	REL_TAG="${MOLE_VERSION:-}"
+	[ -n "$REL_TAG" ] || find_latest_release
+	release_platform
+	if [ -z "$REL_OS" ] || [ -z "$REL_ARCH" ]; then
+		fall_back_to_source "mole releases have no archive for $(uname -s)/$(uname -m)"
+		return 0
+	fi
+	download_release
+	if [ -n "$REL_MISSING" ]; then
+		fall_back_to_source "$REL_MISSING"
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 2: build from source, when that is what is installed
+# ---------------------------------------------------------------------------
+
+clone_ref() {
+	local hint
+	ensure_tmp
+	step "cloning $REPO (ref: $VERSION_REF) into $TMP_ROOT/mole"
+	if ! git clone --depth 1 --branch "$VERSION_REF" "$REPO" "$TMP_ROOT/mole" >/dev/null 2>&1; then
+		# A ref asked for by name must be the one installed: falling back to
+		# main would hand someone testing a branch the wrong code, silently.
+		if [ "$STRICT_REF" = "yes" ] && [ "$VERSION_REF" != "$DEFAULT_REF" ]; then
+			hint="$(git ls-remote --heads --tags "$REPO" 2>/dev/null | sed 's#.*refs/\(heads\|tags\)/##' | grep -iF -- "${VERSION_REF##*/}" | head -5 | tr '\n' ' ' || true)"
+			die "ref '$VERSION_REF' not found in $REPO${hint:+ (similar: $hint)}"
+		fi
+		warn "ref '$VERSION_REF' not found, falling back to the default branch"
+		rm -rf "$TMP_ROOT/mole"
+		git clone --depth 1 "$REPO" "$TMP_ROOT/mole" >/dev/null
+	fi
+	CLONED="yes"
+	PROJECT_ROOT="$TMP_ROOT/mole"
+}
+
+# The Go version the source asks for (the `go` line of go.mod).
+go_wanted() {
+	awk '$1 == "go" { print $2; exit }' "$PROJECT_ROOT/go.mod" 2>/dev/null
 }
 
 # download_go VERSION: fetch the official Go toolchain into a cache under the
@@ -324,7 +614,7 @@ download_go() {
 	step "downloading Go $ver ($os/$arch) into $dest" >&2
 	fetch_to "$base/$file" "$tmp/$file" || { rm -rf "$tmp"; die "could not download $base/$file (set MOLE_NO_GO_DOWNLOAD=1 and install Go yourself, or MOLE_GO_URL to a mirror)"; }
 	want="$(fetch_to "$base/$file.sha256" "$tmp/sum" && tr -d ' \n\r' <"$tmp/sum" || true)"
-	got="$(sha256_of "$tmp/$file")"
+	got="$(sha256_of "$tmp/$file" || true)"
 	case "$want" in
 	*[!0-9a-f]*|"") rm -rf "$tmp"; die "could not read the published checksum of $file; refusing to run an unverified Go" ;;
 	esac
@@ -342,58 +632,76 @@ download_go() {
 	echo "$dest/go/bin/go"
 }
 
-# Pick the Go to build with: the one on PATH when it is new enough, else a
-# private copy of the version go.mod asks for (so `curl | sh` works on a
-# machine without Go, or with an older one).
-GO_BIN="${GO:-$(command -v go || true)}"
-GO_WANT="$(go_wanted)"
-GO_HAVE=""
-# Asked from inside the source, so a Go that can fetch the toolchain go.mod
-# names by itself (1.21+) counts as new enough.
-[ -n "$GO_BIN" ] && GO_HAVE="$(cd "$PROJECT_ROOT" && "$GO_BIN" env GOVERSION 2>/dev/null | sed 's/^go//' || true)"
-if [ -z "${GO:-}" ] && [ -n "$GO_WANT" ] && { [ -z "$GO_HAVE" ] || ! version_ge "$GO_HAVE" "$GO_WANT"; }; then
-	if [ -n "${MOLE_NO_GO_DOWNLOAD:-}" ]; then
-		die "Go $GO_WANT+ is required (found ${GO_HAVE:-none}); install it from https://go.dev/dl/ and re-run"
+build_from_source() {
+	if [ -z "$PROJECT_ROOT" ]; then
+		command -v git >/dev/null 2>&1 || die "building from source needs 'git' to clone $REPO (and Go, fetched when missing)"
+		clone_ref
 	fi
-	if [ -n "$GO_HAVE" ]; then
-		step "Go $GO_HAVE is older than the $GO_WANT this source needs"
-	else
-		step "Go is not installed"
-	fi
-	GO_BIN="$(download_go "$GO_WANT")"
-	# The private toolchain is exactly the one wanted: never go looking for another.
-	export GOTOOLCHAIN=local
-	ok "using $GO_BIN"
-fi
-[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go ${GO_WANT:-1.26.4}+ from https://go.dev/dl/ and re-run."
+	step "using source: $PROJECT_ROOT"
 
-# Say where the binary comes from, so `mole version` shows the branch and
-# commit that was installed (stamped with -ldflags; empty without git).
-BUILD_REF=""
-BUILD_COMMIT=""
-if command -v git >/dev/null 2>&1 && git -C "$PROJECT_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-	BUILD_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --short=7 HEAD 2>/dev/null || true)"
-	if [ "$CLONED" = "yes" ]; then
-		BUILD_REF="$VERSION_REF"
-	else
-		BUILD_REF="$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-		[ "$BUILD_REF" = "HEAD" ] && BUILD_REF=""
-		if [ -n "$(git -C "$PROJECT_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-			BUILD_COMMIT="${BUILD_COMMIT}+dirty"
+	# Pick the Go to build with: the one on PATH when it is new enough, else a
+	# private copy of the version go.mod asks for (so `curl | sh` works on a
+	# machine without Go, or with an older one).
+	GO_BIN="${GO:-$(command -v go || true)}"
+	GO_WANT="$(go_wanted)"
+	GO_HAVE=""
+	# Asked from inside the source, so a Go that can fetch the toolchain go.mod
+	# names by itself (1.21+) counts as new enough.
+	[ -n "$GO_BIN" ] && GO_HAVE="$(cd "$PROJECT_ROOT" && "$GO_BIN" env GOVERSION 2>/dev/null | sed 's/^go//' || true)"
+	if [ -z "${GO:-}" ] && [ -n "$GO_WANT" ] && { [ -z "$GO_HAVE" ] || ! version_ge "$GO_HAVE" "$GO_WANT"; }; then
+		if [ -n "${MOLE_NO_GO_DOWNLOAD:-}" ]; then
+			die "Go $GO_WANT+ is required (found ${GO_HAVE:-none}); install it from https://go.dev/dl/ and re-run"
+		fi
+		if [ -n "$GO_HAVE" ]; then
+			step "Go $GO_HAVE is older than the $GO_WANT this source needs"
+		else
+			step "Go is not installed"
+		fi
+		GO_BIN="$(download_go "$GO_WANT")"
+		# The private toolchain is exactly the one wanted: never go looking for another.
+		export GOTOOLCHAIN=local
+		ok "using $GO_BIN"
+	fi
+	[ -n "$GO_BIN" ] || die "'go' is not installed. Install Go ${GO_WANT:-1.26.10}+ from https://go.dev/dl/ and re-run."
+
+	# Say where the binary comes from, so `mole version` shows the branch and
+	# commit that was installed (stamped with -ldflags; empty without git).
+	BUILD_REF=""
+	BUILD_COMMIT=""
+	if command -v git >/dev/null 2>&1 && git -C "$PROJECT_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+		BUILD_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --short=7 HEAD 2>/dev/null || true)"
+		if [ "$CLONED" = "yes" ]; then
+			BUILD_REF="$VERSION_REF"
+		else
+			BUILD_REF="$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+			[ "$BUILD_REF" = "HEAD" ] && BUILD_REF=""
+			if [ -n "$(git -C "$PROJECT_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+				BUILD_COMMIT="${BUILD_COMMIT}+dirty"
+			fi
 		fi
 	fi
-fi
-case "$BUILD_REF" in *[!A-Za-z0-9._/@+-]*) BUILD_REF="" ;; esac
+	case "$BUILD_REF" in *[!A-Za-z0-9._/@+-]*) BUILD_REF="" ;; esac
 
-BUILD_DIR="$PROJECT_ROOT/dist"
-mkdir -p "$BUILD_DIR"
-step "building $BINARY${BUILD_REF:+ from $BUILD_REF}${BUILD_COMMIT:+ ($BUILD_COMMIT)}"
-(
-	cd "$PROJECT_ROOT"
-	"$GO_BIN" build -trimpath -ldflags "-X main.buildRef=$BUILD_REF -X main.buildCommit=$BUILD_COMMIT" -o "$BUILD_DIR/$BINARY" ./cmd/mole
-)
-[ -f "$BUILD_DIR/$BINARY" ] || die "build did not produce $BUILD_DIR/$BINARY"
-ok "built $BUILD_DIR/$BINARY"
+	BUILD_DIR="$PROJECT_ROOT/dist"
+	mkdir -p "$BUILD_DIR"
+	step "building $BINARY${BUILD_REF:+ from $BUILD_REF}${BUILD_COMMIT:+ ($BUILD_COMMIT)}"
+	(
+		cd "$PROJECT_ROOT"
+		"$GO_BIN" build -trimpath -ldflags "-X main.buildRef=$BUILD_REF -X main.buildCommit=$BUILD_COMMIT" -o "$BUILD_DIR/$BINARY" ./cmd/mole
+	)
+	[ -f "$BUILD_DIR/$BINARY" ] || die "build did not produce $BUILD_DIR/$BINARY"
+	ok "built $BUILD_DIR/$BINARY"
+	BIN="$BUILD_DIR/$BINARY"
+}
+
+choose_mode
+if [ "$MODE" = "release" ]; then
+	install_release
+fi
+if [ "$MODE" = "source" ]; then
+	build_from_source
+fi
+[ -n "$BIN" ] || die "nothing to install"
 
 # ---------------------------------------------------------------------------
 # Step 3: install
@@ -417,7 +725,7 @@ DEST="$(resolve_dest)"
 DEST_DIR="$(dirname "$DEST")"
 step "installing to $DEST"
 mkdir -p "$DEST_DIR"
-install -m 0755 "$BUILD_DIR/$BINARY" "$DEST"
+install -m 0755 "$BIN" "$DEST"
 ok "installed $DEST"
 
 # ---------------------------------------------------------------------------
@@ -461,6 +769,8 @@ export PATH="$DEST_DIR:$PATH"
 # ---------------------------------------------------------------------------
 
 if [ "$RUN_INIT" = "yes" ]; then
+	# exec replaces this shell, so the EXIT trap would never run.
+	cleanup
 	# When stdin is a TTY, run interactively. When it's redirected
 	# (the typical `curl | sh` case), run non-interactively so the
 	# install is scriptable via the MOLE_* env vars documented in

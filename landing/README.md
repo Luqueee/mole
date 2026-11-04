@@ -7,7 +7,7 @@ fully static site in `dist/`.
 ## Develop
 
 ```bash
-pnpm install     # npm also works; both lockfiles are committed
+pnpm install     # pnpm-lock.yaml is the lockfile CI installs from
 pnpm dev         # http://localhost:4321
 ```
 

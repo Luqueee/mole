@@ -15,12 +15,17 @@ ports:
   - 5173
   - 8080
 
-# Probe the remote for common dev ports and forward any that respond.
-# Merged with `ports`.
+# Forward whatever is listening on the remote (found with ss/netstat; if
+# neither works, probe `discover_ports`). Merged with `ports`.
 auto_discover: true
 
 # Override the default probe list (optional).
 # discover_ports: [3000, 5173, 8080, 9000]
+
+# Only auto-forward discovered listeners in this port range, LO-HI
+# inclusive (optional; unset forwards every listener). Ports in `ports`
+# and `discover_ports` are forwarded regardless.
+# discover_range: "1024-49151"
 
 # Admin HTTP API (set to "" to disable).
 admin_addr: 127.0.0.1:9999

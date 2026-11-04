@@ -206,11 +206,11 @@ export const api = {
   jobInstall: async (name: string, branch: string): Promise<number> => {
     if (!MOCK) return MoleService.StartNodeInstall(name, branch);
     setTimeout(() => { mockInstalled = true; }, 4600);
-    return mockJob([[300, `installing mole on ${name} (${branch ? "branch " + branch : "latest main"})`], [500, "== Go is not installed"], [700, "== downloading Go 1.26.4 (linux/amd64)"], [1500, "== building mole from main (97b20cb)"], [1200, "installed ~/.local/bin/mole"], [200, `mole installed on ${name}: try \`mole node ping ${name}\``]]);
+    return mockJob([[300, `installing mole on ${name} (${branch ? "branch " + branch : "latest release"})`], [500, "== latest release: v0.8.4"], [700, "== downloading mole_0.8.4_linux_amd64.tar.gz"], [1500, "== checksum ok (SHA256SUMS)"], [1200, "installed ~/.local/bin/mole"], [200, `mole installed on ${name}: try \`mole node ping ${name}\``]]);
   },
   jobStart: async (name: string, args: string[]): Promise<number> => {
     if (!MOCK) return MoleService.StartNodeJob(name, args);
-    if (args[0] === "update") return mockJob([[300, `→ updating mole on ${name}`], [700, "cloning https://github.com/Luqueee/mole (main)"], [900, "go build ./cmd/mole"], [1400, "installed ~/.local/bin/mole"], [200, "mole v0.4.0 (main@97b20cb)"]]);
+    if (args[0] === "update") return mockJob([[300, `→ updating mole on ${name}`], [700, "== latest release: v0.8.4"], [900, "== checksum ok (SHA256SUMS)"], [1400, "installed ~/.local/bin/mole"], [200, "mole v0.8.4"]]);
     return mockJob([[300, `mole v0.4.0 · ${name}`], [200, args.join(" ")], [300, "ok"]]);
   },
   job: async (id: number, from: number): Promise<NodeJobView> => {

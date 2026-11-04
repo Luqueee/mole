@@ -18,6 +18,7 @@ import (
 
 	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
+	"github.com/Luqueee/mole/internal/meshdns"
 )
 
 // MoleService exposes the mole daemon to the frontend. Status and port
@@ -62,12 +63,6 @@ type Settings struct {
 	AdminAddr     string `json:"adminAddr"`
 }
 
-func loadConfig() (*config.Config, string, error) {
-	path := config.Find()
-	cfg, err := config.Load(path)
-	return cfg, path, err
-}
-
 // GetStatus queries the daemon. A daemon that is down is not an error: it
 // returns Running=false so the UI can offer to start it.
 func (m *MoleService) GetStatus() Status {
@@ -102,15 +97,16 @@ func (m *MoleService) GetStatus() Status {
 		st.Push = nil
 		_ = json.Unmarshal(b, &st.Push)
 	}
-	defer func() {
-		// Daemons that predate live port reporting answer with an empty
-		// list even while forwarding; ask the OS what the process holds.
-		if len(st.Ports) == 0 {
-			st.Ports = listeningPorts(cfg.AdminAddr)
-		}
-	}()
-	if raw, ok := body.Info["ports"].([]any); ok {
-		for _, p := range raw {
+	raw, reported := body.Info["ports"]
+	if !reported {
+		// Every mole daemon lists its forwarded ports here, even when there
+		// are none; only one that leaves the key out entirely is asked
+		// about through the OS instead.
+		st.Ports = osListeningPorts(cfg)
+		return st
+	}
+	if list, ok := raw.([]any); ok {
+		for _, p := range list {
 			if f, ok := p.(float64); ok {
 				st.Ports = append(st.Ports, int(f))
 			}
@@ -168,26 +164,53 @@ func (m *MoleService) GetEvents(since uint64) Events {
 	return out
 }
 
+// osListeningPorts is listeningPorts; a variable so tests can see whether
+// GetStatus falls back to it.
+var osListeningPorts = listeningPorts
+
 // listeningPorts lists the loopback TCP ports the mole daemon listens on,
-// minus its own admin port. Unix only (lsof); elsewhere it returns nil.
-func listeningPorts(adminAddr string) []int {
+// minus those it opens for itself (nonForwardPorts). Unix only (lsof);
+// elsewhere it returns nil.
+func listeningPorts(cfg *config.Config) []int {
 	data, err := os.ReadFile(filepath.Join(config.StateDir(), "mole.pid"))
 	if err != nil {
 		return nil
 	}
 	pid := strings.TrimSpace(string(data))
+	if _, err := strconv.Atoi(pid); err != nil {
+		return nil
+	}
 	out, err := exec.Command("lsof", "-nP", "-a", "-p", pid, "-iTCP", "-sTCP:LISTEN", "-Fn").Output()
 	if err != nil {
 		return nil
 	}
-	_, adminPort, _ := net.SplitHostPort(adminAddr)
+	return parseLsofPorts(out, nonForwardPorts(cfg))
+}
+
+// nonForwardPorts are the loopback ports a daemon with this config may
+// listen on that are not forwards: the admin API, the route proxy, the DNS
+// stub and the transfer receiver.
+func nonForwardPorts(cfg *config.Config) map[int]bool {
+	skip := map[int]bool{cfg.RoutePortOrDefault(): true, cfg.Transfer.PortOrDefault(): true}
+	for _, addr := range []string{cfg.AdminAddr, meshdns.LoopbackStubAddr} {
+		if _, p, err := net.SplitHostPort(addr); err == nil {
+			if n, err := strconv.Atoi(p); err == nil {
+				skip[n] = true
+			}
+		}
+	}
+	return skip
+}
+
+// parseLsofPorts reads the 127.0.0.1 ports out of `lsof -Fn` output.
+func parseLsofPorts(out []byte, skip map[int]bool) []int {
 	var ports []int
 	for _, line := range strings.Split(string(out), "\n") {
 		name, ok := strings.CutPrefix(line, "n127.0.0.1:")
-		if !ok || name == adminPort {
+		if !ok {
 			continue
 		}
-		if p, err := strconv.Atoi(name); err == nil {
+		if p, err := strconv.Atoi(name); err == nil && !skip[p] {
 			ports = append(ports, p)
 		}
 	}
@@ -272,6 +295,7 @@ func (m *MoleService) mole(args ...string) error {
 	if err != nil {
 		return err
 	}
+	defer invalidateConfig() // most of these commands edit the config
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var out bytes.Buffer

@@ -9,6 +9,16 @@ concurrency:
   group: mole-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
+# Analysis tools, pinned. Dependabot does not see these, so bump them by hand;
+# the Go checksum database verifies what `go install`/`go run` download.
+env:
+  STATICCHECK_VERSION: v0.8.2 # staticcheck 2026.2.2
+  GOVULNCHECK_VERSION: v1.9.0
+  ACTIONLINT_VERSION: v1.7.12
+
 jobs:
   go:
     name: Go checks
@@ -30,6 +40,22 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Install staticcheck
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "honnef.co/go/tools/cmd/staticcheck@$STATICCHECK_VERSION"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # One pass per supported OS, so files behind build tags are checked too.
+      - name: Staticcheck
+        run: |
+          status=0
+          for goos in linux darwin windows freebsd; do
+            echo "::group::staticcheck GOOS=$goos"
+            GOOS="$goos" staticcheck ./... || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+
       - name: Test
         run: |
           go test -race -coverprofile=coverage.out ./...
@@ -38,8 +64,65 @@ jobs:
       - name: Installer builds the ref it is asked for
         run: ./scripts/test-install-branch.sh
 
-  clip-darwin:
-    name: macOS clipboard checks
+  # Kept out of the deploy job's needs: a newly published advisory can fail it
+  # without any code change, and that should not hold back a landing deploy.
+  vulncheck:
+    name: Go vulnerability check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Fails only on vulnerabilities the code can reach. Standard-library
+      # findings are fixed by raising the go directive in go.mod (CI follows it).
+      - name: Govulncheck
+        run: |
+          status=0
+          for goos in linux darwin windows freebsd; do
+            echo "::group::govulncheck GOOS=$goos"
+            GOOS="$goos" govulncheck ./... || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Uses the runner's shellcheck for the run: scripts.
+      - name: Actionlint
+        run: go run "github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION"
+
+  darwin:
+    name: macOS checks
     runs-on: macos-latest
     permissions:
       contents: read
@@ -55,8 +138,84 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test clipboard watcher
-        run: go test -race ./internal/clip
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+  # The desktop app is its own Go module (desktop/go.mod), which the root
+  # `go test ./...` does not reach. macOS has the native toolkit Wails links
+  # against, so no system packages are needed.
+  desktop:
+    name: Desktop checks
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      # No dependency needs its install script to typecheck or build (the only
+      # one is fsevents, used by the dev server's file watcher).
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Typecheck frontend
+        working-directory: desktop/frontend
+        run: npm run typecheck
+
+      # main.go embeds frontend/dist, which is not committed.
+      - name: Build frontend
+        working-directory: desktop/frontend
+        run: npm run build
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Install analysis tools
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "honnef.co/go/tools/cmd/staticcheck@$STATICCHECK_VERSION"
+          GOBIN="$RUNNER_TEMP/bin" go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Windows builds of Wails need no cgo, so they can be analysed from here;
+      # Linux ones need the GTK/WebKit headers and are left to the bundle job.
+      - name: Staticcheck and govulncheck
+        run: |
+          status=0
+          for goos in darwin windows; do
+            echo "::group::GOOS=$goos"
+            GOOS="$goos" staticcheck ./... || status=1
+            GOOS="$goos" govulncheck ./... || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
   windows:
     name: Windows checks
@@ -156,7 +315,9 @@ jobs:
   deploy:
     name: Deploy landing
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [go, clip-darwin, landing]
+    # Gated on the deterministic Go checks as before; the desktop job (slow,
+    # macOS-only), the vulnerability scan and workflow lint report on their own.
+    needs: [go, darwin, landing]
     runs-on: ubuntu-latest
     environment:
       name: production

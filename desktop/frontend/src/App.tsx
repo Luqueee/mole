@@ -8,6 +8,7 @@ import type { Record as TRecord } from "../bindings/github.com/Luqueee/mole/inte
 import { api, MOCK, type Transfers } from "./api";
 import NodesPage from "./Nodes";
 import ProxyPage from "./Proxy";
+import { useFailureToast, usePoll } from "./usePoll";
 
 type Tab = "status" | "ports" | "proxy" | "nodes" | "transfers" | "logs" | "setup";
 const NAV: { id: Tab; label: string; icon: typeof Activity }[] = [
@@ -121,9 +122,13 @@ function LocalBox({ lanes, conns }: { lanes: Lane[]; conns: Seen[] }) {
   );
 }
 
+// connecting: the daemon runs (its admin API answers) but its first SSH
+// connection is not up yet, e.g. started at login before the network.
+const connecting = (s: Status) => s.running && s.info?.state === "connecting";
+
 function RemoteBox({ remote, ports, s }: { remote: string; ports: number; s: Status }) {
   const rows: [string, string][] = [
-    ["TUNNEL", s.running ? "UP" : "DOWN"],
+    ["TUNNEL", connecting(s) ? "CONNECTING" : s.running ? "UP" : "DOWN"],
     ["FORWARDED", String(ports)],
     ["PUSHED", String((s.push ?? []).filter((p) => p.state === "active").length)],
     ["CONNS", String(s.stats.active_conns)],
@@ -137,7 +142,7 @@ function RemoteBox({ remote, ports, s }: { remote: string; ports: number; s: Sta
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between">
             <span className="text-faint">{k}</span>
-            <span className={k === "TUNNEL" ? (s.running ? "text-live" : "text-bad") : "tabular-nums"}>{v}</span>
+            <span className={k === "TUNNEL" ? (connecting(s) ? "text-warn" : s.running ? "text-live" : "text-bad") : "tabular-nums"}>{v}</span>
           </div>
         ))}
       </div>
@@ -691,29 +696,30 @@ export default function App() {
   const cursor = useRef<number | null>(null);
   const appUpdate = useAppUpdate();
   const [nodeCount, setNodeCount] = useState(0);
-  useEffect(() => {
-    const load = () => api.nodes().then((l) => setNodeCount(l.nodes.length)).catch(() => {});
-    load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, []);
+  usePoll(() => api.nodes().then((l) => setNodeCount(l.nodes.length)).catch(() => {}), 5000);
   const [tv, setTv] = useState<Transfers>({ supported: false, last: 0, records: [], active: [], pending: [] });
-  const refreshTransfers = useCallback(async () => {
+  const refreshTransfers = usePoll(async () => {
     try {
       setTv(await api.transfers(0));
     } catch { /* daemon down: keep the last view */ }
-  }, []);
-  useEffect(() => {
-    refreshTransfers();
-    const t = setInterval(refreshTransfers, 1000);
-    return () => clearInterval(t);
-  }, [refreshTransfers]);
-  const refresh = useCallback(async () => {
+  }, 1000);
+  // The log tail is only shown on its tab: read it only there.
+  const logsFailure = useFailureToast();
+  usePoll(async () => {
+    try {
+      setLogs(await api.logs(400));
+      logsFailure.ok();
+    } catch (e) {
+      logsFailure.fail(errMsg(e));
+    }
+  }, 2000, tab === "logs");
+  const pollFailure = useFailureToast();
+  const refresh = usePoll(async () => {
     try {
       const st = await api.status();
       setS(st);
       setDiscover(await api.discover());
-      setLogs(await api.logs(400));
+      pollFailure.ok();
       const push = (a: number[], v: number) => [...a, v].slice(-40);
       const prev = lastTotal.current || st.stats.total_conns;
       lastTotal.current = st.stats.total_conns;
@@ -724,39 +730,31 @@ export default function App() {
         failed: push(h.failed, st.stats.failed_dials),
       }));
     } catch (e) {
-      toast.error(errMsg(e));
+      pollFailure.fail(errMsg(e)); // once, not every 2s while it lasts
     }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
-  }, [refresh]);
+  }, 2000);
 
   // Live traffic: poll the daemon's event ring and play each finished
   // connection as a round trip along its lane.
-  useEffect(() => {
-    let stop = false;
-    const tick = async () => {
-      try {
-        const r = await api.events(cursor.current ?? 0);
-        if (stop) return;
-        setSupported(r.supported);
-        const first = cursor.current === null;
-        cursor.current = r.last;
-        if (first || !r.events?.length) return; // don't replay history on startup
-        const fresh = r.events.slice(-8);
-        const at = Date.now();
-        setConns((c) => [...c, ...fresh.map((e) => ({ ...e, at }))].slice(-120));
-        setTrips((t) => [...t, ...fresh.map((e) => ({ id: e.id, dir: e.dir, port: e.port, failed: e.failed, row: rowSeq.current++ % 3 }))]);
-        setTimeout(() => setTrips((t) => t.filter((x) => !fresh.some((f) => f.id === x.id))), TRIP + 200);
-      } catch { /* daemon down: ignore */ }
-    };
-    tick();
-    const t = setInterval(tick, 500);
-    return () => { stop = true; clearInterval(t); };
-  }, []);
+  usePoll(async () => {
+    try {
+      const r = await api.events(cursor.current ?? 0);
+      setSupported(r.supported);
+      const first = cursor.current === null;
+      cursor.current = r.last;
+      if (first || !r.events?.length) return; // don't replay history on startup
+      const fresh = r.events.slice(-8);
+      // Stamp each with when it ended: after a pause (window hidden) the
+      // backlog arrives at once, and only what just ended is animated.
+      const now = Date.now();
+      const seen = fresh.map((e) => ({ ...e, at: Math.min(e.startMs + e.durMs, now) }));
+      const live = seen.filter((e) => now - e.at < TRIP);
+      setConns((c) => [...c, ...seen].slice(-120));
+      if (!live.length) return;
+      setTrips((t) => [...t, ...live.map((e) => ({ id: e.id, dir: e.dir, port: e.port, failed: e.failed, row: rowSeq.current++ % 3 }))]);
+      setTimeout(() => setTrips((t) => t.filter((x) => !live.some((f) => f.id === x.id))), TRIP + 200);
+    } catch { /* daemon down: ignore */ }
+  }, 500);
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     try {
@@ -774,9 +772,9 @@ export default function App() {
       {/* title bar */}
       <header className="drag flex h-14 shrink-0 items-center border-b border-line pl-24 pr-5">
         <div className="font-display text-xl font-bold tracking-[0.3em]">MOLE<span className="text-hot">/</span></div>
-        <div className={`ml-5 flex items-center gap-2 border px-3 py-1 text-[10px] tracking-[0.25em] ${s.running ? "border-live text-live" : "border-faint text-dim"}`}>
-          <span className={`size-1.5 ${s.running ? "blink bg-live" : "bg-faint"}`} />
-          {s.running ? "LIVE" : "OFFLINE"}
+        <div className={`ml-5 flex items-center gap-2 border px-3 py-1 text-[10px] tracking-[0.25em] ${connecting(s) ? "border-warn text-warn" : s.running ? "border-live text-live" : "border-faint text-dim"}`}>
+          <span className={`size-1.5 ${connecting(s) ? "blink bg-warn" : s.running ? "blink bg-live" : "bg-faint"}`} />
+          {connecting(s) ? "CONNECTING" : s.running ? "LIVE" : "OFFLINE"}
         </div>
         {MOCK && <span className="ml-3 text-[10px] tracking-[0.25em] text-warn">MOCK</span>}
         <div className="no-drag ml-auto flex">

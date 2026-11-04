@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { ArrowRight, ChevronDown, Pencil, Play, Plus, RotateCw, Square, Trash2, X, Download, CornerDownLeft, Plug } from "lucide-react";
 import type { NodeEntry, SSHHost } from "../bindings/github.com/Luqueee/mole/desktop";
 import { api, type NodeInfo, type NodeList } from "./api";
+import { useFailureToast, usePoll } from "./usePoll";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const validPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
@@ -731,21 +732,18 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
   const names = useRef<string[]>([]);
 
   // The registry, from the config: cheap, so it is re-read often.
-  const loadList = useCallback(async () => {
+  const listFailure = useFailureToast();
+  const loadList = usePoll(async () => {
     try {
       const l = await api.nodes();
       setList((old) => (JSON.stringify(old) === JSON.stringify(l) ? old : l));
+      listFailure.ok();
     } catch (e) {
-      toast.error(errMsg(e));
+      listFailure.fail(errMsg(e)); // once, not every 3s while it lasts
     } finally {
       setLoaded(true);
     }
-  }, []);
-  useEffect(() => {
-    void loadList();
-    const t = setInterval(loadList, 3000);
-    return () => clearInterval(t);
-  }, [loadList]);
+  }, 3000);
   useEffect(() => {
     api.cli().then((c) => setSelfVersion(/v(\d+\.\d+\.\d+)/.exec(c.version ?? "")?.[1] ?? "")).catch(() => {});
   }, []);
@@ -763,7 +761,7 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
     if (seq.current[name] !== n) return;
     setProbes((p) => ({ ...p, [name]: { info, loading: false, at: Date.now() } }));
   }, []);
-  const probeAll = useCallback(() => { names.current.forEach((n) => void probe(n)); }, [probe]);
+  const probeAll = useCallback(() => Promise.all(names.current.map(probe)), [probe]);
 
   const key = list.nodes.map((n) => `${n.name}|${n.target}|${n.sshPort}|${n.bin}|${n.insecure}`).join("\n");
   useEffect(() => {
@@ -772,10 +770,10 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
     for (const n of list.nodes) if (!probes[n.name] && !seq.current[n.name]) void probe(n.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, list.cliReady]);
-  useEffect(() => {
-    const t = setInterval(() => { if (document.visibilityState === "visible") probeAll(); }, 20_000);
-    return () => clearInterval(t);
-  }, [probeAll]);
+  // Re-probe 20s after the last round finished, so a node that times out
+  // (30s) cannot pile up SSH connections. The effect above does the first
+  // round: at mount no names are known yet, so this tick finds none.
+  usePoll(probeAll, 20_000);
 
   // A node edited in place is a different node: ask again.
   const lastKey = useRef(key);
@@ -799,7 +797,7 @@ export default function NodesPage({ onGoSetup }: { onGoSetup: () => void }) {
   }, [list.nodes, probes]);
   const lastCheck = Math.max(0, ...Object.values(probes).map((p) => p?.at ?? 0));
   const [, tick] = useState(0);
-  useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
+  usePoll(() => tick((x) => x + 1), 1000);
   const ago = lastCheck ? Math.max(0, Math.round((Date.now() - lastCheck) / 1000)) : -1;
 
   const select = (name: string) => setSelected((s) => (s === name ? null : name));

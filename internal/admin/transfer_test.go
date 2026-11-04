@@ -74,6 +74,7 @@ func transferServer(t *testing.T, ft *fakeTransfer) *httptest.Server {
 func put(t *testing.T, url string, body []byte) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", ContentTypeFile)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -182,6 +183,7 @@ func TestTransferReceiveAndStatus(t *testing.T) {
 	ft := &fakeTransfer{}
 	ts := transferServer(t, ft)
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/transfer/receive", strings.NewReader(`{"on":true}`))
+	req.Header.Set("Content-Type", ContentTypeJSON)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != 200 || !ft.receive {
 		t.Fatalf("enable: %v %v receive=%v", resp, err, ft.receive)
@@ -190,6 +192,7 @@ func TestTransferReceiveAndStatus(t *testing.T) {
 
 	ft.recvErr = errors.New("port in use")
 	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/transfer/receive", strings.NewReader(`{"on":true}`))
+	req.Header.Set("Content-Type", ContentTypeJSON)
 	resp, _ = http.DefaultClient.Do(req)
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()

@@ -182,7 +182,7 @@ func TestNodeInstallRunsTheInstallerOnTheNode(t *testing.T) {
 		t.Fatalf("the node was told %q", cmds[0])
 	}
 
-	out, _ = capture(t, func() { code = runNode([]string{"install", "devlabs", "-branch", "feat/x", "-config", m.cfg}) })
+	_, _ = capture(t, func() { code = runNode([]string{"install", "devlabs", "-branch", "feat/x", "-config", m.cfg}) })
 	cmds = m.commands()
 	if code != 0 || !strings.Contains(cmds[1], "refs/heads/feat/x/scripts/install.sh") || !strings.Contains(cmds[1], "MOLE_VERSION=feat/x ") {
 		t.Fatalf("branch: code=%d cmds=%q", code, cmds)

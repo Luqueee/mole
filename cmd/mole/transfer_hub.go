@@ -61,11 +61,19 @@ type transferHub struct {
 	ctlMu sync.Mutex // serialises SetReceive, reconnect handling and close
 	tokMu sync.Mutex // one token installation at a time
 
+	// Background work (token installations, enabling the receiver at start)
+	// runs on goroutines the hub owns: close cancels bgCtx and waits for them,
+	// so none outlives the hub (see goBackground).
+	bg     sync.WaitGroup
+	bgCtx  context.Context
+	stopBG context.CancelFunc
+
 	cfgMu    sync.Mutex
 	cfg      config.TransferConfig
 	cfgMTime time.Time
 
 	mu        sync.Mutex // guards the fields below; never held across I/O
+	closed    bool       // close was called: nothing starts any more
 	wanted    bool       // receiving was asked for (config or live) and should be retried
 	receiving bool
 	ln        net.Listener
@@ -81,6 +89,7 @@ func newTransferHub(log *slog.Logger, remote, cfgPath string, cfg config.Transfe
 		tlog: transfer.NewLog(), gate: transfer.NewGate(),
 		recvCmd: remoteRecvCmd, tokenCmd: remoteSetTokenCmd, notify: osNotify,
 	}
+	h.bgCtx, h.stopBG = context.WithCancel(context.Background())
 	if st, err := os.Stat(cfgPath); err == nil {
 		h.cfgMTime = st.ModTime()
 	}
@@ -163,12 +172,17 @@ func (h *transferHub) Info() map[string]any {
 	cfg := h.settings()
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return transferInfo(cfg, h.receiving, h.remoteErr)
+}
+
+// transferInfo is what /status reports under info.transfer.
+func transferInfo(cfg config.TransferConfig, receiving bool, remoteErr string) map[string]any {
 	return map[string]any{
-		"receive":      h.receiving,
+		"receive":      receiving,
 		"accept":       cfg.AcceptMode(),
 		"inbox":        cfg.InboxDir(),
 		"port":         cfg.PortOrDefault(),
-		"remote_error": h.remoteErr,
+		"remote_error": remoteErr,
 	}
 }
 
@@ -196,7 +210,7 @@ func (h *transferHub) SetReceive(on bool) error {
 	already, tok, port := h.receiving, h.token, h.remotePortLocked()
 	h.mu.Unlock()
 	if already {
-		go h.installToken(tok, port) // refresh the remote's copy
+		h.goBackground(func(ctx context.Context) { h.installToken(ctx, tok, port) }) // refresh the remote's copy
 		return nil
 	}
 	if err := h.startReceiver(); err != nil {
@@ -206,8 +220,26 @@ func (h *transferHub) SetReceive(on bool) error {
 	h.wanted = true
 	tok, port = h.token, h.remotePortLocked()
 	h.mu.Unlock()
-	go h.installToken(tok, port)
+	h.goBackground(func(ctx context.Context) { h.installToken(ctx, tok, port) })
 	return nil
+}
+
+// errHubClosed is returned when the receiver is asked to start after close.
+var errHubClosed = errors.New("file transfer is shutting down")
+
+// goBackground runs fn on a goroutine the hub waits for in close; fn's ctx
+// is cancelled when close starts. After close it does nothing.
+func (h *transferHub) goBackground(fn func(ctx context.Context)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	h.bg.Add(1)
+	go func() {
+		defer h.bg.Done()
+		fn(h.bgCtx)
+	}()
 }
 
 // remotePortLocked is the port the remote's `mole send` must connect to.
@@ -219,6 +251,12 @@ func (h *transferHub) remotePortLocked() int {
 }
 
 func (h *transferHub) startReceiver() error {
+	h.mu.Lock()
+	closed := h.closed
+	h.mu.Unlock()
+	if closed {
+		return errHubClosed
+	}
 	cfg := h.settings()
 	tok, err := transfer.LoadOrCreateToken(transfer.TokenPath(h.stateDir))
 	if err != nil {
@@ -281,10 +319,14 @@ func (h *transferHub) stopReceiver() {
 
 // installToken writes the shared token (and the receiver's port) on the
 // remote, where `mole send` reads them. It needs a mole on the remote that
-// knows `recv`; if there is none the reason is kept for the status.
-func (h *transferHub) installToken(token string, port int) {
+// knows `recv`; if there is none the reason is kept for the status. It gives
+// up when ctx is done (the hub is closing).
+func (h *transferHub) installToken(ctx context.Context, token string, port int) {
 	h.tokMu.Lock()
 	defer h.tokMu.Unlock()
+	if ctx.Err() != nil {
+		return // closing: no new session
+	}
 	st, err := h.ssh.Stream(h.tokenCmd)
 	if err != nil {
 		h.setRemoteErr("cannot reach the remote: " + err.Error())
@@ -295,6 +337,8 @@ func (h *transferHub) installToken(token string, port int) {
 	_ = st.CloseWrite()
 	select {
 	case <-st.Done():
+	case <-ctx.Done():
+		return // closing: the deferred Close ends the session
 	case <-time.After(15 * time.Second):
 		h.setRemoteErr("timed out installing the transfer token on the remote")
 		return
@@ -323,35 +367,59 @@ func (h *transferHub) onReconnect() {
 	h.mu.Unlock()
 	switch {
 	case receiving:
-		h.installToken(tok, port)
+		h.installToken(h.bgCtx, tok, port)
 	case wanted:
 		if err := h.startReceiver(); err != nil {
-			h.log.Warn("could not start receiving files", "err", err)
+			if !errors.Is(err, errHubClosed) {
+				h.log.Warn("could not start receiving files", "err", err)
+			}
 			return
 		}
 		h.mu.Lock()
 		tok, port = h.token, h.remotePortLocked()
 		h.mu.Unlock()
-		h.installToken(tok, port)
+		h.installToken(h.bgCtx, tok, port)
 	}
 }
 
 // enableAtStart turns the receiver on when the config asks for it. A failure
 // is logged, not fatal; the next reconnect (or `mole inbox receive on`) retries.
+// It runs in the background (see goBackground), so close waits for it.
 func (h *transferHub) enableAtStart() {
-	if !h.settings().Receive {
-		return
-	}
-	h.mu.Lock()
-	h.wanted = true
-	h.mu.Unlock()
-	if err := h.SetReceive(true); err != nil {
-		h.log.Warn("could not start receiving files", "err", err)
-	}
+	h.goBackground(func(context.Context) {
+		if !h.settings().Receive {
+			return
+		}
+		h.mu.Lock()
+		h.wanted = true
+		h.mu.Unlock()
+		if err := h.SetReceive(true); err != nil && !errors.Is(err, errHubClosed) {
+			h.log.Warn("could not start receiving files", "err", err)
+		}
+	})
 }
 
+// hubCloseWait bounds how long close waits for background work. Cancelled
+// work returns at once; only an SSH session stuck opening on a dead transport
+// can take longer, and closing the connection right after the hub ends it.
+const hubCloseWait = 3 * time.Second
+
+// close stops the receiver and the hub's background work: nothing it started
+// keeps running, and nothing starts afterwards.
 func (h *transferHub) close() {
+	h.mu.Lock()
+	h.closed = true
+	h.mu.Unlock()
+	h.stopBG()
 	h.ctlMu.Lock()
-	defer h.ctlMu.Unlock()
 	h.stopReceiver()
+	h.ctlMu.Unlock()
+
+	done := make(chan struct{})
+	go func() { h.bg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(hubCloseWait):
+		h.log.Warn("file transfer: background work still running at shutdown")
+	}
 }

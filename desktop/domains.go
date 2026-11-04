@@ -292,7 +292,9 @@ func (m *MoleService) dnsAction(action string) error {
 	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	invalidateConfig()
+	if err != nil {
 		msg := strings.TrimSpace(out.String())
 		if strings.Contains(strings.ToLower(msg), "user canceled") || (exitCode(err) == 126 && runtime.GOOS == "linux") {
 			return fmt.Errorf("cancelled")

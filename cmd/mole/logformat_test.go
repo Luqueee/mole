@@ -112,7 +112,6 @@ func TestCollapseKey_IgnoresTime(t *testing.T) {
 }
 
 func TestCollapser_CountsRepeats(t *testing.T) {
-	var got []string
 	out := captureStdout(t, func() {
 		col := &collapser{color: false, dedup: true}
 		col.emit(`time=2026-06-29T20:00:00Z level=WARN msg="dup" port=25`)
@@ -121,10 +120,7 @@ func TestCollapser_CountsRepeats(t *testing.T) {
 		col.emit(`time=2026-06-29T20:00:45Z level=INFO msg="other"`)
 		col.flush()
 	})
-	got = nil
-	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		got = append(got, l)
-	}
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(got) != 2 {
 		t.Fatalf("expected 2 output lines, got %d: %q", len(got), got)
 	}

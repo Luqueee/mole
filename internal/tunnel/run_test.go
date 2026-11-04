@@ -129,3 +129,89 @@ func TestManagerWatchConnectsAndStops(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// silentSSHClient connects to a real SSH server that never answers global
+// requests, like a peer behind a black-holed connection.
+func silentSSHClient(t *testing.T) *ssh.Client {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		raw, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer raw.Close()
+		config := &ssh.ServerConfig{NoClientAuth: true}
+		config.AddHostKey(signer)
+		conn, channels, requests, err := ssh.NewServerConn(raw, config)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		go func() {
+			for ch := range channels {
+				_ = ch.Reject(ssh.Prohibited, "no channels")
+			}
+		}()
+		for range requests {
+			// Never reply.
+		}
+	}()
+	client, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
+		User: "test", HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+		select {
+		case <-serverDone:
+		case <-time.After(time.Second):
+			t.Error("silent SSH server did not stop")
+		}
+	})
+	return client
+}
+
+func TestProbeTimesOutAndCloseReleasesTheRequest(t *testing.T) {
+	client := silentSSHClient(t)
+	start := time.Now()
+	err := probe(context.Background(), client, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("probe succeeded against a server that never replies")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("probe took %s, want it bounded by its timeout", elapsed)
+	}
+	// Watch closes the client after a timed-out probe; that must fail the
+	// still-pending keepalive instead of leaving its goroutine blocked.
+	pending := make(chan error, 1)
+	go func() {
+		_, _, err := client.SendRequest(keepaliveRequest, true, nil)
+		pending <- err
+	}()
+	_ = client.Close()
+	select {
+	case err := <-pending:
+		if err == nil {
+			t.Fatal("pending keepalive succeeded after Close")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing the client did not release a pending keepalive")
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -420,6 +421,69 @@ func TestReceiveOffClosesEverything(t *testing.T) {
 	}
 	if err := e.hub.SetReceive(true); err != nil { // and can come back
 		t.Fatalf("re-enable: %v", err)
+	}
+}
+
+// Nothing a test's hub started may still run once the test is over. A token
+// installation started by the last SetReceive(true) of a test used to reach
+// the fake remote after the test returned, and its `mole recv --set-token`
+// wrote the token into the test's temp dir while it was being removed
+// ("TempDir RemoveAll: directory not empty"). The hub now cancels and waits
+// for its background work in close, and the fake sshd waits for its exec
+// handlers, so a slow remote finishes before the temp dir goes.
+func TestReceiveLeavesNothingRunningAfterTheTest(t *testing.T) {
+	var handlerDone atomic.Bool
+	var remoteState string
+	// Registered before newE2E, so it runs after every cleanup newE2E adds,
+	// the removal of the temp dirs included.
+	t.Cleanup(func() {
+		if !handlerDone.Load() {
+			t.Error("the remote's token installation was still running after the test's cleanup")
+		}
+		if _, err := os.Stat(remoteState); err == nil {
+			t.Errorf("%s was written after the temp dir was removed", remoteState)
+		}
+	})
+	e := newE2E(t, config.TransferConfig{Accept: "auto"})
+	remoteState = e.remoteState
+	inner := e.srv.exec
+	entered := make(chan struct{})
+	var once sync.Once
+	e.srv.exec = func(cmd string, ch ssh.Channel) uint32 {
+		if cmd != remoteSetTokenCmd {
+			return inner(cmd, ch)
+		}
+		defer handlerDone.Store(true)
+		once.Do(func() { close(entered) })
+		time.Sleep(100 * time.Millisecond) // a slow remote: still busy when the test returns
+		return inner(cmd, ch)
+	}
+	if err := e.hub.SetReceive(true); err != nil {
+		t.Fatal(err)
+	}
+	<-entered // the installation reached the remote; the test ends here
+}
+
+// After close the hub starts nothing: no receiver, no background work.
+func TestTransferHubClosedStartsNothing(t *testing.T) {
+	e := newE2E(t, config.TransferConfig{Accept: "auto", Receive: true})
+	e.hub.close()
+	if err := e.hub.SetReceive(true); !errors.Is(err, errHubClosed) {
+		t.Fatalf("SetReceive(true) after close = %v, want errHubClosed", err)
+	}
+	e.hub.enableAtStart()
+	e.hub.onReconnect()
+	e.hub.close() // idempotent
+	if on, _ := e.hub.Info()["receive"].(bool); on {
+		t.Fatal("receiving after close")
+	}
+	local := net.JoinHostPort("127.0.0.1", strconv.Itoa(e.hub.settings().PortOrDefault()))
+	if c, err := net.DialTimeout("tcp", local, 200*time.Millisecond); err == nil {
+		c.Close()
+		t.Fatal("a receiver listens after close")
+	}
+	if len(e.pf.ListPush()) != 0 || e.remoteToken() != "" {
+		t.Fatal("close left a forward or installed a token")
 	}
 }
 
