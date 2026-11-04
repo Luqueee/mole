@@ -32,35 +32,35 @@ import (
 // initAnswers holds the user's choices, populated either by flags /
 // env vars (non-interactive) or by the prompts in promptAnswers.
 type initAnswers struct {
-	Remote       string // "user@host[:port]"
-	Ports        []int  // explicit ports, may be empty
-	AutoDiscover bool   // probe remote for common dev ports
-	ConfigPath   string // where to write the YAML
-	PrintOnly    bool   // true → write to stdout instead of a file
-	Global       bool   // true → ~/.config/mole/config.yaml
-	ClipEnabled  bool   // true → also write clip_* keys for `mole clip`
-	ClipURL      string // URL the LXC pulls from; e.g. http://100.64.0.10:7777
-	ClipListen   string // address the Mac serves on; defaults to 127.0.0.1:7777
-	ClipIntervalMs int  // clipboard poll cadence on the Mac
+	Remote         string // "user@host[:port]"
+	Ports          []int  // explicit ports, may be empty
+	AutoDiscover   bool   // probe remote for common dev ports
+	ConfigPath     string // where to write the YAML
+	PrintOnly      bool   // true → write to stdout instead of a file
+	Global         bool   // true → ~/.config/mole/config.yaml
+	ClipEnabled    bool   // true → also write clip_* keys for `mole clip`
+	ClipURL        string // URL the LXC pulls from; e.g. http://100.64.0.10:7777
+	ClipListen     string // address the Mac serves on; defaults to 127.0.0.1:7777
+	ClipIntervalMs int    // clipboard poll cadence on the Mac
 }
 
 func runInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	var (
-		remote    = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
-		portsCSV  = fs.String("ports", "", "comma-separated ports to forward (e.g. 3000,5173)")
-		autoDisc  = fs.Bool("auto-discover", false, "probe the remote for common dev ports")
-		cfgPath   = fs.String("config", "", "where to write the YAML (default: ./mole.yaml)")
-		global    = fs.Bool("global", false, "write to the user-global config (~/.config/mole/config.yaml)")
-		printOnly = fs.Bool("print", false, "print the generated YAML to stdout instead of writing a file")
-		up        = fs.Bool("up", false, "start mole (mole up) immediately after writing the config")
-		noPrompt  = fs.Bool("no-prompt", false, "don't ask questions; require all flags / env vars")
-		yes       = fs.Bool("yes", false, "accept defaults for any unanswered questions")
-		test      = fs.Bool("test", false, "after writing the config, test the SSH connection")
-		force     = fs.Bool("force", false, "overwrite the config file if it already exists")
-		clip      = fs.Bool("clip", false, "configure clip_* keys so `mole clip` works (skip the interactive prompt)")
-		clipURL   = fs.String("clip-url", "", "URL the LXC pulls from (only used with -clip); e.g. http://10.0.0.1:7777")
-		clipListen = fs.String("clip-listen", "", "address the Mac serves on (only used with -clip; defaults to the clip URL or 127.0.0.1:7777)")
+		remote       = fs.String("remote", "", "SSH target, e.g. dev@workstation[:port]")
+		portsCSV     = fs.String("ports", "", "comma-separated ports to forward (e.g. 3000,5173)")
+		autoDisc     = fs.Bool("auto-discover", false, "probe the remote for common dev ports")
+		cfgPath      = fs.String("config", "", "where to write the YAML (default: ./mole.yaml)")
+		global       = fs.Bool("global", false, "write to the user-global config (~/.config/mole/config.yaml)")
+		printOnly    = fs.Bool("print", false, "print the generated YAML to stdout instead of writing a file")
+		up           = fs.Bool("up", false, "start mole (mole up) immediately after writing the config")
+		noPrompt     = fs.Bool("no-prompt", false, "don't ask questions; require all flags / env vars")
+		yes          = fs.Bool("yes", false, "accept defaults for any unanswered questions")
+		test         = fs.Bool("test", false, "after writing the config, test the SSH connection")
+		force        = fs.Bool("force", false, "overwrite the config file if it already exists")
+		clip         = fs.Bool("clip", false, "configure clip_* keys so `mole clip` works (skip the interactive prompt)")
+		clipURL      = fs.String("clip-url", "", "URL the LXC pulls from (only used with -clip); e.g. http://10.0.0.1:7777")
+		clipListen   = fs.String("clip-listen", "", "address the Mac serves on (only used with -clip; defaults to the clip URL or 127.0.0.1:7777)")
 		clipInterval = fs.Int("clip-interval-ms", 500, "clipboard poll cadence in ms (only used with -clip)")
 	)
 	fs.Usage = func() {
@@ -103,15 +103,15 @@ Environment (read when the corresponding flag is empty):
 	}
 
 	ans, err := gatherAnswers(initInputs{
-		Remote:    *remote,
-		PortsCSV:  *portsCSV,
-		AutoDisc:  *autoDisc,
-		Config:    *cfgPath,
-		Global:    *global,
-		PrintOnly: *printOnly,
-		ClipEnabled: *clip,
-		ClipURL:   *clipURL,
-		ClipListen: *clipListen,
+		Remote:         *remote,
+		PortsCSV:       *portsCSV,
+		AutoDisc:       *autoDisc,
+		Config:         *cfgPath,
+		Global:         *global,
+		PrintOnly:      *printOnly,
+		ClipEnabled:    *clip,
+		ClipURL:        *clipURL,
+		ClipListen:     *clipListen,
 		ClipIntervalMs: *clipInterval,
 	}, initOptions{
 		Interactive: interactive,
@@ -182,15 +182,15 @@ Environment (read when the corresponding flag is empty):
 }
 
 type initInputs struct {
-	Remote    string
-	PortsCSV  string
-	AutoDisc  bool
-	Config    string
-	Global    bool
-	PrintOnly bool
-	ClipEnabled bool
-	ClipURL string
-	ClipListen string
+	Remote         string
+	PortsCSV       string
+	AutoDisc       bool
+	Config         string
+	Global         bool
+	PrintOnly      bool
+	ClipEnabled    bool
+	ClipURL        string
+	ClipListen     string
 	ClipIntervalMs int
 }
 
@@ -259,14 +259,14 @@ func gatherAnswers(in initInputs, opt initOptions) (*initAnswers, error) {
 	}
 
 	ans := &initAnswers{
-		Remote:       strings.TrimSpace(in.Remote),
-		AutoDiscover: in.AutoDisc,
-		PrintOnly:    in.PrintOnly,
-		Global:       in.Global,
-		ConfigPath:   strings.TrimSpace(in.Config),
-		ClipEnabled:  in.ClipEnabled,
-		ClipURL:      strings.TrimSpace(in.ClipURL),
-		ClipListen:   strings.TrimSpace(in.ClipListen),
+		Remote:         strings.TrimSpace(in.Remote),
+		AutoDiscover:   in.AutoDisc,
+		PrintOnly:      in.PrintOnly,
+		Global:         in.Global,
+		ConfigPath:     strings.TrimSpace(in.Config),
+		ClipEnabled:    in.ClipEnabled,
+		ClipURL:        strings.TrimSpace(in.ClipURL),
+		ClipListen:     strings.TrimSpace(in.ClipListen),
 		ClipIntervalMs: in.ClipIntervalMs,
 	}
 	ans.Ports = config.ParsePorts(in.PortsCSV)

@@ -349,7 +349,7 @@ Flags:
 	_ = adminDo(http.MethodDelete, cfg.AdminAddr, fmt.Sprintf("/ports/push/%d", local), "", http.StatusOK)
 	body, _ := json.Marshal(map[string]any{"local": local, "remote": remote, "bind": *bind})
 	if err := adminDo(http.MethodPost, cfg.AdminAddr, "/ports/push", string(body), http.StatusCreated); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: live push failed (%v); saved, mole up retries it after the next reconnect\n", err)
+		fmt.Fprintf(os.Stderr, "warning: live push failed (%v); %s\n", err, liveApplyHint(err))
 		return 1
 	}
 	fmt.Printf("live: mole up is pushing %d now\n", local)
@@ -477,7 +477,7 @@ func adminDo(method, addr, path, body string, wantStatus int) error {
 		return err
 	}
 	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", admin.ContentTypeJSON)
 	}
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
@@ -508,4 +508,16 @@ func reorderFlags(args []string) []string {
 		}
 	}
 	return append(flags, rest...)
+}
+
+// liveApplyHint explains what happens to a change that was saved in the
+// config but could not be applied to the running mole up. While mole up is
+// still making its first connection (the admin API answers 503) it has
+// already read the config, so the change waits for a restart; otherwise the
+// running daemon retries it after the next reconnect.
+func liveApplyHint(err error) string {
+	if err != nil && strings.Contains(err.Error(), "503") {
+		return "saved; mole up is still connecting and read its config at start: run `mole restart` to apply it"
+	}
+	return "saved, mole up retries it after the next reconnect"
 }

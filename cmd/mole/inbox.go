@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Luqueee/mole/internal/admin"
 	"github.com/Luqueee/mole/internal/config"
 	"github.com/Luqueee/mole/internal/transfer"
 )
@@ -114,7 +115,7 @@ func adminJSON(method, addr, path string, body any, out any) error {
 		return err
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", admin.ContentTypeJSON)
 	}
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
@@ -136,6 +137,7 @@ func adminJSON(method, addr, path string, body any, out any) error {
 
 type transferStatus struct {
 	Info struct {
+		State    string `json:"state"` // "connecting" until the daemon is connected
 		Transfer struct {
 			Receive     bool   `json:"receive"`
 			Accept      string `json:"accept"`
@@ -176,6 +178,14 @@ func inboxShow(configPath string) int {
 			break
 		}
 		t := st.Info.Transfer
+		if st.Info.State == stateConnecting {
+			state := "off"
+			if cfg.Transfer.Receive {
+				state = "on (starts once connected)"
+			}
+			fmt.Printf("%s %s %s\n", cDim("receive", color), state, cDim("· mole is still connecting to the remote", color))
+			break
+		}
 		if t.Receive {
 			fmt.Printf("%s %s %s\n", cDim("receive", color), cGreen("on", color), cDim("· accept: "+t.Accept, color))
 		} else {
@@ -340,7 +350,7 @@ func inboxReceive(configPath string, on bool) int {
 		return 0
 	}
 	if err := adminJSON(http.MethodPut, cfg.AdminAddr, "/transfer/receive", map[string]bool{"on": on}, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: live change failed (%v); saved, mole up retries it after the next reconnect\n", err)
+		fmt.Fprintf(os.Stderr, "warning: live change failed (%v); %s\n", err, liveApplyHint(err))
 		return 1
 	}
 	if on {

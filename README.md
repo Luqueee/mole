@@ -4,7 +4,7 @@
 
 **Hit `localhost:3000` as if it were always running — even when the real service lives on another machine.**
 
-[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.26.10%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20·%20macOS%20·%20Windows%20·%20FreeBSD-555)](#-platforms)
 [![Single binary](https://img.shields.io/badge/deploy-single%20static%20binary-2ea043)](#-install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#-license)
@@ -34,13 +34,13 @@ dev servers as they start.
 |---|---|
 | 🔌 **One connection** | A single SSH client multiplexes every forwarded port. |
 | 🔭 **Smart auto-discover** | Enumerates the remote's TCP listeners with `ss` or `netstat`; if neither works, probes `discover_ports`. Re-scans every 15s to pick up new servers. |
-| 🧭 **SSH config aliases** | A `remote` like `dev` is resolved through `~/.ssh/config` (`ssh -G`): HostName, User, Port, IdentityFile, Include, Match — all honoured. |
+| 🧭 **SSH config aliases** | A `remote` like `dev` is resolved through `~/.ssh/config` (`ssh -G`): HostName, User, Port, IdentityFile, IdentitiesOnly, ProxyJump, known-hosts settings, Include, Match — all honoured. |
 | 🛡️ **Exclude list** | System/reserved ports (22, 25, 53, 111, 631) are skipped by default; fully configurable. |
 | ♻️ **Auto-reconnect** | Transparent reconnect on tunnel drop, with periodic health checks. |
-| 🔑 **Native auth** | ssh-agent first (Unix socket / Windows named pipe), then `~/.ssh/id_*` keys. |
+| 🔑 **Native auth** | Configured `IdentityFile` keys, then ssh-agent (Unix socket / Windows named pipe), then `~/.ssh/id_*` keys. |
 | 📨 **Send files** | `mole send` puts files in the other machine's inbox, from either side, over the same SSH connection; a picker lists the folder when you name nothing. |
 | 🕸️ **Manage other machines** | Register nodes with `mole node add`, then run any mole command on one with `mole -n NODE <command>`: its ports, pushes, inbox, status, update. Any machine can manage any other it can reach over SSH. |
-| 🌙 **Background daemon** | `mole up -d` detaches; `mole down` stops it; `mole status` and `mole logs` introspect it. |
+| 🌙 **Background daemon** | `mole up -d` detaches; `mole down` stops it; `mole status` and `mole logs` introspect it; `mole service install` starts it at login. |
 | 🎨 **Beautiful logs** | `mole logs` renders the daemon log with colour level badges, a green `FORWARD` badge, and `(×N)` collapsing of repeats. |
 | 📦 **Single binary** | No separate runtime or `node_modules`; daemon mode uses the same executable. |
 
@@ -63,7 +63,8 @@ Install on **Windows** with PowerShell 5.1 or newer:
 irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
 ```
 
-On **Linux, macOS, or FreeBSD**, install with Go 1.26.4+ and Git available:
+On **Linux, macOS, or FreeBSD**, install the latest release (it needs curl or
+wget, tar, and sha256sum or shasum):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
@@ -111,8 +112,9 @@ create a config interactively.
 | Command | What it does |
 |---------|--------------|
 | `mole up` | Start the forwarder in the foreground (add `-d` to background it). |
-| `mole down` | Stop a backgrounded mole (started with `up -d`). |
+| `mole down` | Stop the running mole (started with `up -d`, in another terminal, or by the login service) and wait for it to exit. |
 | `mole restart` | Stop and re-launch a backgrounded mole using the same config. |
+| `mole service` | Start mole at login and restart it if it dies: `service install`, `service uninstall`, `service status` (macOS launchd, Linux systemd). |
 | `mole status` | Query the local admin API for live stats + forwarded ports. |
 | `mole logs` | Show the daemon log, colourised; `-f` to follow, `clean` to truncate it. |
 | `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
@@ -126,8 +128,8 @@ create a config interactively.
 | `mole dns` | Make the OS resolve the configured `domains:` through mole: `dns install`, `dns uninstall` (Linux and macOS, root). |
 | `mole config` | `config edit` opens the active `mole.yaml` in `$VISUAL` / `$EDITOR`. |
 | `mole init` | Generate a `mole.yaml` interactively (or scripted). |
-| `mole clip` | Share clipboard images over a separate private HTTP connection: `clip serve`, `clip pull`. |
-| `mole update` | Update in place using the installer (latest source on Unix, latest release on Windows). |
+| `mole clip` | Share clipboard images over HTTP, through a push forward or a private network: `clip serve`, `clip pull`. |
+| `mole update` | Update in place to the latest release (`-version` pins one, `-branch` builds a branch). |
 | `mole version` · `mole help` | The obvious. |
 
 ## 📦 Install
@@ -142,13 +144,20 @@ user `PATH`. It needs PowerShell 5.1 or newer, but no Go or Git:
 irm https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.ps1 | iex
 ```
 
-The Unix installer builds from a local mole clone when run inside one;
-otherwise it clones the latest `main`. This one-liner needs Go 1.26.4+, Git,
-and curl:
+Outside a local mole clone, the Unix installer downloads the latest release's
+archive for your OS and CPU (amd64 or arm64) and checks it against the
+release's `SHA256SUMS` before installing it. It needs curl or wget, tar, and
+sha256sum or shasum, but no Go or Git:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | sh
 ```
+
+When the GitHub CLI (`gh`) is installed and signed in, the Unix installer also
+checks the archive's build provenance with `gh attestation verify`; set
+`MOLE_ATTESTATION=require` to refuse an archive it cannot verify, or `off` to
+skip the check. `GITHUB_TOKEN`, when set, is sent to the GitHub API to look up
+the latest release (useful on shared CI runners).
 
 | Platform | Default binary location |
 |----------|-------------------------|
@@ -160,16 +169,23 @@ Open a new PowerShell session to use the updated user `PATH`. On Unix, the
 installer prints a `PATH` hint when needed.
 
 To install from a local clone, run `./scripts/install.sh` on Unix or
-`.\scripts\install.ps1` in PowerShell; both build from source with Go. You can
-also download a [prebuilt archive](https://github.com/Luqueee/mole/releases/latest)
-for any supported platform and check it against the release's `SHA256SUMS`.
+`.\scripts\install.ps1` in PowerShell; both build from source. Source builds
+need Git and Go 1.26.10+; the Unix installer downloads that Go into
+`~/.cache/mole/go` when yours is missing or older (`MOLE_NO_GO_DOWNLOAD=1`
+refuses to). The Unix installer also builds from source when `MOLE_VERSION` is
+a branch or another ref that is not a `vX.Y.Z` release, when `MOLE_REPO` points
+at another remote, and on a platform the releases have no archive for (it says
+why). You can also download a
+[prebuilt archive](https://github.com/Luqueee/mole/releases) for any
+supported platform and check it against the release's `SHA256SUMS`.
 
 Custom destinations and version pins:
 
 ```bash
 ./scripts/install.sh --prefix /opt              # /opt/bin/mole
 INSTALL_DIR=~/bin/mole ./scripts/install.sh      # exact binary path
-MOLE_VERSION=v0.1.1 ./scripts/install.sh         # Git ref, outside a clone
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | MOLE_VERSION=v0.6.1 sh   # a release
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/main/scripts/install.sh | MOLE_VERSION=main sh     # build main
 ```
 
 ```powershell
@@ -188,7 +204,7 @@ environment variable accepts the full path to `mole.exe`.
 
 ### Other ways to install
 
-With Go 1.26.4+:
+With Go 1.26.10+:
 
 ```bash
 go install github.com/Luqueee/mole/cmd/mole@latest
@@ -223,15 +239,20 @@ Update an installed mole in place — no manual re-clone. It re-runs the officia
 installer against the running binary's own location:
 
 ```bash
-mole update                  # latest main on Unix; latest release on Windows
-mole update -version v0.1.1  # Unix: Git ref; Windows: release tag
+mole update                  # the latest release
+mole update -version v0.6.1  # a given release
 mole update -branch feat/x   # build and install a branch (see below)
 mole update -dry-run         # print what it would run, change nothing
 ```
 
-Unix updates need Go, Git, and curl or wget. Windows release updates need
-PowerShell. For a `go install` setup, re-run
-`go install github.com/Luqueee/mole/cmd/mole@latest` instead.
+Like the installers, an update downloads the release's archive and checks its
+SHA-256 before replacing anything; a mole clone in the working directory is
+not built instead. On Unix it needs curl or wget, tar, and sha256sum or
+shasum; Windows needs PowerShell. Only `-branch` builds from source (Git on
+Unix, with Go downloaded when missing; Go on Windows). On Unix, `-version`
+also takes another Git ref, which is built from source the same way. For a
+`go install` setup, re-run `go install github.com/Luqueee/mole/cmd/mole@latest`
+instead.
 
 #### Try a branch
 
@@ -242,18 +263,18 @@ source and installs it over the running binary.
 mole update -branch feat/mesh-nodes      # this machine
 mole -n devlabs update -branch feat/x    # another node
 mole version                             # mole v0.3.0 (feat/mesh-nodes@a1b2c3d)
-mole update                              # back to main
+mole update                              # back to the latest release
 ```
 
 `mole version` (and `mole node ping`) show which branch and commit a binary
 was built from, so you can tell what each machine runs. The installer fetched
 is the one **that branch** carries, so a branch can change the installer too.
-A branch that does not exist is an error, never a silent install of `main`.
+A branch that does not exist is an error, never a silent install of something else.
 On Windows `-branch` downloads the branch's source and builds it, so it needs
 Go (releases do not). Without the CLI:
 
 ```bash
-MOLE_VERSION=feat/x curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/refs/heads/feat/x/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/refs/heads/feat/x/scripts/install.sh | MOLE_VERSION=feat/x sh
 ```
 
 `MOLE_REPO` points the installer at a fork (or a local repository), and
@@ -266,7 +287,10 @@ MOLE_VERSION=feat/x curl -fsSL https://raw.githubusercontent.com/Luqueee/mole/re
 ./scripts/uninstall.sh --purge # also remove the user config
 ```
 
-On Windows, run `.\scripts\uninstall.ps1` from a clone. For a `go install`
+`uninstall.sh` also stops and removes the login service `mole service install`
+set up (with `mole service uninstall` when the installed mole has it, else with
+`launchctl` / `systemctl --user` directly); run through `sudo`, it removes the
+service of the user who ran `sudo`. On Windows, run `.\scripts\uninstall.ps1` from a clone. For a `go install`
 setup, remove the binary from `$(go env GOPATH)/bin`.
 
 ## 🛠️ Usage
@@ -278,6 +302,50 @@ mole up                 # foreground (Ctrl+C to stop) — great for debugging
 mole up -d              # background daemon — returns your shell
 mole down               # stop the daemon
 ```
+
+One mole runs per user: a second `mole up` (with or without `-d`) is refused
+while one is running. The running mole holds a lock in the state directory for
+its whole life, so a stale pidfile left by a crash or a reboot can never make
+`mole down` signal an unrelated process that reused the PID. `mole down` waits
+up to 5 seconds for mole to exit and says so if it is still running.
+
+If the remote can't be reached when mole starts — no network yet, DNS not
+ready, connection refused — mole keeps retrying (1s, 2s, 4s, … up to every 30s)
+instead of exiting; Ctrl+C or `mole down` stop it at any point. Meanwhile
+`mole status` reports `"state": "connecting"` (the desktop app: CONNECTING).
+Problems a retry can't fix (authentication, host keys, no SSH keys, an invalid
+remote) still exit with an error at once.
+
+### Start at login (`mole service`)
+
+```bash
+mole service install            # start at login, restart if it dies
+mole service install -dry-run   # print the service file and commands only
+mole service status             # installed? running?
+mole service uninstall          # stop it and remove the service
+```
+
+`install` registers mole with the system's service manager, running
+`mole up -config <absolute path>` in the foreground with the absolute path of
+the `mole` binary. `-config` picks the config (default: `./mole.yaml`, then
+the user-global one — the same lookup as `mole up`); it must set `remote:`.
+
+| Platform | Service | Output |
+|----------|---------|--------|
+| macOS | launchd user agent `~/Library/LaunchAgents/dev.luqueee.mole.plist` (`launchctl bootstrap gui/$UID`) | the daemon log (`mole logs`) |
+| Linux | systemd user unit `~/.config/systemd/user/mole.service` (`systemctl --user enable` + `restart`) | the daemon log (`mole logs`) |
+| Windows, FreeBSD | not supported yet — run `mole up -d` from a logon script instead | |
+
+The service manager restarts mole when it crashes or exits with an error; a
+clean stop is respected. So `mole down` stops a supervised mole until the next
+login (it prints a reminder), and `mole restart` restarts it through the
+service manager so it stays supervised. A mole already running when you
+install is stopped so the service can take over.
+
+On Linux, user services run only while you are logged in: on a headless
+machine run `loginctl enable-linger $USER` so mole starts at boot. The service
+sees ssh-agent only if the systemd user manager has `SSH_AUTH_SOCK` (check
+`systemctl --user show-environment`); otherwise it uses `~/.ssh/id_*` keys.
 
 ### Pick the remote
 
@@ -297,6 +365,19 @@ expansion; `IdentityAgent SSH_AUTH_SOCK` explicitly uses that variable, and
 Without the directive, the existing environment/platform agent default applies.
 The selected agent must already be running with the appropriate keys loaded.
 
+Keys are offered in the order configured `IdentityFile` entries, agent keys,
+then `~/.ssh/id_*` files, each key once; `IdentitiesOnly yes` limits this to the
+`IdentityFile` keys (an agent copy of one of them still counts). Mole cannot
+ask for passphrases, so a passphrase-protected key is skipped with a warning
+unless it is loaded in the agent (`ssh-add`).
+
+Host keys follow the alias's `UserKnownHostsFile` and `GlobalKnownHostsFile`
+(every listed file that exists is checked; new keys go to the first user
+file), `HostKeyAlias` and `HashKnownHosts`. `StrictHostKeyChecking yes`
+refuses hosts that are not recorded yet; any other value trusts them on first
+use. `ProxyCommand` and `CertificateFile` are not supported: mole logs a warning
+and connects directly with plain keys. Use `ProxyJump` for SSH hops.
+
 ### Pick the ports
 
 ```bash
@@ -304,10 +385,25 @@ mole up --remote dev --auto-discover           # forward whatever's listening on
 mole up --remote dev --ports 3000,5173,8080    # forward an explicit set
 ```
 
-With `--auto-discover`, mole tries `ss` or `netstat` on the remote and forwards
-listeners reachable through remote loopback, excluding `exclude_ports`. If
-neither command works, it probes only the ports in `discover_ports`. It repeats
-discovery every 15 seconds, so a new server can be forwarded without a restart.
+With `--auto-discover`, mole lists the remote's TCP listeners (`ss` on Linux;
+`netstat` on macOS, the BSDs and Windows OpenSSH hosts) and forwards those
+reachable through remote loopback, excluding `exclude_ports`. If no command
+works, or none prints a listener table mole can read, it probes only the ports
+in `discover_ports` and never unforwards on a guess. It repeats discovery every
+15 seconds, so a new server can be forwarded without a restart.
+
+Listing finds everything that listens, including databases and the high
+ephemeral ports that editors and language servers open. To auto-forward only
+part of it, set a range:
+
+```yaml
+discover_range: "1024-49151"   # LO-HI, inclusive; unset forwards every listener
+```
+
+The range only filters listeners mole finds by itself. Ports in `ports:` and
+`discover_ports:` (the built-in list included, and ports `mole ports add`
+writes) are forwarded regardless, and the `discover_ports` probe fallback is
+not filtered. `exclude_ports` still applies to everything except `ports:`.
 
 ### Config file
 
@@ -336,7 +432,24 @@ mole logs -n 50 --no-dedup
 
 `mole status` needs the admin API to be on. It's **off by default** — set
 `admin_addr: 127.0.0.1:9999` in the config (`mole init` writes it for you) or
-pass `mole up -admin 127.0.0.1:9999`.
+pass `mole up -admin 127.0.0.1:9999`. `mole status` reads `admin_addr` from the
+same config as `mole up` (`-config PATH`, else `./mole.yaml`, else the
+user-global config); pass `-admin ADDR` to query another address.
+
+The admin API answers as soon as `mole up` starts, also while the first SSH
+connection is still being retried: `info.state` in `/status` is `"connecting"`
+until the connection is up and `"connected"` from then on. While connecting,
+nothing is forwarded yet and what needs the tunnel (`mole ports add`,
+`mole push`, `mole route`, `mole send`, receiving files) answers
+`503 Service Unavailable` saying so.
+
+The admin API has no authentication, so it is local-only: `mole up` refuses an
+`admin_addr` that is not `localhost`, `127.x.x.x` or `[::1]` (e.g. `0.0.0.0` or
+a LAN address) and exits with status 1. It also refuses requests from web
+browsers (an `Origin` header, a `Sec-Fetch-Site` other than `none`, or a `Host`
+that is not a loopback address, which blocks DNS rebinding), and its endpoints
+that take a JSON body require `Content-Type: application/json`. A `curl` from
+the same machine works: `curl -s 127.0.0.1:9999/status`.
 
 `mole logs` parses the daemon's structured log and renders it with coloured
 level badges (a distinct green **FORWARD** badge for forwarded ports), a dimmed
@@ -620,31 +733,54 @@ $ mole doctor admin.kena.lan
 
 The exit status is 1 if any check failed. It never changes anything.
 
-### Clipboard images over a private network
+### Clipboard images
 
 `mole clip` moves clipboard **images** from the machine running `clip serve` to
-the one running `clip pull` — useful for pasting a screenshot taken on a remote
-desktop. It uses a separate HTTP connection over a private network, such as
-Tailscale or WireGuard. Automatic clipboard watching is available on macOS;
-`clip pull` works on every supported platform.
+the one running `clip pull` — useful for pasting a screenshot taken on your
+machine into a tool that runs on the remote. Automatic clipboard watching is
+available on macOS; `clip pull` works on every supported platform.
 
 ```bash
 mole clip serve              # on the source Mac; watches its clipboard by default
 mole clip pull               # on the target; uses clip_url from the config, or -url
 ```
 
-The clip endpoint has no authentication and binds to `127.0.0.1:7777` by
-default. For a remote pull, bind it to the source machine's private network
-address and use the same address in `clip_url`:
+The clip endpoint is plain HTTP with **no authentication**, and `clip serve`
+binds `127.0.0.1:7777` by default. The safer way to reach it from the remote is
+to keep it on loopback and carry it over mole's SSH connection with a
+[push forward](#push-expose-a-local-service-on-the-remote), on the machine that
+runs both `mole up` and `mole clip serve`:
+
+```yaml
+push:
+  - local: 7777    # the remote's 127.0.0.1:7777 reaches this machine's clip server
+```
+
+`mole push 7777` adds the same rule from the command line. On the remote, point
+`mole clip pull` at its own loopback port (in the remote's `mole.yaml`, or with
+`-url`):
+
+```yaml
+clip_url: http://127.0.0.1:7777
+```
+
+While `mole up` is connected, the image travels through the SSH tunnel and the
+server is never exposed on a network interface. The forwarded port is still
+open to every local user of the remote, as any push forward bound to loopback is.
+
+Without the tunnel, you can bind the server to the source machine's private
+Tailscale or WireGuard address and use the same address in `clip_url`:
 
 ```yaml
 clip_url: http://100.64.0.10:7777
 clip_listen: 100.64.0.10:7777
 ```
 
-Binding to `0.0.0.0:7777`, `:7777`, or `[::]:7777` is supported for controlled
-networks, but `mole clip serve` emits a warning because every interface can
-reach the unauthenticated endpoint.
+Every host that can reach that address can then read the latest image and
+upload a new one, so prefer the push forward. Binding to `0.0.0.0:7777`,
+`:7777`, or `[::]:7777` is supported for controlled networks, but
+`mole clip serve` emits a warning because every interface can reach the
+unauthenticated endpoint.
 
 
 ### Generate the config with `mole init`
@@ -690,14 +826,15 @@ mole up [flags]
   -remote         SSH target (user@host[:port]) or an ssh config alias
   -ports          comma-separated ports to forward (e.g. 3000,5173)
   -auto-discover  forward whatever is listening on the remote
-  -admin          admin HTTP address (empty to disable)
+  -admin          admin HTTP address, loopback only; overrides admin_addr
   -log-level      debug|info|warn|error
   -insecure       disable SSH host key verification (UNSAFE; dev only)
   -d, -detach     run in the background; stop with 'mole down'
 
 mole down
 mole restart [-config PATH]
-mole status  [-admin 127.0.0.1:9999]
+mole service install|uninstall|status [-config PATH] [-dry-run]
+mole status  [-config PATH] [-admin ADDR]
 mole logs    [-f] [-n N] [-raw] [-color] [-no-color] [-no-dedup]
 mole logs clean [-keep N]
 mole ports  add [-config PATH] <port>
@@ -732,13 +869,14 @@ mole version · mole help
 | `ports`          | int[]  | `[]`                 | Explicit ports — always forwarded                  |
 | `auto_discover`  | bool   | `false`              | Forward the remote's live listeners                |
 | `discover_ports` | int[]  | see below            | Fallback probe list when `ss`/`netstat` are absent |
+| `discover_range` | string | `""` (no filter)     | Only auto-forward enumerated listeners in `LO-HI` (e.g. `"1024-49151"`); `ports`/`discover_ports` are not filtered |
 | `exclude_ports`  | int[]  | `[22,25,53,111,631]` | Never auto-forwarded; `[]` excludes nothing        |
-| `admin_addr`     | string | `""` (disabled)      | Admin HTTP address; `mole init` writes `127.0.0.1:9999`. Required by `mole status` |
+| `admin_addr`     | string | `""` (disabled)      | Admin HTTP address, loopback only (`localhost`, `127.x.x.x`, `[::1]`); `mole init` writes `127.0.0.1:9999`. Required by `mole status` |
 | `log_level`      | string | `info`               | `debug`, `info`, `warn`, `error`                   |
 | `ssh_port`       | int    | `22`                 | SSH port on the remote                             |
 | `insecure`       | bool   | `false`              | Disable SSH host key verification (UNSAFE; dev only) |
 | `clip_url`       | string | —                    | Clip server URL used by `mole clip pull`           |
-| `clip_listen`    | string | `127.0.0.1:7777`     | Bind address; use a private Tailscale/WireGuard IP for remote access |
+| `clip_listen`    | string | `127.0.0.1:7777`     | Bind address of `mole clip serve`; keep loopback and reach it with a push forward |
 | `clip_interval_ms` | int  | —                    | Clipboard poll interval for `clip serve -watch`    |
 | `push`           | rule[] | `[]`                 | Local services exposed on the remote (`local`, optional `remote`, optional `bind`; default bind `127.0.0.1`) |
 | `transfer`       | object | see [Send files](#send-files-between-the-two-machines) | `inbox`, `receive`, `accept`, `port`, `max_size_mb` |
@@ -761,14 +899,16 @@ Fallback `discover_ports`:
 1. Open **one** SSH client connection to the remote (ssh-agent or `~/.ssh/id_*`
    keys; aliases resolved via `ssh -G`).
 2. Discover ports: enumerate the remote's TCP listeners (`ss`/`netstat`), or
-   fall back to probing `discover_ports`. Skip `exclude_ports`.
+   fall back to probing `discover_ports`. Skip `exclude_ports` and, if set,
+   listeners outside `discover_range`.
 3. For each port, bind `127.0.0.1:<port>` locally; on a local connection, dial
    `127.0.0.1:<port>` through the tunnel and bridge bytes both ways.
 4. Re-discover every 15s and forward anything new; a watchdog goroutine
    reconnects the SSH session if it dies.
 
-State (pidfile + background log) lives in `~/.local/state/mole/` on Unix
-(honouring `XDG_STATE_HOME`) and `%LOCALAPPDATA%\mole\` on Windows.
+State (pidfile, instance lock `mole.lock`, background log) lives in
+`~/.local/state/mole/` on Unix (honouring `XDG_STATE_HOME`) and
+`%LOCALAPPDATA%\mole\` on Windows.
 
 ## 💻 Platforms
 
@@ -781,9 +921,10 @@ SSH auth is native per platform:
 
 ## ⚠️ Limitations
 
-- **Host keys are verified** against `~/.ssh/known_hosts`. Unknown hosts are
-  trusted on first use (recorded automatically, like OpenSSH); a later key
-  *mismatch* is refused as a possible MITM. Pass `--insecure` (or
+- **Host keys are verified** against `~/.ssh/known_hosts` (or the known-hosts
+  files an alias's ssh_config selects). Unknown hosts are trusted on first use
+  (recorded automatically, like OpenSSH) unless `StrictHostKeyChecking yes` is
+  set; a later key *mismatch* is always refused as a possible MITM. Pass `--insecure` (or
   `insecure: true`) to turn verification off for throwaway dev hosts.
 - **Dead ports are pruned only under auto-discover** — when `ss`/`netstat` can be
   enumerated, a remote service that stops has its local listener closed (you'll
@@ -815,6 +956,44 @@ make tidy
 make uninstall
 make clean
 ```
+
+CI (`.github/workflows/ci-cd.yml`) runs on every pull request and on `main`:
+`go vet` and `go test -race` on Linux and macOS, tests and the installers on
+Windows, staticcheck and govulncheck for every supported OS, actionlint, the
+landing checks, and — on macOS — the desktop module's vet, race tests,
+staticcheck and govulncheck plus its frontend typecheck. The Go version comes from the `go`
+directive in `go.mod` and `desktop/go.mod`. The same analysis locally:
+
+```bash
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+# the desktop module embeds desktop/frontend/dist, so build the frontend first
+(cd desktop/frontend && npm ci && npm run build) && (cd desktop && go test ./...)
+```
+
+### Releasing
+
+CLI releases are built and published by `.github/workflows/release.yml` when a
+`v*` tag is pushed:
+
+1. Bump `const version` in `cmd/mole/main.go` and merge it to `main`.
+2. Tag that commit and push the tag: `git tag v0.9.0 && git push origin v0.9.0`.
+3. The workflow runs the tests, builds the archives with
+   `scripts/release-archives.sh` (it refuses a version that `main.go` does not
+   carry), attests their build provenance, and creates the GitHub release with
+   every `mole_<version>_<os>_<arch>` archive and `SHA256SUMS`, notes generated
+   since the previous `v*` tag. It is marked as the latest release, which is
+   what the installers download.
+
+To check a downloaded archive:
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS
+gh attestation verify mole_0.9.0_linux_amd64.tar.gz --repo Luqueee/mole
+```
+
+The desktop app is released separately from `desktop-v*` tags by
+`.github/workflows/desktop-bundles.yml`; those releases are never marked latest.
 
 ## 📄 License
 

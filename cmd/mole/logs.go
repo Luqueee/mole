@@ -37,7 +37,7 @@ func runLogs(args []string) int {
 		}
 	}
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
- 	var (
+	var (
 		follow     = fs.Bool("f", false, "follow the log (stream new lines)")
 		lines      = fs.Int("n", 200, "number of trailing lines to show")
 		raw        = fs.Bool("raw", false, "print raw log lines without formatting")

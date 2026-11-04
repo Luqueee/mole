@@ -44,6 +44,11 @@ type sshTestServer struct {
 	// events records what sessions asked for besides exec: "pty TERM CxR",
 	// "winch CxR", "signal NAME".
 	events []string
+	// execs tracks running exec handlers: they act for the test (writing
+	// files into its temp dirs, say), so the cleanup waits for them. closed
+	// (under mu) stops new ones once the cleanup has begun.
+	execs  sync.WaitGroup
+	closed bool
 }
 
 func (s *sshTestServer) session(nc ssh.NewChannel) {
@@ -56,8 +61,17 @@ func (s *sshTestServer) session(nc ssh.NewChannel) {
 		case "exec":
 			var p struct{ Command string }
 			_ = ssh.Unmarshal(r.Payload, &p)
+			s.mu.Lock()
+			if s.closed {
+				s.mu.Unlock()
+				_ = r.Reply(false, nil)
+				continue
+			}
+			s.execs.Add(1)
+			s.mu.Unlock()
 			_ = r.Reply(true, nil)
 			go func() {
+				defer s.execs.Done()
 				status := s.exec(p.Command, ch)
 				_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
 				_ = ch.Close()
@@ -121,7 +135,16 @@ func newSSHTestServer(t *testing.T, clientKey ssh.PublicKey) *sshTestServer {
 		t.Fatal(err)
 	}
 	s := &sshTestServer{ln: ln, cfg: cfg}
-	t.Cleanup(func() { ln.Close(); s.kill() })
+	t.Cleanup(func() {
+		ln.Close()
+		s.mu.Lock()
+		s.closed = true
+		s.mu.Unlock()
+		s.kill()
+		// The connections are gone, so a handler still reading its input
+		// sees EOF and returns.
+		s.execs.Wait()
+	})
 	go func() {
 		for {
 			raw, err := ln.Accept()
