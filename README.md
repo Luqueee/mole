@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦫 mole
+# <img src="landing/public/mole-mark.png" alt="" width="64" height="64" align="absmiddle"> mole
 
 **Hit `localhost:3000` as if it were always running — even when the real service lives on another machine.**
 
@@ -8,6 +8,8 @@
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20·%20macOS%20·%20Windows%20·%20FreeBSD-555)](#-platforms)
 [![Single binary](https://img.shields.io/badge/deploy-single%20static%20binary-2ea043)](#-install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#-license)
+
+<img src="docs/mole-desktop.gif" alt="mole desktop app — live tunnel and connection log, the Nodes map, and file transfers" width="920">
 
 </div>
 
@@ -38,7 +40,8 @@ dev servers as they start.
 | 🛡️ **Exclude list** | System/reserved ports (22, 25, 53, 111, 631) are skipped by default; fully configurable. |
 | ♻️ **Auto-reconnect** | Transparent reconnect on tunnel drop, with periodic health checks. |
 | 🔑 **Native auth** | Configured `IdentityFile` keys, then ssh-agent (Unix socket / Windows named pipe), then `~/.ssh/id_*` keys. |
-| 📨 **Send files** | `mole send` puts files in the other machine's inbox, from either side, over the same SSH connection; a picker lists the folder when you name nothing. |
+| 📨 **Send files** | `mole send` puts files in the other machine's inbox, from either side, over the same SSH connection; a picker lists the folder when you name nothing. Interrupted transfers resume where they stopped. |
+| 📥 **Fetch files** | `mole get NODE:/path` downloads a file from any machine you can SSH into: nothing of mole needed there, checksum-verified, resumable. |
 | 🕸️ **Manage other machines** | Register nodes with `mole node add`, then run any mole command on one with `mole -n NODE <command>`: its ports, pushes, inbox, status, update. Any machine can manage any other it can reach over SSH. |
 | 🌙 **Background daemon** | `mole up -d` detaches; `mole down` stops it; `mole status` and `mole logs` introspect it; `mole service install` starts it at login. |
 | 🎨 **Beautiful logs** | `mole logs` renders the daemon log with colour level badges, a green `FORWARD` badge, and `(×N)` collapsing of repeats. |
@@ -120,6 +123,7 @@ create a config interactively.
 | `mole ports` | Manage the auto-discover port list: `add`, `remove`/`rm`, `list`/`ls`. |
 | `mole push` · `mole unpush` | Expose a local port on the remote (`ssh -R`): `push LOCAL[:REMOTE]`, `push list`, `unpush LOCAL`. |
 | `mole send` (`ftp`) | Send files to the other machine's inbox; no arguments opens a file picker: `send [-to SUBFOLDER] [files...]`. |
+| `mole get` | Download files from another machine over SSH: `get [-o DIR] [-no-verify] NODE:PATH...`. |
 | `mole inbox` | Where received files land, and who may send: `inbox`, `path`, `set DIR`, `receive on\|off`, `mode ask\|auto`, `pending`, `accept`, `reject`. |
 | `mole node` | The other machines you manage: `node add NAME TARGET`, `node ls`, `node ping NAME`, `node rm NAME`. |
 | `mole -n NODE <command>` | Run any mole command on a node, as if typed there (pickers and Ctrl+C work). |
@@ -562,6 +566,37 @@ that try to leave the inbox (`../x`, absolute paths, symlinked folders) are
 refused, and received files keep only the owner's permissions. Set the remote's
 own inbox with `mole inbox set DIR` on the remote.
 
+**Interrupted transfers resume.** If the connection drops mid-file, the receiver
+keeps what arrived (a hidden `.mole-resume-*.part` file in the destination
+folder, for files of 1 MiB or more). Run the same `mole send` again and only
+the rest is sent; the SHA-256 still covers the whole file, so a damaged partial
+is detected, discarded and the next attempt starts over. A file that changed
+(different size or modification time) never resumes onto the old bytes, and
+partials untouched for 7 days are removed. Both machines should run a mole that
+knows this (an older one just sends the whole file again, as before). If you
+retry within a couple of minutes of a *silent* network drop the receiver may
+still be waiting on the dead connection, and that attempt starts over.
+
+### Fetch files from another machine
+
+`mole send` needs mole on both ends. `mole get` only needs SSH access: the other
+machine must have a POSIX shell and `tail`, plus `sha256sum` (or `shasum`, or
+`openssl`) to verify the download. `NODE` is a registered node (`mole node ls`),
+the config's own `remote:`, any host from your `~/.ssh/config`, or `user@host`:
+
+```bash
+mole get devlabs:/var/log/syslog                 # into the current folder
+mole get -o ~/backups devlabs:~/db.dump devlabs:/etc/hosts   # several, into a folder
+mole get -no-verify devlabs:/srv/huge.iso        # skip the second read for the checksum
+```
+
+The download is compared with a SHA-256 computed there (`-no-verify` skips it,
+which saves reading the file a second time on that machine); if the machine has no
+such tool the size is still checked and `get` says the file was not verified. An
+interrupted `get` keeps what arrived: run the same command again and it continues.
+Like the inbox, `get` never overwrites an existing file (`name (1).ext`). It
+fetches files, not folders.
+
 ### Manage other machines (nodes)
 
 Every machine can manage the others it can reach over SSH: there is no fixed
@@ -599,6 +634,10 @@ Nothing changes for existing setups: with no `nodes:`, mole behaves as before,
 and the config's own `remote:` also works as a node name (`mole -n <remote> ...`).
 Nodes are kept in the user-global config (`mole node add` writes it when no
 config exists), so any project sees them.
+
+<div align="center">
+  <img src="docs/mole-desktop-nodes.png" alt="mole desktop — Nodes tab: a live map of your machines with the state and latency of every link" width="920">
+</div>
 
 The desktop app has a **Nodes** tab for all of it: a map of your machines with
 the state and latency of every link, adding a node (with your `~/.ssh/config`
@@ -844,6 +883,7 @@ mole push   [-config PATH] [-bind ADDR] LOCAL[:REMOTE]
 mole push   list|ls [-config PATH]
 mole unpush [-config PATH] LOCAL
 mole send   [-config PATH] [-to SUBFOLDER] [-a] [-direct] [files...]    (alias: ftp)
+mole get    [-config PATH] [-o DIR] [-no-verify] NODE:PATH...
 mole inbox  [path | set DIR | receive on|off | mode ask|auto | pending | accept [ID|all] | reject [ID|all]] [-config PATH]
 mole -n NODE <command> [args...]                 run a mole command on a node
 mole node   install NAME [-branch B]

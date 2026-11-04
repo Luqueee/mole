@@ -13,10 +13,11 @@ import (
 
 // Result is the outcome of one sent file.
 type Result struct {
-	Name  string `json:"name"`
-	Saved string `json:"saved"` // final name at the destination
-	Bytes int64  `json:"bytes"`
-	Dir   string `json:"dir"` // folder the receiver wrote into
+	Name    string `json:"name"`
+	Saved   string `json:"saved"` // final name at the destination
+	Bytes   int64  `json:"bytes"`
+	Dir     string `json:"dir"`               // folder the receiver wrote into
+	Resumed int64  `json:"resumed,omitempty"` // leading bytes the receiver already had from an earlier attempt
 }
 
 // SendOptions tunes Send. All fields are optional.
@@ -157,7 +158,7 @@ func Send(ctx context.Context, conn io.ReadWriteCloser, files []File, opt SendOp
 		total += f.Size
 	}
 
-	if err := writeJSONLine(conn, hello{V: protoVersion, Token: opt.Token, To: opt.To, Files: infos}); err != nil {
+	if err := writeJSONLine(conn, hello{V: protoVersion, Token: opt.Token, To: opt.To, Resume: true, Files: infos}); err != nil {
 		return nil, fail(explain(err), total)
 	}
 	rp, err := next()
@@ -171,11 +172,25 @@ func Send(ctx context.Context, conn io.ReadWriteCloser, files []File, opt SendOp
 		return nil, fail(&RemoteError{Msg: rp.Error}, total)
 	}
 	dir := rp.Dir
+	offsets := rp.Offsets
+	if len(offsets) != 0 && len(offsets) != len(files) {
+		return nil, fail(fmt.Errorf("the other side sent %d resume offsets for %d files", len(offsets), len(files)), total)
+	}
+	for i, off := range offsets {
+		if off < 0 || off > files[i].Size {
+			return nil, fail(fmt.Errorf("the other side asked to resume %s at an invalid offset", files[i].Name), total)
+		}
+	}
 
 	results := make([]Result, 0, len(files))
 	buf := make([]byte, 256<<10)
 	for i, f := range files {
+		var off int64
+		if i < len(offsets) {
+			off = offsets[i]
+		}
 		tr := opt.Log.Begin(DirSend, opt.Peer, f.Name, f.Size)
+		tr.Skip(off)
 		res, err := func() (Result, error) {
 			rc, err := f.Open()
 			if err != nil {
@@ -183,12 +198,22 @@ func Send(ctx context.Context, conn io.ReadWriteCloser, files []File, opt SendOp
 			}
 			defer rc.Close()
 			h := sha256.New()
-			w := io.MultiWriter(conn, h, tr, &progressWriter{fn: opt.Progress, idx: i, size: f.Size})
-			n, err := io.CopyBuffer(w, io.LimitReader(rc, f.Size), buf)
+			if off > 0 {
+				// The receiver already holds these bytes: read them only to
+				// keep the checksum, which covers the whole file.
+				if n, err := io.CopyN(h, rc, off); err != nil || n != off {
+					return Result{}, fmt.Errorf("%s changed while it was being sent", f.Name)
+				}
+				if opt.Progress != nil {
+					opt.Progress(i, off, f.Size)
+				}
+			}
+			w := io.MultiWriter(conn, h, tr, &progressWriter{fn: opt.Progress, idx: i, size: f.Size, sent: off})
+			n, err := io.CopyBuffer(w, io.LimitReader(rc, f.Size-off), buf)
 			if err != nil {
 				return Result{}, explain(err)
 			}
-			if n != f.Size {
+			if n != f.Size-off {
 				return Result{}, fmt.Errorf("%s changed while it was being sent", f.Name)
 			}
 			if _, err := conn.Write(h.Sum(nil)); err != nil {
@@ -201,7 +226,7 @@ func Send(ctx context.Context, conn io.ReadWriteCloser, files []File, opt SendOp
 			if !rp.OK {
 				return Result{}, &RemoteError{Msg: rp.Error}
 			}
-			return Result{Name: f.Name, Saved: rp.Saved, Bytes: rp.Bytes, Dir: dir}, nil
+			return Result{Name: f.Name, Saved: rp.Saved, Bytes: rp.Bytes, Dir: dir, Resumed: off}, nil
 		}()
 		if err != nil {
 			tr.Done(StatusFailed, err, "")

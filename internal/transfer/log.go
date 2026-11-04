@@ -94,6 +94,14 @@ func (t *Tracker) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Skip counts n bytes as already transferred: a resumed transfer starts
+// partway through its file.
+func (t *Tracker) Skip(n int64) {
+	if t != nil {
+		t.bytes.Add(n)
+	}
+}
+
 // Done finishes the transfer with status (and err, if it failed).
 func (t *Tracker) Done(status string, err error, saved string) {
 	if t == nil {

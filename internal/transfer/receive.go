@@ -136,14 +136,33 @@ func (r *Receiver) Handle(ctx context.Context, conn io.ReadWriter) error {
 			return refuse(msg)
 		}
 	}
-	if err := writeJSONLine(conn, reply{OK: true, Dir: dir}); err != nil {
+	parts := make([]*partial, len(h.Files))
+	var offsets []int64
+	if h.Resume {
+		pruneStale(dir)
+		offsets = make([]int64, len(h.Files))
+	}
+	defer func() {
+		for _, p := range parts {
+			p.done()
+		}
+	}()
+	for i, f := range h.Files {
+		if h.Resume {
+			parts[i] = acquirePartial(dir, names[i], f.Size, f.MTime)
+			offsets[i] = parts[i].off
+		} else {
+			parts[i] = &partial{}
+		}
+	}
+	if err := writeJSONLine(conn, reply{OK: true, Dir: dir, Offsets: offsets}); err != nil {
 		return err
 	}
 	if senderMoved != nil {
 		<-senderMoved // the watcher reads from br too: let it finish before we do
 	}
 	for i, f := range h.Files {
-		if err := r.receiveOne(br, conn, dir, names[i], f); err != nil {
+		if err := r.receiveOne(br, conn, dir, names[i], f, parts[i]); err != nil {
 			return err
 		}
 	}
@@ -182,7 +201,7 @@ func (r *Receiver) prepareDir(subs []string) (string, error) {
 
 var errChecksum = errors.New("checksum mismatch: the file was corrupted in transit")
 
-func (r *Receiver) receiveOne(br *bufio.Reader, conn io.Writer, dir, name string, fi FileInfo) (err error) {
+func (r *Receiver) receiveOne(br *bufio.Reader, conn io.Writer, dir, name string, fi FileInfo, p *partial) (err error) {
 	tr := r.Log.Begin(DirRecv, r.peer(), name, fi.Size)
 	saved := ""
 	defer func() {
@@ -194,21 +213,21 @@ func (r *Receiver) receiveOne(br *bufio.Reader, conn io.Writer, dir, name string
 		tr.Done(StatusOK, nil, saved)
 	}()
 
-	tmp, err := os.CreateTemp(dir, ".mole-*.part")
+	tmp, h, err := p.open(dir)
 	if err != nil {
-		return fmt.Errorf("create temporary file: %w", err)
+		return err
 	}
-	tmpName := tmp.Name()
 	published := false
 	defer func() {
 		if !published {
-			_ = os.Remove(tmpName)
+			p.abandon(err)
 		}
 	}()
+	tr.Skip(p.off)
 
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h, tr), io.LimitReader(br, fi.Size))
-	if err == nil && n != fi.Size {
+	want := fi.Size - p.off
+	n, err := io.Copy(io.MultiWriter(tmp, h, tr), io.LimitReader(br, want))
+	if err == nil && n != want {
 		err = io.ErrUnexpectedEOF
 	}
 	var sum [sha256.Size]byte
@@ -225,26 +244,12 @@ func (r *Receiver) receiveOne(br *bufio.Reader, conn io.Writer, dir, name string
 		return err
 	}
 
-	perm := os.FileMode(0o600)
-	if fi.Mode&0o100 != 0 {
-		perm |= 0o100
-	}
-	_ = os.Chmod(tmpName, perm)
-	if fi.MTime > 0 {
-		mt := time.Unix(fi.MTime, 0)
-		_ = os.Chtimes(tmpName, mt, mt)
-	}
-	final, saved2, err := claimName(dir, name)
+	saved, err = p.publish(dir, name, fi)
 	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, final); err != nil {
-		_ = os.Remove(final)
-		return err
-	}
 	published = true
-	saved = saved2
-	return writeJSONLine(conn, reply{OK: true, Saved: saved, Bytes: n})
+	return writeJSONLine(conn, reply{OK: true, Saved: saved, Bytes: fi.Size})
 }
 
 // claimName reserves a free name in dir (adding " (1)", " (2)" before the
