@@ -86,7 +86,18 @@ same backend/frontend over HTTP for browser-based inspection.
 The canonical icon is `../landing/public/mole-mark.png`, shared with the landing
 page. `build/appicon-128.png` is its exact package-size copy. The larger app icon,
 tray images and Icon Composer source are checked-in derivatives, so normal
-builds do not require ImageMagick.
+builds do not require image-generation tools.
+
+The macOS menu bar uses `build/tray/template.png`, a filled silhouette derived
+from the complete transparent `../landing/public/mole.webp` artwork, via its
+checked-in PNG copy `build/tray/mascot.png`. Do not derive it from the square
+app tile: that artwork already crops the pick. The full figure is fitted without
+distortion, with clear padding and antialiased outer edges, no grayscale shading
+or orange tile. macOS supplies the tint for the menu-bar appearance.
+The tray has no numeric label; port and pending-transfer counts remain in its
+menu and status tooltip. Windows and Linux retain the colour
+tray icon; the Dock/application icon is unchanged. Regenerate only the macOS tray
+image with `wails3 task common:generate:tray-template` (Go only).
 
 When intentionally changing the mark, regenerate the derivatives from `desktop/`
 with ImageMagick available, then regenerate the platform icons:

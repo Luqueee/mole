@@ -3,6 +3,7 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -10,9 +11,11 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-// The mascot is an opaque rounded square, so a template image (alpha only)
-// would draw as a solid white block in the menu bar; use the colour icon.
+// macOS tints the transparent menu glyph for the current menu-bar appearance.
 //
+//go:embed build/tray/template.png
+var trayTemplateIcon []byte
+
 //go:embed build/tray/color.png
 var trayColorIcon []byte
 
@@ -36,7 +39,11 @@ func setupTray(app *application.App, win *application.WebviewWindow, svc *MoleSe
 	}
 
 	tray := app.SystemTray.New()
-	tray.SetIcon(trayColorIcon)
+	if runtime.GOOS == "darwin" {
+		tray.SetTemplateIcon(trayTemplateIcon)
+	} else {
+		tray.SetIcon(trayColorIcon)
+	}
 
 	menu := app.NewMenu()
 	state := menu.Add("mole")
@@ -84,21 +91,17 @@ func refreshTray(tray *application.SystemTray, menu *application.Menu, state, in
 	switch {
 	case st.Running:
 		state.SetLabel(fmt.Sprintf("● LIVE · %s · %d ports", st.Remote, len(st.Ports)))
-		tray.SetLabel(fmt.Sprint(len(st.Ports)))
 		tray.SetTooltip(fmt.Sprintf("mole: %s, %d ports, %d active", st.Remote, len(st.Ports), st.Stats.ActiveConns))
 	default:
 		state.SetLabel("○ OFFLINE")
-		tray.SetLabel("")
 		tray.SetTooltip("mole: stopped")
 	}
 	start.SetEnabled(!st.Running)
 	stop.SetEnabled(st.Running)
-	// Files offered by the remote wait for an answer: say so where the user
-	// will see it even with the window hidden.
+	// Keep pending transfer counts in the menu, not beside the tray icon.
 	if n := svc.pendingCount(); n > 0 && st.Running {
 		incoming.SetLabel(fmt.Sprintf("⬇ %d incoming transfer(s) waiting…", n))
 		incoming.SetHidden(false)
-		tray.SetLabel(fmt.Sprintf("%d ⬇%d", len(st.Ports), n))
 	} else {
 		incoming.SetHidden(true)
 	}

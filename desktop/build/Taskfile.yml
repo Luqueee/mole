@@ -196,10 +196,12 @@ tasks:
     dir: build
     sources:
       - "../../landing/public/mole-mark.png"
+      - "../../landing/public/mole.webp"
       - "appicon.png"
       - "appicon-128.png"
       - "appicon.icon/Assets/mole.png"
       - "tray/color.png"
+      - "tray/mascot.png"
     preconditions:
       - sh: command -v magick >/dev/null 2>&1
         msg: "ImageMagick is required to regenerate desktop icon assets."
@@ -208,6 +210,19 @@ tasks:
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 824x824 -background none -gravity center -extent 1024x1024 appicon.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 1024x1024 appicon.icon/Assets/mole.png
       - magick ../../landing/public/mole-mark.png -filter Lanczos -resize 88x88 tray/color.png
+      - magick ../../landing/public/mole.webp tray/mascot.png
+      - task: generate:tray-template
+
+  generate:tray-template:
+    summary: Generates the macOS monochrome tray image from the original mascot
+    dir: build/tray
+    sources:
+      - "mascot.png"
+      - "generate.go"
+    generates:
+      - "template.png"
+    cmds:
+      - go run generate.go
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from the checked-in branded desktop icon; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` (skipped on other platforms).
