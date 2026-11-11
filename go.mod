@@ -3,7 +3,7 @@ module github.com/Luqueee/mole
 go 1.26.10
 
 require (
-	github.com/Microsoft/go-winio v0.6.2
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/charmbracelet/huh v1.0.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
